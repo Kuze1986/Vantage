@@ -1,0 +1,68 @@
+import "dotenv/config";
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { HTTPException } from "hono/http-exception";
+import { authMiddleware } from "./lib/auth.js";
+import { logActivity } from "./lib/activity.js";
+import { sourceRoutes } from "./routes/source.js";
+import { generateRoutes } from "./routes/generate.js";
+import { auditRoutes } from "./routes/audit.js";
+import { publishRoutes } from "./routes/publish.js";
+import { scheduleRoutes } from "./routes/schedule.js";
+import { dashboardRoutes } from "./routes/dashboard.js";
+import { webhooksRoutes } from "./routes/webhooks.js";
+import { channelsAuthedRoutes } from "./routes/channels.js";
+import { oauthCallbackGet } from "./routes/oauth-callback.js";
+
+const app = new Hono();
+
+const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:5173";
+app.use(
+  "*",
+  cors({
+    origin: corsOrigin,
+    allowHeaders: ["Content-Type", "Authorization"],
+    allowMethods: ["GET", "POST", "OPTIONS"],
+    credentials: true,
+  }),
+);
+
+app.get("/health", (c) => c.json({ ok: true }));
+
+app.route("/v1/webhooks", webhooksRoutes);
+app.get("/v1/channels/:slug/auth/callback", (c) => oauthCallbackGet(c));
+
+const authedV1 = new Hono();
+authedV1.use("*", authMiddleware);
+authedV1.route("/source", sourceRoutes);
+authedV1.route("/generate", generateRoutes);
+authedV1.route("/audit", auditRoutes);
+authedV1.route("/publish", publishRoutes);
+authedV1.route("/schedule", scheduleRoutes);
+authedV1.route("/dashboard", dashboardRoutes);
+authedV1.route("/channels", channelsAuthedRoutes);
+
+app.route("/v1", authedV1);
+
+app.onError(async (err, c) => {
+  const status = err instanceof HTTPException ? err.status : 500;
+  const message = err instanceof Error ? err.message : "Unknown error";
+  try {
+    await logActivity({
+      source: "vantage-api",
+      source_type: "system",
+      event_type: "error",
+      summary: message.slice(0, 500),
+      payload: { path: c.req.path, status, stack: err instanceof Error ? err.stack : undefined },
+    });
+  } catch {
+    console.error("logActivity failed", err);
+  }
+  console.error(err);
+  return c.json({ error: message }, status);
+});
+
+const port = Number(process.env.PORT ?? 8787);
+console.log(`vantage-api listening on ${port}`);
+serve({ fetch: app.fetch, port });
