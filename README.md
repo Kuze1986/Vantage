@@ -11,8 +11,8 @@ Automated advertising loop for the NEXUS portfolio: **source → Kuze → Ilita 
 
 ## Local dev
 
-1. Copy [`.env.local.example`](.env.local.example) into `apps/api/.env` and `apps/web/.env.local` (or use root `.env` for the API with `dotenv`).
-2. Apply migrations (see [`supabase/README.md`](supabase/README.md)).
+1. Copy `[.env.local.example](.env.local.example)` into `apps/api/.env` and `apps/web/.env.local` (or use root `.env` for the API with `dotenv`).
+2. Apply migrations (see `[supabase/README.md](supabase/README.md)`).
 3. Create a Supabase user for Brandon and sign in via stub SSO (email/password) on the web app.
 4. From repo root:
 
@@ -31,7 +31,7 @@ pnpm dev
 - **Root directory:** `apps/api`
 - **Build:** `pnpm install && pnpm exec tsc -p tsconfig.build.json` (from `apps/api`, after monorepo install — see below)
 - **Start:** `node dist/index.js`
-- **Env:** `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `CORS_ORIGIN` (public web URL), `X_*`, `PORT` (Railway)
+- **Env:** `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ANTHROPIC_API_KEY`, `CORS_ORIGIN` (public web URL), `X_`*, `PORT` (Railway)
 
 Monorepo note: Railway can use **root directory** repo with custom install:
 
@@ -67,3 +67,4 @@ See [docs/railway.md](docs/railway.md) for a copy-paste checklist.
 - `POST /v1/channels/x/auth/start` (JWT)
 - `GET /v1/channels/x/auth/callback` (public)
 - `GET|POST /v1/webhooks/x` (public; CRC + events)
+

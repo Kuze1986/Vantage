@@ -1,0 +1,8 @@
+# Local Supabase only (`supabase start`). Ensures PostgREST exposes `vantage` like production after you add it in Dashboard.
+# Docs: https://supabase.com/docs/guides/api/using-custom-schemas
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public", "vantage"]
+extra_search_path = ["public", "extensions"]
