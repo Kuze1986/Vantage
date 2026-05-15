@@ -1,0 +1,65 @@
+.nx-panel {
+  background: var(--nx-bg-card);
+  border: 1px solid var(--nx-border-dim);
+  border-radius: var(--nx-radius-md);
+  overflow: hidden;
+}
+
+.nx-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+.nx-panel__title {
+  margin: 0;
+  font-family: var(--nx-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nx-text-1);
+}
+
+.nx-panel__title--amber { color: var(--nx-amber); }
+.nx-panel__title--cyan  { color: var(--nx-cyan); }
+.nx-panel__title--green { color: var(--nx-green); }
+.nx-panel__title--red   { color: var(--nx-red); }
+
+.nx-panel__action {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-family: var(--nx-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--nx-amber);
+  background: transparent;
+  border: 1px solid var(--nx-amber-dim);
+  border-radius: var(--nx-radius-sm);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.nx-panel__action:hover {
+  background: var(--nx-amber-glow);
+  border-color: var(--nx-amber);
+}
+
+.nx-panel__divider {
+  height: 1px;
+  background: var(--nx-border-dim);
+}
+
+.nx-panel__body {
+  padding: 14px;
+  font-family: var(--nx-sans);
+  font-size: 13px;
+  color: var(--nx-text-2);
+}

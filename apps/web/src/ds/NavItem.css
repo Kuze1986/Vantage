@@ -1,0 +1,70 @@
+.nx-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px 8px 14px;
+  margin: 0;
+  border: none;
+  background: transparent;
+  color: var(--nx-text-2);
+  font-family: var(--nx-sans);
+  font-size: 12.5px;
+  font-weight: 400;
+  text-align: left;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  border-radius: 0 var(--nx-radius-sm) var(--nx-radius-sm) 0;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.nx-nav-item:hover {
+  background: var(--nx-bg-raised);
+  color: var(--nx-text-1);
+}
+
+.nx-nav-item--active {
+  background: var(--nx-amber-glow);
+  color: var(--nx-text-1);
+  border-left-color: var(--nx-amber);
+}
+
+.nx-nav-item__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--nx-text-3);
+  font-size: 12.5px;
+}
+
+.nx-nav-item--active .nx-nav-item__icon {
+  color: var(--nx-amber);
+}
+
+.nx-nav-item__label {
+  position: relative;
+  padding-left: 11px;
+  line-height: 1.3;
+}
+
+.nx-nav-item__label::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--nx-text-4);
+}
+
+.nx-nav-item--active .nx-nav-item__label::before {
+  background: var(--nx-amber);
+}
+
+.nx-nav-item:hover:not(.nx-nav-item--active) .nx-nav-item__label::before {
+  background: var(--nx-text-3);
+}

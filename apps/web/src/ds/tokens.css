@@ -1,0 +1,47 @@
+:root {
+  --nx-bg-deep: #050c18;
+  --nx-bg-card: #0b1525;
+  --nx-bg-raised: #111e33;
+  --nx-bg-active: #162540;
+  --nx-bg-deeper: #020713;
+
+  --nx-amber: #f59e0b;
+  --nx-amber-dim: #92600a;
+  --nx-amber-glow: #f59e0b18;
+
+  --nx-cyan: #22d3ee;
+  --nx-cyan-dim: #164e63;
+  --nx-cyan-glow: #22d3ee18;
+
+  --nx-green: #10b981;
+  --nx-green-dim: #064e3b;
+  --nx-green-glow: #10b98118;
+
+  --nx-red: #ef4444;
+  --nx-red-dim: #7f1d1d;
+  --nx-red-glow: #ef444418;
+
+  --nx-gold: #eab308;
+  --nx-gold-dim: #713f12;
+  --nx-gold-glow: #eab30818;
+
+  --nx-magenta: #e879f9;
+  --nx-magenta-dim: #701a75;
+  --nx-magenta-glow: #e879f918;
+
+  --nx-text-1: #f1f5f9;
+  --nx-text-2: #94a3b8;
+  --nx-text-3: #64748b;
+  --nx-text-4: #334155;
+
+  --nx-border: #1e3050;
+  --nx-border-bright: #2a4a70;
+  --nx-border-dim: #0f1e35;
+
+  --nx-mono: 'Space Mono', monospace;
+  --nx-sans: 'DM Sans', sans-serif;
+
+  --nx-radius-sm: 3px;
+  --nx-radius-md: 4px;
+  --nx-radius-lg: 6px;
+}

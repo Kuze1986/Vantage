@@ -1,65 +1,104 @@
-import { BrowserRouter, NavLink, Navigate, Outlet, Route, Routes } from "react-router-dom";
-import React, { type ReactElement } from "react";
-import { supabase } from "./lib/supabase";
-import { signOut } from "./lib/auth/sso";
-import { LoginPage } from "./pages/LoginPage";
-import { DashboardPage } from "./pages/DashboardPage";
-import { QueuePage } from "./pages/QueuePage";
-import { ChannelsPage } from "./pages/ChannelsPage";
-import { VoicePage } from "./pages/VoicePage";
-import { SettingsPage } from "./pages/SettingsPage";
+import React, { type ReactElement } from 'react'
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { supabase } from './lib/supabase'
+import { signOut } from './lib/auth/sso'
+import { NavItem } from './ds'
+import { LoginPage } from './pages/LoginPage'
+import { DashboardPage } from './pages/DashboardPage'
+import { QueuePage } from './pages/QueuePage'
+import { ChannelsPage } from './pages/ChannelsPage'
+import { VoicePage } from './pages/VoicePage'
+import { SettingsPage } from './pages/SettingsPage'
+
+const NAV = [
+  { label: 'Dashboard', path: '/',         icon: '◈' },
+  { label: 'Queue',     path: '/queue',     icon: '≋' },
+  { label: 'Channels',  path: '/channels',  icon: '⊕' },
+  { label: 'Voice',     path: '/voice',     icon: '◆' },
+  { label: 'Settings',  path: '/settings',  icon: '⚙' },
+]
+
+function Sidebar() {
+  const navigate = useNavigate()
+  const location = useLocation()
+
+  const handleSignOut = () => {
+    void signOut().then(() => { window.location.href = '/login' })
+  }
+
+  return (
+    <aside className="vg-sidebar">
+      <div className="vg-sidebar__brand">
+        <p className="vg-sidebar__brand-name">Vantage</p>
+        <p className="vg-sidebar__brand-sub">Nexus Marketing OS</p>
+      </div>
+      <div className="vg-sidebar__divider" />
+      <nav className="vg-sidebar__nav">
+        <div className="vg-sidebar__section-label">Navigation</div>
+        {NAV.map((item) => (
+          <NavItem
+            key={item.path}
+            label={item.label}
+            icon={<span>{item.icon}</span>}
+            active={
+              item.path === '/'
+                ? location.pathname === '/'
+                : location.pathname.startsWith(item.path)
+            }
+            onClick={() => navigate(item.path)}
+          />
+        ))}
+      </nav>
+      <div className="vg-sidebar__footer">
+        <button
+          type="button"
+          className="nx-btn nx-btn--ghost nx-btn--sm nx-btn--full"
+          onClick={handleSignOut}
+        >
+          Sign out
+        </button>
+      </div>
+    </aside>
+  )
+}
 
 function Layout() {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", minHeight: "100vh" }}>
-      <aside style={{ borderRight: "1px solid #ddd", padding: 16 }}>
-        <h2 style={{ marginTop: 0 }}>Vantage</h2>
-        <nav style={{ display: "grid", gap: 8 }}>
-          <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : undefined)}>
-            Dashboard
-          </NavLink>
-          <NavLink to="/queue" className={({ isActive }) => (isActive ? "active" : undefined)}>
-            Queue
-          </NavLink>
-          <NavLink to="/channels" className={({ isActive }) => (isActive ? "active" : undefined)}>
-            Channels
-          </NavLink>
-          <NavLink to="/voice" className={({ isActive }) => (isActive ? "active" : undefined)}>
-            Voice
-          </NavLink>
-          <NavLink to="/settings" className={({ isActive }) => (isActive ? "active" : undefined)}>
-            Settings
-          </NavLink>
-        </nav>
-        <button type="button" style={{ marginTop: 24 }} onClick={() => void signOut().then(() => (window.location.href = "/login"))}>
-          Sign out
-        </button>
-      </aside>
-      <main style={{ padding: 24 }}>
+    <div className="vg-layout nx-app">
+      <Sidebar />
+      <main className="vg-main">
         <Outlet />
       </main>
     </div>
-  );
+  )
 }
 
 function RequireAuth({ children }: { children: ReactElement }) {
-  const [ready, setReady] = React.useState(false);
-  const [authed, setAuthed] = React.useState(false);
+  const [ready, setReady] = React.useState(false)
+  const [authed, setAuthed] = React.useState(false)
 
   React.useEffect(() => {
     void supabase.auth.getSession().then(({ data }) => {
-      setAuthed(!!data.session);
-      setReady(true);
-    });
+      setAuthed(!!data.session)
+      setReady(true)
+    })
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      setAuthed(!!session);
-    });
-    return () => sub.subscription.unsubscribe();
-  }, []);
+      setAuthed(!!session)
+    })
+    return () => sub.subscription.unsubscribe()
+  }, [])
 
-  if (!ready) return <p>Loading…</p>;
-  if (!authed) return <Navigate to="/login" replace />;
-  return children;
+  if (!ready) {
+    return (
+      <div className="vg-layout nx-app">
+        <div style={{ margin: 'auto', padding: '40px', fontFamily: 'var(--nx-mono)', fontSize: '10px', color: 'var(--nx-text-4)', letterSpacing: '0.1em' }}>
+          LOADING…
+        </div>
+      </div>
+    )
+  }
+  if (!authed) return <Navigate to="/login" replace />
+  return children
 }
 
 export function App() {
@@ -74,14 +113,14 @@ export function App() {
             </RequireAuth>
           }
         >
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/queue" element={<QueuePage />} />
+          <Route path="/"         element={<DashboardPage />} />
+          <Route path="/queue"    element={<QueuePage />} />
           <Route path="/channels" element={<ChannelsPage />} />
-          <Route path="/voice" element={<VoicePage />} />
+          <Route path="/voice"    element={<VoicePage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
-  );
+  )
 }

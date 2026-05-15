@@ -1,0 +1,419 @@
+/* ── Layout shell ───────────────────────────────────────────── */
+.vg-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+/* ── Sidebar ────────────────────────────────────────────────── */
+.vg-sidebar {
+  background: var(--nx-bg-card);
+  border-right: 1px solid var(--nx-border-dim);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.vg-sidebar__brand {
+  padding: 20px 14px 18px;
+}
+
+.vg-sidebar__brand-name {
+  font-family: var(--nx-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--nx-amber);
+  margin: 0 0 3px;
+}
+
+.vg-sidebar__brand-sub {
+  font-family: var(--nx-mono);
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--nx-text-4);
+  margin: 0;
+}
+
+.vg-sidebar__divider {
+  height: 1px;
+  background: var(--nx-border-dim);
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.vg-sidebar__section-label {
+  font-family: var(--nx-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--nx-text-4);
+  padding: 14px 14px 6px;
+}
+
+.vg-sidebar__nav {
+  padding: 8px 0;
+  flex: 1;
+}
+
+.vg-sidebar__footer {
+  padding: 12px 10px 20px;
+  border-top: 1px solid var(--nx-border-dim);
+}
+
+/* ── Main content ───────────────────────────────────────────── */
+.vg-main {
+  background: var(--nx-bg-deep);
+  padding: 28px 32px;
+  min-height: 100vh;
+}
+
+/* ── Page header ────────────────────────────────────────────── */
+.vg-page-header {
+  margin-bottom: 24px;
+}
+
+.vg-page-title {
+  font-family: var(--nx-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--nx-text-1);
+  margin: 0 0 4px;
+}
+
+.vg-page-sub {
+  font-family: var(--nx-sans);
+  font-size: 12.5px;
+  color: var(--nx-text-3);
+  margin: 0;
+}
+
+/* ── Stats row ──────────────────────────────────────────────── */
+.vg-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+/* ── Content grids ──────────────────────────────────────────── */
+.vg-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.vg-grid-60-40 {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.vg-stack {
+  display: grid;
+  gap: 16px;
+}
+
+/* ── Activity feed ──────────────────────────────────────────── */
+.vg-activity {
+  display: grid;
+  gap: 0;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.vg-activity-item {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--nx-border-dim);
+  display: grid;
+  gap: 3px;
+}
+
+.vg-activity-item:last-child {
+  border-bottom: none;
+}
+
+.vg-activity-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vg-activity-source {
+  font-family: var(--nx-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--nx-amber);
+}
+
+.vg-activity-time {
+  font-family: var(--nx-mono);
+  font-size: 8px;
+  color: var(--nx-text-4);
+}
+
+.vg-activity-summary {
+  font-size: 12.5px;
+  color: var(--nx-text-2);
+  line-height: 1.4;
+}
+
+/* ── Form styles ────────────────────────────────────────────── */
+.vg-form {
+  display: grid;
+  gap: 16px;
+}
+
+.vg-field {
+  display: grid;
+  gap: 6px;
+}
+
+.vg-field__label {
+  font-family: var(--nx-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--nx-text-3);
+}
+
+.vg-field__hint {
+  font-family: var(--nx-sans);
+  font-size: 11px;
+  color: var(--nx-text-4);
+  margin-top: 2px;
+}
+
+.vg-input,
+.vg-textarea,
+.vg-select {
+  width: 100%;
+  background: var(--nx-bg-raised);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-radius-sm);
+  color: var(--nx-text-1);
+  font-family: var(--nx-sans);
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  appearance: none;
+}
+
+.vg-input:focus,
+.vg-textarea:focus,
+.vg-select:focus {
+  border-color: var(--nx-amber);
+  background: var(--nx-bg-active);
+}
+
+.vg-input::placeholder,
+.vg-textarea::placeholder {
+  color: var(--nx-text-4);
+}
+
+.vg-textarea {
+  resize: vertical;
+  min-height: 80px;
+  font-family: var(--nx-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+/* ── Feedback banners ───────────────────────────────────────── */
+.vg-error {
+  font-family: var(--nx-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--nx-red);
+  padding: 8px 12px;
+  background: var(--nx-red-glow);
+  border: 1px solid var(--nx-red-dim);
+  border-radius: var(--nx-radius-sm);
+}
+
+.vg-success {
+  font-family: var(--nx-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--nx-green);
+  padding: 8px 12px;
+  background: var(--nx-green-glow);
+  border: 1px solid var(--nx-green-dim);
+  border-radius: var(--nx-radius-sm);
+}
+
+/* ── Filter tab bar ─────────────────────────────────────────── */
+.vg-filter-bar {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.vg-filter-tab {
+  font-family: var(--nx-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  border-radius: var(--nx-radius-sm);
+  border: 1px solid var(--nx-border-dim);
+  background: transparent;
+  color: var(--nx-text-3);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.vg-filter-tab:hover {
+  border-color: var(--nx-border);
+  color: var(--nx-text-2);
+  background: var(--nx-bg-raised);
+}
+
+.vg-filter-tab--active {
+  border-color: var(--nx-amber-dim);
+  color: var(--nx-amber);
+  background: var(--nx-amber-glow);
+}
+
+/* ── Channel grid ───────────────────────────────────────────── */
+.vg-channel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+}
+
+/* ── Loading / empty states ─────────────────────────────────── */
+.vg-loading {
+  font-family: var(--nx-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--nx-text-4);
+  padding: 24px 0;
+  text-align: center;
+}
+
+.vg-empty {
+  font-family: var(--nx-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--nx-text-4);
+  padding: 20px 0;
+  text-align: center;
+}
+
+/* ── Login page ─────────────────────────────────────────────── */
+.vg-login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--nx-bg-deep);
+  padding: 24px;
+}
+
+.vg-login-card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--nx-bg-card);
+  border: 1px solid var(--nx-border-dim);
+  border-radius: var(--nx-radius-lg);
+  padding: 32px 28px 28px;
+}
+
+.vg-login-brand {
+  margin-bottom: 28px;
+}
+
+.vg-login-brand-name {
+  font-family: var(--nx-mono);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--nx-amber);
+  margin: 0 0 4px;
+}
+
+.vg-login-brand-sub {
+  font-family: var(--nx-mono);
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--nx-text-4);
+  margin: 0;
+}
+
+/* ── Inline action row ──────────────────────────────────────── */
+.vg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── Topic list item ────────────────────────────────────────── */
+.vg-topic-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--nx-border-dim);
+}
+
+.vg-topic-item:last-child {
+  border-bottom: none;
+}
+
+.vg-topic-text {
+  font-size: 12.5px;
+  color: var(--nx-text-2);
+  line-height: 1.4;
+  flex: 1;
+}
+
+.vg-topic-vert {
+  font-family: var(--nx-mono);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--nx-text-4);
+  margin-top: 3px;
+}
+
+.vg-topic-list {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+/* ── Piece content preview ──────────────────────────────────── */
+.vg-piece-preview {
+  font-size: 12px;
+  color: var(--nx-text-2);
+  max-width: 360px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Channel icon ───────────────────────────────────────────── */
+.vg-channel-icon {
+  font-family: var(--nx-mono);
+  font-size: 13px;
+  font-weight: 700;
+}

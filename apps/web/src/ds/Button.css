@@ -1,0 +1,85 @@
+.nx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--nx-sans);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  border-radius: var(--nx-radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.nx-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.nx-btn--full {
+  width: 100%;
+}
+
+.nx-btn--sm {
+  padding: 5px 12px;
+  font-size: 11px;
+}
+
+.nx-btn--md {
+  padding: 8px 16px;
+  font-size: 13px;
+}
+
+.nx-btn--lg {
+  padding: 11px 22px;
+  font-size: 15px;
+}
+
+.nx-btn--primary {
+  background: var(--nx-amber);
+  color: var(--nx-bg-deep);
+  border-color: var(--nx-amber);
+}
+
+.nx-btn--primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+}
+
+.nx-btn--secondary {
+  background: transparent;
+  color: var(--nx-amber);
+  border-color: var(--nx-amber);
+}
+
+.nx-btn--secondary:hover:not(:disabled) {
+  background: var(--nx-amber-glow);
+}
+
+.nx-btn--ghost {
+  background: transparent;
+  color: var(--nx-text-3);
+  border-color: transparent;
+}
+
+.nx-btn--ghost:hover:not(:disabled) {
+  color: var(--nx-text-1);
+  border-color: var(--nx-border);
+  background: var(--nx-bg-raised);
+}
+
+.nx-btn--danger {
+  background: transparent;
+  color: var(--nx-red);
+  border-color: var(--nx-red);
+}
+
+.nx-btn--danger:hover:not(:disabled) {
+  background: var(--nx-red-glow);
+}

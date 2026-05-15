@@ -1,0 +1,23 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600;700&display=swap');
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--nx-bg-deep);
+  color: var(--nx-text-1);
+  font-family: var(--nx-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.nx-app {
+  background: var(--nx-bg-deep);
+  color: var(--nx-text-1);
+  font-family: var(--nx-sans);
+  -webkit-font-smoothing: antialiased;
+}

@@ -14,6 +14,7 @@ import { dashboardRoutes } from "./routes/dashboard.js";
 import { webhooksRoutes } from "./routes/webhooks.js";
 import { channelsAuthedRoutes } from "./routes/channels.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
+import { startCadenceEngine } from "./services/scheduler.js";
 
 const app = new Hono();
 
@@ -23,7 +24,7 @@ app.use(
   cors({
     origin: corsOrigin,
     allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["GET", "POST", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
     credentials: true,
   }),
 );
@@ -66,3 +67,5 @@ app.onError(async (err, c) => {
 const port = Number(process.env.PORT ?? 8787);
 console.log(`vantage-api listening on ${port}`);
 serve({ fetch: app.fetch, port });
+
+startCadenceEngine();

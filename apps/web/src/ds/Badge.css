@@ -1,0 +1,56 @@
+.nx-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  font-family: var(--nx-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.nx-badge--active {
+  color: var(--nx-green);
+  background: var(--nx-green-glow);
+  border-color: var(--nx-green-dim);
+}
+
+.nx-badge--pending {
+  color: var(--nx-amber);
+  background: var(--nx-amber-glow);
+  border-color: var(--nx-amber-dim);
+}
+
+.nx-badge--critical {
+  color: var(--nx-red);
+  background: var(--nx-red-glow);
+  border-color: var(--nx-red-dim);
+}
+
+.nx-badge--new {
+  color: var(--nx-bg-deep);
+  background: var(--nx-amber);
+  border-color: var(--nx-amber);
+}
+
+.nx-badge--core {
+  color: var(--nx-green);
+  background: transparent;
+  border-color: var(--nx-green);
+}
+
+.nx-badge--soon {
+  color: var(--nx-text-4);
+  background: var(--nx-bg-raised);
+  border-color: var(--nx-border);
+}
+
+.nx-badge--default {
+  color: var(--nx-text-2);
+  background: var(--nx-bg-raised);
+  border-color: var(--nx-border-dim);
+}
