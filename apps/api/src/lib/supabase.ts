@@ -19,7 +19,7 @@ let vantageAdmin: SupabaseClient | null = null;
 let anonClient: SupabaseClient | null = null;
 
 export function getSupabaseAdmin(): SupabaseClient {
-  if (!vantageAdmin) vantageAdmin = makeClient("vantage");
+  if (!vantageAdmin) vantageAdmin = makeClient("public");
   return vantageAdmin;
 }
 
