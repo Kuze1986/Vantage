@@ -4,10 +4,12 @@ function makeClient(schema: string): SupabaseClient {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  // Cast needed: createClient with a dynamic schema string infers SchemaName=string,
+  // which is incompatible with the default SupabaseClient<any,"public","public"> signature.
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
     db: { schema },
-  });
+  }) as unknown as SupabaseClient;
 }
 
 // Singletons — one client per schema, created once on first use.
