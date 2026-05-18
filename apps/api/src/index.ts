@@ -18,11 +18,14 @@ import { startCadenceEngine } from "./services/scheduler.js";
 
 const app = new Hono();
 
-const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:5173";
+const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:5173")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
 app.use(
   "*",
   cors({
-    origin: corsOrigin,
+    origin: (origin) => (corsOrigins.includes(origin) ? origin : corsOrigins[0]),
     allowHeaders: ["Content-Type", "Authorization"],
     allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
     credentials: true,
