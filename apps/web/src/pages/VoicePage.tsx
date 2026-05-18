@@ -19,7 +19,6 @@ export function VoicePage() {
   React.useEffect(() => {
     void (async () => {
       const { data, error } = await supabase
-        .schema('vantage')
         .from('brand_voice')
         .select('*')
         .limit(1)
@@ -53,11 +52,11 @@ export function VoicePage() {
       updated_at: new Date().toISOString(),
     }
     if (id) {
-      const { error } = await supabase.schema('vantage').from('brand_voice').update(row).eq('id', id)
+      const { error } = await supabase.from('brand_voice').update(row).eq('id', id)
       if (error) setErr(error.message)
       else setMsg('Brand voice saved')
     } else {
-      const { data, error } = await supabase.schema('vantage').from('brand_voice').insert(row).select('id').single()
+      const { data, error } = await supabase.from('brand_voice').insert(row).select('id').single()
       if (error) setErr(error.message)
       else { setId(data?.id as string); setMsg('Brand voice created') }
     }
