@@ -26,12 +26,12 @@ generateRoutes.post("/:channel", async (c) => {
   const sb = getSupabaseAdmin();
 
   const { data: topic, error: tErr } = await sb
-    .schema("vantage").from("topics")
+    .from("topics")
     .select("id, topic_text, vertical, used_at")
     .eq("id", topic_id).single();
   if (tErr || !topic) throw new HTTPException(404, { message: "Topic not found" });
 
-  const { data: voices } = await sb.schema("vantage").from("brand_voice").select("*").limit(1);
+  const { data: voices } = await sb.from("brand_voice").select("*").limit(1);
   const voice = voices?.[0];
   if (!voice) throw new HTTPException(400, { message: "Configure brand voice first" });
 
@@ -64,7 +64,7 @@ generateRoutes.post("/:channel", async (c) => {
 
   // Insert piece first so we have the ID for UTM tagging
   const { data: piece, error: pErr } = await sb
-    .schema("vantage").from("content_pieces")
+    .from("content_pieces")
     .insert({
       topic_id,
       channel_slug:     channel,
@@ -90,11 +90,11 @@ generateRoutes.post("/:channel", async (c) => {
   for (const [k, v] of Object.entries(taggedPayload)) {
     if (typeof v === "string") taggedPayload[k] = tagUrls(v, channel, piece.id);
   }
-  await sb.schema("vantage").from("content_pieces")
+  await sb.from("content_pieces")
     .update({ content_payload: taggedPayload }).eq("id", piece.id);
 
   if (!topic.used_at) {
-    await sb.schema("vantage").from("topics")
+    await sb.from("topics")
       .update({ used_at: new Date().toISOString() }).eq("id", topic_id);
   }
 

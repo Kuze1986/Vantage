@@ -24,7 +24,7 @@ export async function sendEmail(params: {
   if (recipients.length === 0) {
     // Pull active subscribers from newsletter_subscribers
     const { data, error } = await sb
-      .schema("vantage")
+      
       .from("newsletter_subscribers")
       .select("email")
       .is("unsubscribed_at", null);
@@ -73,6 +73,6 @@ export async function sendEmail(params: {
 
 export async function subscriberCount(): Promise<number> {
   const sb = getSupabaseAdmin();
-  const { count } = await sb.schema("vantage").from("newsletter_subscribers").select("*", { count: "exact", head: true }).is("unsubscribed_at", null);
+  const { count } = await sb.from("newsletter_subscribers").select("*", { count: "exact", head: true }).is("unsubscribed_at", null);
   return count ?? 0;
 }

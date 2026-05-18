@@ -28,7 +28,7 @@ publishRoutes.post("/:channel", async (c) => {
   const sb = getSupabaseAdmin();
 
   const { data: piece, error } = await sb
-    .schema("vantage").from("content_pieces")
+    .from("content_pieces")
     .select("id, channel_slug, format, content_payload, status")
     .eq("id", content_piece_id).single();
   if (error || !piece) throw new HTTPException(404, { message: "Not found" });
@@ -47,7 +47,7 @@ publishRoutes.post("/:channel", async (c) => {
       });
     }
     const now = new Date().toISOString();
-    await sb.schema("vantage").from("content_pieces").update({
+    await sb.from("content_pieces").update({
       status:           "published",
       published_at:     now,
       external_post_id: external_post_url,
@@ -80,7 +80,7 @@ publishRoutes.post("/:channel", async (c) => {
       }
       case "reddit": {
         // Load subreddit from channel cadence_config
-        const { data: ch } = await sb.schema("vantage").from("channels")
+        const { data: ch } = await sb.from("channels")
           .select("cadence_config").eq("slug", "reddit").single();
         const subs: string[] = (ch?.cadence_config as { subreddits?: string[] })?.subreddits ?? [];
         if (!subs.length) throw new Error("No subreddits configured for Reddit channel");
@@ -105,7 +105,7 @@ publishRoutes.post("/:channel", async (c) => {
     }
 
     const now = new Date().toISOString();
-    await sb.schema("vantage").from("content_pieces").update({
+    await sb.from("content_pieces").update({
       status:           "published",
       published_at:     now,
       external_post_id: externalId,
@@ -123,7 +123,7 @@ publishRoutes.post("/:channel", async (c) => {
   } catch (e) {
     if (e instanceof HTTPException) throw e;
     const msg = e instanceof Error ? e.message : String(e);
-    await sb.schema("vantage").from("content_pieces").update({
+    await sb.from("content_pieces").update({
       status: "failed", audit_notes: msg, updated_at: new Date().toISOString(),
     }).eq("id", content_piece_id);
     await logActivity({

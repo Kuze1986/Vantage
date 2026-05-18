@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from "../lib/supabase.js";
+import { getSupabaseAdmin, getSupabaseForSchema } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 
 const DEDUP_DAYS = Number(process.env.TOPIC_DEDUP_DAYS ?? "30");
@@ -31,7 +31,7 @@ async function isDuplicate(sourceProduct: string, sourceRef: string): Promise<bo
   const sb = getSupabaseAdmin();
   const cutoff = new Date(Date.now() - DEDUP_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const { data } = await sb
-    .schema("vantage")
+    
     .from("topics")
     .select("id")
     .eq("source_product", sourceProduct)
@@ -51,7 +51,7 @@ async function insertTopic(params: {
   priority?: number;
 }): Promise<boolean> {
   const sb = getSupabaseAdmin();
-  const { error } = await sb.schema("vantage").from("topics").insert({
+  const { error } = await sb.from("topics").insert({
     source_product:  params.source_product,
     source_ref:      params.source_ref,
     vertical:        params.vertical,
@@ -75,7 +75,7 @@ async function insertTopic(params: {
 /** Pull topics from shift.questions — all verticals with 30-day dedup. */
 export async function refreshTopicsFromShift(): Promise<{ inserted: number; scanned: number }> {
   const sb = getSupabaseAdmin();
-  const { data: rows, error } = await sb.schema("shift").from("questions").select("*").limit(500);
+  const { data: rows, error } = await getSupabaseForSchema("shift").from("questions").select("*").limit(500);
 
   if (error) {
     await logActivity({
@@ -134,7 +134,7 @@ export async function refreshTopicsFromScripta(): Promise<{ inserted: number; sc
   let tableName = "";
 
   for (const t of tables) {
-    const { data, error } = await sb.schema("scripta").from(t).select("*").limit(300);
+    const { data, error } = await getSupabaseForSchema("scripta").from(t).select("*").limit(300);
     if (!error && data && data.length > 0) {
       rows = data as ShiftRow[];
       tableName = t;
@@ -207,7 +207,7 @@ export async function listNextTopics(limit: number): Promise<{
 }[]> {
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
-    .schema("vantage")
+    
     .from("topics")
     .select("id, topic_text, vertical, priority, source_ref, source_product")
     .is("used_at", null)

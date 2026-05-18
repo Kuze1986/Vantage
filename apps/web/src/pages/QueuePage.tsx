@@ -1,11 +1,10 @@
 import React from 'react'
-import { supabase } from '../lib/supabase'
 import { vantageApi } from '../api/vantage'
 import { Panel, Badge, DataTable } from '../ds'
 import type { BadgeVariant } from '../ds'
 import type { ReactNode } from 'react'
 
-type Piece = {
+export type Piece = {
   id: string
   status: string
   channel_slug: string
@@ -42,26 +41,15 @@ export function QueuePage() {
 
   const load = React.useCallback(async () => {
     setErr(null)
-    const query = supabase
-      .schema('vantage')
-      .from('content_pieces')
-      .select('id, status, channel_slug, format, content_payload, audit_notes, audit_iterations, created_at')
-      .order('created_at', { ascending: false })
-      .limit(100)
-
-    const { data, error } = await query
-    if (error) setErr(error.message)
-    else setPieces((data ?? []) as Piece[])
+    try {
+      const { pieces } = await vantageApi.getQueue()
+      setPieces(pieces)
+    } catch (e) {
+      setErr(String((e as Error).message))
+    }
   }, [])
 
-  React.useEffect(() => {
-    void load()
-    const ch = supabase
-      .channel('vantage-pieces-queue')
-      .on('postgres_changes', { event: '*', schema: 'vantage', table: 'content_pieces' }, () => void load())
-      .subscribe()
-    return () => { void supabase.removeChannel(ch) }
-  }, [load])
+  React.useEffect(() => { void load() }, [load])
 
   const visible = filter === 'all' ? pieces : pieces.filter((p) => p.status === filter)
 

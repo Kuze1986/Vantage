@@ -22,7 +22,7 @@ export const channelsAuthedRoutes = new Hono();
 channelsAuthedRoutes.get("/", async (c) => {
   const sb = getSupabaseAdmin();
   const { data: channels, error } = await sb
-    .schema("vantage").from("channels")
+    .from("channels")
     .select("slug, enabled, cadence_config, connected_at, access_token_hash")
     .order("slug");
   if (error) throw new HTTPException(500, { message: error.message });
@@ -49,12 +49,12 @@ channelsAuthedRoutes.patch("/:slug/cadence", async (c) => {
 
   // Load current config so we can merge (patch semantics)
   const { data: ch, error: fetchErr } = await sb
-    .schema("vantage").from("channels")
+    .from("channels")
     .select("cadence_config").eq("slug", slug).single();
   if (fetchErr || !ch) throw new HTTPException(404, { message: `Channel ${slug} not found` });
 
   const merged = { ...(ch.cadence_config as object), ...parsed.data };
-  const { error } = await sb.schema("vantage").from("channels")
+  const { error } = await sb.from("channels")
     .update({ cadence_config: merged, updated_at: new Date().toISOString() })
     .eq("slug", slug);
   if (error) throw new HTTPException(500, { message: error.message });
@@ -69,7 +69,7 @@ channelsAuthedRoutes.patch("/:slug/toggle", async (c) => {
   const { enabled } = z.object({ enabled: z.boolean() }).parse(json);
 
   const sb = getSupabaseAdmin();
-  const { error } = await sb.schema("vantage").from("channels")
+  const { error } = await sb.from("channels")
     .update({ enabled, updated_at: new Date().toISOString() }).eq("slug", slug);
   if (error) throw new HTTPException(500, { message: error.message });
 

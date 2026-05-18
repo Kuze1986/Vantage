@@ -11,7 +11,7 @@ export type LogActivityInput = {
 
 export async function logActivity(input: LogActivityInput): Promise<void> {
   const sb = getSupabaseAdmin();
-  const { error } = await sb.schema("vantage").from("activity_events").insert({
+  const { error } = await sb.from("activity_events").insert({
     source: input.source,
     source_type: input.source_type,
     event_type: input.event_type,

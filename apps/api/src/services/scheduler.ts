@@ -40,12 +40,12 @@ export async function scheduleContentPiece(contentPieceId: string, scheduledForI
   const scheduledFor = scheduledForIso ?? new Date().toISOString();
 
   const { data: piece, error: loadErr } = await sb
-    .schema("vantage").from("content_pieces")
+    .from("content_pieces")
     .select("id, status").eq("id", contentPieceId).single();
   if (loadErr || !piece) throw new Error("Content piece not found");
   if (piece.status !== "approved") throw new Error(`Can only schedule approved pieces, got ${piece.status}`);
 
-  const { error } = await sb.schema("vantage").from("content_pieces").update({
+  const { error } = await sb.from("content_pieces").update({
     status: "queued",
     scheduled_for: scheduledFor,
     updated_at: new Date().toISOString(),
@@ -108,7 +108,7 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
     }
 
     const now = new Date().toISOString();
-    await sb.schema("vantage").from("content_pieces").update({
+    await sb.from("content_pieces").update({
       status: "published", published_at: now, external_post_id: externalId, updated_at: now,
     }).eq("id", piece.id);
 
@@ -120,7 +120,7 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    await sb.schema("vantage").from("content_pieces").update({
+    await sb.from("content_pieces").update({
       status: "failed", audit_notes: msg, updated_at: new Date().toISOString(),
     }).eq("id", piece.id);
     await logActivity({
@@ -139,7 +139,7 @@ async function cadenceTick(): Promise<void> {
   const now = new Date().toISOString();
 
   const { data: pieces, error } = await sb
-    .schema("vantage").from("content_pieces")
+    .from("content_pieces")
     .select("id, channel_slug, format, content_payload")
     .eq("status", "queued")
     .lte("scheduled_for", now)
@@ -152,7 +152,7 @@ async function cadenceTick(): Promise<void> {
   if (!pieces?.length) return;
 
   // Load enabled channel rows for routing
-  const { data: channels } = await sb.schema("vantage").from("channels").select("slug, enabled, cadence_config").eq("enabled", true);
+  const { data: channels } = await sb.from("channels").select("slug, enabled, cadence_config").eq("enabled", true);
   const channelMap = Object.fromEntries((channels ?? []).map((c: ChannelRow) => [c.slug, c]));
 
   for (const piece of pieces as ContentPieceRow[]) {
@@ -173,7 +173,7 @@ async function autoGenerateTick(): Promise<void> {
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
   const { data: channels } = await sb
-    .schema("vantage").from("channels")
+    .from("channels")
     .select("slug, enabled, cadence_config")
     .eq("enabled", true);
 
@@ -187,7 +187,7 @@ async function autoGenerateTick(): Promise<void> {
 
     // Count how many pieces were published today for this channel
     const { count } = await sb
-      .schema("vantage").from("content_pieces")
+      .from("content_pieces")
       .select("*", { count: "exact", head: true })
       .eq("channel_slug", ch.slug)
       .eq("status", "published")
@@ -198,7 +198,7 @@ async function autoGenerateTick(): Promise<void> {
     if (deficit <= 0) continue;
 
     // Load brand voice
-    const { data: voices } = await sb.schema("vantage").from("brand_voice").select("*").limit(1);
+    const { data: voices } = await sb.from("brand_voice").select("*").limit(1);
     const voice = voices?.[0];
     if (!voice) continue;
     const brandVoiceStr = JSON.stringify({
@@ -226,7 +226,7 @@ async function autoGenerateTick(): Promise<void> {
 
         // Insert as 'auditing'
         const { data: inserted, error: insErr } = await sb
-          .schema("vantage").from("content_pieces")
+          .from("content_pieces")
           .insert({
             topic_id:        topic.id,
             channel_slug:    ch.slug,
@@ -245,10 +245,10 @@ async function autoGenerateTick(): Promise<void> {
         for (const [k, v] of Object.entries(taggedPayload)) {
           if (typeof v === "string") taggedPayload[k] = tagUrls(v, ch.slug, inserted.id);
         }
-        await sb.schema("vantage").from("content_pieces").update({ content_payload: taggedPayload }).eq("id", inserted.id);
+        await sb.from("content_pieces").update({ content_payload: taggedPayload }).eq("id", inserted.id);
 
         // Mark topic used
-        await sb.schema("vantage").from("topics").update({ used_at: new Date().toISOString() }).eq("id", topic.id);
+        await sb.from("topics").update({ used_at: new Date().toISOString() }).eq("id", topic.id);
 
         await logActivity({
           source: "kuze", source_type: "agent",
@@ -270,7 +270,7 @@ async function autoGenerateTick(): Promise<void> {
           const hour = postingHours[i % postingHours.length];
           const scheduledFor = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), hour, 0, 0)).toISOString();
 
-          await sb.schema("vantage").from("content_pieces").update({
+          await sb.from("content_pieces").update({
             status: "queued",
             audit_notes: auditResult.feedback || null,
             scheduled_for: scheduledFor,
@@ -294,7 +294,7 @@ async function autoGenerateTick(): Promise<void> {
           });
           const audit2 = await auditContent({ content: gen2.text_preview, format: gen2.format, brand_voice: brandVoiceStr });
           const finalStatus = audit2.verdict === "pass" ? "approved" : "rejected";
-          await sb.schema("vantage").from("content_pieces").update({
+          await sb.from("content_pieces").update({
             status: finalStatus,
             content_payload: gen2.content_payload,
             audit_notes: audit2.feedback,

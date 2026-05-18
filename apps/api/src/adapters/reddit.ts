@@ -37,14 +37,14 @@ export function buildAuthorizeUrl(stateToken: string): string {
 export async function savePendingOAuth(state: string): Promise<void> {
   const sb = getSupabaseAdmin();
   const auth_state: RedditAuthState = { pending_oauth: { state, created_at: new Date().toISOString() } };
-  const { error } = await sb.schema("vantage").from("channels").update({ auth_state }).eq("slug", "reddit");
+  const { error } = await sb.from("channels").update({ auth_state }).eq("slug", "reddit");
   if (error) throw new Error(error.message);
 }
 
 export async function exchangeCodeForTokens(code: string, state: string): Promise<void> {
   const { clientId, clientSecret, redirect } = requireEnv();
   const sb = getSupabaseAdmin();
-  const { data: row } = await sb.schema("vantage").from("channels").select("auth_state").eq("slug", "reddit").single();
+  const { data: row } = await sb.from("channels").select("auth_state").eq("slug", "reddit").single();
   const pending = ((row?.auth_state ?? {}) as RedditAuthState).pending_oauth;
   if (!pending || pending.state !== state) throw new Error("Invalid OAuth state");
 
@@ -65,7 +65,7 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
   const expires_at = new Date(Date.now() + expires_in * 1000).toISOString();
 
   const next: RedditAuthState = { tokens: { access_token, refresh_token, expires_at } };
-  const { error } = await sb.schema("vantage").from("channels").update({ auth_state: next, enabled: true }).eq("slug", "reddit");
+  const { error } = await sb.from("channels").update({ auth_state: next, enabled: true }).eq("slug", "reddit");
   if (error) throw new Error(error.message);
 
   await logActivity({ source: "adapter:reddit", source_type: "adapter", event_type: "oauth_connected", summary: "Reddit account connected", payload: {} });
@@ -73,7 +73,7 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
 
 async function getAccessToken(): Promise<string> {
   const sb = getSupabaseAdmin();
-  const { data } = await sb.schema("vantage").from("channels").select("auth_state").eq("slug", "reddit").single();
+  const { data } = await sb.from("channels").select("auth_state").eq("slug", "reddit").single();
   const auth = ((data?.auth_state ?? {}) as RedditAuthState).tokens;
   if (!auth?.access_token) throw new Error("Reddit channel not connected");
   const exp = auth.expires_at ? Date.parse(auth.expires_at) : 0;
@@ -99,9 +99,9 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
   const expires_in = typeof json.expires_in === "number" ? json.expires_in : 3600;
   const expires_at = new Date(Date.now() + expires_in * 1000).toISOString();
   const sb = getSupabaseAdmin();
-  const cur = await sb.schema("vantage").from("channels").select("auth_state").eq("slug", "reddit").single();
+  const cur = await sb.from("channels").select("auth_state").eq("slug", "reddit").single();
   const prev = ((cur.data?.auth_state ?? {}) as RedditAuthState).tokens;
-  await sb.schema("vantage").from("channels").update({
+  await sb.from("channels").update({
     auth_state: { tokens: { access_token, refresh_token: prev?.refresh_token ?? refreshToken, expires_at } }
   }).eq("slug", "reddit");
   return access_token;

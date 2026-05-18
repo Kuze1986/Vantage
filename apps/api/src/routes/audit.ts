@@ -23,7 +23,7 @@ auditRoutes.post("/", async (c) => {
   const sb = getSupabaseAdmin();
 
   const { data: piece, error: pErr } = await sb
-    .schema("vantage").from("content_pieces")
+    .from("content_pieces")
     .select("id, topic_id, channel_slug, format, content_payload, status, audit_iterations")
     .eq("id", content_piece_id).single();
   if (pErr || !piece) throw new HTTPException(404, { message: "Content piece not found" });
@@ -36,7 +36,7 @@ auditRoutes.post("/", async (c) => {
   const content = String(payload.body ?? payload.text ?? payload.hook ?? payload.title ?? JSON.stringify(payload));
   if (!content) throw new HTTPException(400, { message: "Missing content in payload" });
 
-  const { data: voices } = await sb.schema("vantage").from("brand_voice").select("*").limit(1);
+  const { data: voices } = await sb.from("brand_voice").select("*").limit(1);
   const voice = voices?.[0];
   if (!voice) throw new HTTPException(400, { message: "Configure brand voice first" });
   const brandVoiceStr = JSON.stringify({
@@ -51,7 +51,7 @@ auditRoutes.post("/", async (c) => {
   const first = await auditContent({ content, format, brand_voice: brandVoiceStr });
 
   if (first.verdict === "pass") {
-    await sb.schema("vantage").from("content_pieces").update({
+    await sb.from("content_pieces").update({
       status: "approved",
       audit_notes: first.feedback || null,
       audit_iterations: iterations,
@@ -68,7 +68,7 @@ auditRoutes.post("/", async (c) => {
 
   // First pass failed — if already at max iterations, reject
   if (iterations >= 1) {
-    await sb.schema("vantage").from("content_pieces").update({
+    await sb.from("content_pieces").update({
       status: "rejected",
       audit_notes: first.feedback,
       audit_iterations: iterations,
@@ -84,7 +84,7 @@ auditRoutes.post("/", async (c) => {
   }
 
   // Regen with feedback
-  const { data: topic } = await sb.schema("vantage").from("topics")
+  const { data: topic } = await sb.from("topics")
     .select("topic_text, vertical").eq("id", piece.topic_id as string).single();
 
   const regenTopicText = `${topic?.topic_text ?? ""}\n\nIlita feedback (must address): ${first.feedback}`;
@@ -117,7 +117,7 @@ auditRoutes.post("/", async (c) => {
   const status = second.verdict === "pass" ? "approved" : "rejected";
   const notes  = second.verdict === "pass" ? second.feedback : `${first.feedback} | ${second.feedback}`;
 
-  await sb.schema("vantage").from("content_pieces").update({
+  await sb.from("content_pieces").update({
     status,
     content_payload:  gen2.content_payload,
     audit_notes:      notes,

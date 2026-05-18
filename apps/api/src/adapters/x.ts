@@ -50,7 +50,7 @@ export async function savePendingOAuth(state: string, verifier: string): Promise
     pending_oauth: { state, code_verifier: verifier, created_at: new Date().toISOString() },
   };
   const { error } = await sb
-    .schema("vantage")
+    
     .from("channels")
     .update({ auth_state })
     .eq("slug", "x");
@@ -59,7 +59,7 @@ export async function savePendingOAuth(state: string, verifier: string): Promise
 
 export async function exchangeCodeForTokens(code: string, state: string): Promise<void> {
   const sb = getSupabaseAdmin();
-  const { data: row, error } = await sb.schema("vantage").from("channels").select("auth_state").eq("slug", "x").single();
+  const { data: row, error } = await sb.from("channels").select("auth_state").eq("slug", "x").single();
   if (error) throw new Error(error.message);
   const auth = (row?.auth_state ?? {}) as XAuthState;
   const pending = auth.pending_oauth;
@@ -109,7 +109,7 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
     tokens: { access_token, refresh_token, expires_at },
   };
   const { error: upErr } = await sb
-    .schema("vantage")
+    
     .from("channels")
     .update({ auth_state: next, enabled: true })
     .eq("slug", "x");
@@ -126,7 +126,7 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
 
 async function getAccessToken(): Promise<string> {
   const sb = getSupabaseAdmin();
-  const { data, error } = await sb.schema("vantage").from("channels").select("auth_state").eq("slug", "x").single();
+  const { data, error } = await sb.from("channels").select("auth_state").eq("slug", "x").single();
   if (error) throw new Error(error.message);
   const auth = (data?.auth_state ?? {}) as XAuthState;
   const token = auth.tokens?.access_token;
@@ -167,7 +167,7 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
   const expires_at = new Date(Date.now() + expires_in * 1000).toISOString();
   const sb = getSupabaseAdmin();
   const next: XAuthState = { tokens: { access_token, refresh_token: new_refresh, expires_at } };
-  const { error } = await sb.schema("vantage").from("channels").update({ auth_state: next }).eq("slug", "x");
+  const { error } = await sb.from("channels").update({ auth_state: next }).eq("slug", "x");
   if (error) throw new Error(error.message);
   return access_token;
 }

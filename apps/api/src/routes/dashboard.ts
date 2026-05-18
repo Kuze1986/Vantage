@@ -11,20 +11,20 @@ dashboardRoutes.get("/overview", async (c) => {
   const todayStart  = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
   const [activityRes, piecesRes, engagementRes, channelsRes] = await Promise.all([
-    sb.schema("vantage").from("activity_events")
+    sb.from("activity_events")
       .select("id, source, source_type, event_type, summary, occurred_at")
       .gte("occurred_at", since24h)
       .order("occurred_at", { ascending: false })
       .limit(100),
 
-    sb.schema("vantage").from("content_pieces").select("status, channel_slug, published_at"),
+    sb.from("content_pieces").select("status, channel_slug, published_at"),
 
-    sb.schema("vantage").from("engagement_events")
+    sb.from("engagement_events")
       .select("id, content_piece_id, event_type, occurred_at")
       .order("occurred_at", { ascending: false })
       .limit(50),
 
-    sb.schema("vantage").from("channels")
+    sb.from("channels")
       .select("slug, enabled, access_token_hash, cadence_config"),
   ]);
 

@@ -40,7 +40,7 @@ webhooksRoutes.post("/x", async (c) => {
 
   if (tweetId) {
     const { data: piece } = await sb
-      .schema("vantage")
+      
       .from("content_pieces")
       .select("id")
       .eq("external_post_id", tweetId)
@@ -48,7 +48,7 @@ webhooksRoutes.post("/x", async (c) => {
     contentPieceId = piece?.id ?? null;
   }
 
-  const { error } = await sb.schema("vantage").from("engagement_events").insert({
+  const { error } = await sb.from("engagement_events").insert({
     content_piece_id: contentPieceId,
     event_type: eventType,
     event_payload: payload,

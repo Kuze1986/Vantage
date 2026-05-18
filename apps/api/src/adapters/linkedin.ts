@@ -38,7 +38,7 @@ export async function savePendingOAuth(state: string): Promise<void> {
   const auth_state: LinkedInAuthState = {
     pending_oauth: { state, created_at: new Date().toISOString() },
   };
-  const { error } = await sb.schema("vantage").from("channels").update({ auth_state }).eq("slug", "linkedin");
+  const { error } = await sb.from("channels").update({ auth_state }).eq("slug", "linkedin");
   if (error) throw new Error(error.message);
 }
 
@@ -46,7 +46,7 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
   const { clientId, clientSecret, redirect } = requireEnv();
   const sb = getSupabaseAdmin();
 
-  const { data: row } = await sb.schema("vantage").from("channels").select("auth_state").eq("slug", "linkedin").single();
+  const { data: row } = await sb.from("channels").select("auth_state").eq("slug", "linkedin").single();
   const pending = ((row?.auth_state ?? {}) as LinkedInAuthState).pending_oauth;
   if (!pending || pending.state !== state) throw new Error("Invalid OAuth state");
 
@@ -66,7 +66,7 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
   const person_urn = typeof me.sub === "string" ? `urn:li:person:${me.sub}` : undefined;
 
   const next: LinkedInAuthState = { tokens: { access_token, expires_at, person_urn } };
-  const { error } = await sb.schema("vantage").from("channels").update({ auth_state: next, enabled: true }).eq("slug", "linkedin");
+  const { error } = await sb.from("channels").update({ auth_state: next, enabled: true }).eq("slug", "linkedin");
   if (error) throw new Error(error.message);
 
   await logActivity({ source: "adapter:linkedin", source_type: "adapter", event_type: "oauth_connected", summary: "LinkedIn account connected", payload: { person_urn } });
@@ -74,7 +74,7 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
 
 async function getAccessToken(): Promise<{ token: string; personUrn: string }> {
   const sb = getSupabaseAdmin();
-  const { data } = await sb.schema("vantage").from("channels").select("auth_state").eq("slug", "linkedin").single();
+  const { data } = await sb.from("channels").select("auth_state").eq("slug", "linkedin").single();
   const auth = ((data?.auth_state ?? {}) as LinkedInAuthState).tokens;
   if (!auth?.access_token) throw new Error("LinkedIn channel not connected");
   const personUrn = auth.person_urn ?? "";

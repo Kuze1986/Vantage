@@ -88,6 +88,14 @@ export const vantageApi = {
       body: JSON.stringify({ content_piece_id, scheduled_for }),
     }),
 
+  // ── Queue ─────────────────────────────────────────────────────────────────
+  getQueue: (limit = 100) =>
+    vantageFetch(`/v1/queue?limit=${limit}`) as Promise<{ pieces: {
+      id: string; status: string; channel_slug: string; format: string;
+      content_payload: Record<string, unknown>; audit_notes: string | null;
+      audit_iterations: number; created_at: string;
+    }[] }>,
+
   // ── Dashboard ─────────────────────────────────────────────────────────────
   dashboardOverview: () =>
     vantageFetch("/v1/dashboard/overview") as Promise<DashboardOverview>,

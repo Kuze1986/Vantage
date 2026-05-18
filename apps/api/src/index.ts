@@ -16,6 +16,7 @@ import { scheduleRoutes } from "./routes/schedule.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
 import { webhooksRoutes } from "./routes/webhooks.js";
 import { channelsAuthedRoutes } from "./routes/channels.js";
+import { queueRoutes } from "./routes/queue.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
 import { startCadenceEngine } from "./services/scheduler.js";
 
@@ -49,6 +50,7 @@ authedV1.route("/publish", publishRoutes);
 authedV1.route("/schedule", scheduleRoutes);
 authedV1.route("/dashboard", dashboardRoutes);
 authedV1.route("/channels", channelsAuthedRoutes);
+authedV1.route("/queue", queueRoutes);
 
 app.route("/v1", authedV1);
 

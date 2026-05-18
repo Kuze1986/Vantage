@@ -26,7 +26,7 @@ async function loadWeights(channel: ChannelSlug): Promise<string> {
   try {
     const sb = getSupabaseAdmin();
     const { data } = await sb
-      .schema("vantage")
+      
       .from("generation_weights")
       .select("pattern_key, weight, sample_size")
       .eq("channel_slug", channel)
