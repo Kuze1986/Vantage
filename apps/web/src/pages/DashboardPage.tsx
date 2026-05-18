@@ -90,11 +90,12 @@ export function DashboardPage() {
     finally { setGenerating(null) }
   }
 
-  const queueDepth    = overview?.queueDepth ?? {}
-  const publishedToday = overview?.publishedToday ?? {}
-  const activity       = overview?.activityLast24h ?? []
-  const channelStatus  = overview?.channelStatus ?? []
-  const topPieces      = overview?.topPieces ?? []
+  const queueDepth        = overview?.queueDepth ?? {}
+  const publishedToday    = overview?.publishedToday ?? {}
+  const activity          = overview?.activityLast24h ?? []
+  const channelStatus     = overview?.channelStatus ?? []
+  const topPieces         = overview?.topPieces ?? []
+  const verticalBreakdown = overview?.verticalBreakdown ?? {}
 
   const totalActive = Object.values(queueDepth).reduce((s, v) => s + v, 0)
   const totalQueued = (queueDepth['queued'] ?? 0) + (queueDepth['approved'] ?? 0)
@@ -296,6 +297,39 @@ export function DashboardPage() {
                   </span>
                 </span>
               ))}
+            </div>
+          </Panel>
+        </div>
+      )}
+
+      {/* 3A-8: Per-vertical breakdown */}
+      {Object.keys(verticalBreakdown).length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Panel title="Vertical Breakdown — 7d" titleAccent="amber">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 8 }}>
+              {Object.entries(verticalBreakdown)
+                .sort(([, a], [, b]) => b.published_7d - a.published_7d)
+                .map(([vertical, stats]) => (
+                  <div
+                    key={vertical}
+                    style={{
+                      background: 'var(--nx-surface-2)',
+                      border: '1px solid var(--nx-border)',
+                      borderRadius: 6,
+                      padding: '8px 10px',
+                    }}
+                  >
+                    <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {vertical}
+                    </div>
+                    <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 18, color: 'var(--nx-amber)', fontWeight: 700 }}>
+                      {stats.published_7d}
+                    </div>
+                    <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)' }}>
+                      {stats.published_today > 0 ? `+${stats.published_today} today` : 'posts 7d'}
+                    </div>
+                  </div>
+                ))}
             </div>
           </Panel>
         </div>

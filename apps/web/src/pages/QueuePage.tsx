@@ -15,6 +15,8 @@ export type Piece = {
   created_at: string
   image_url?: string | null
   variant_group_id?: string | null
+  retry_count?: number
+  retry_after?: string | null
 }
 
 const MANUAL_CHANNELS = new Set(['tiktok', 'instagram', 'facebook'])
@@ -292,6 +294,28 @@ export function QueuePage() {
           >
             {busy === p.id ? '…' : 'Publish'}
           </button>
+        )}
+        {/* 3A-6: Retry button for permanently-failed pieces */}
+        {p.status === 'failed' && (
+          <div>
+            <button
+              type="button"
+              className="nx-btn nx-btn--ghost nx-btn--sm"
+              disabled={busy === p.id}
+              onClick={() => {
+                setBusy(p.id)
+                void action(() => vantageApi.retryPiece(p.id), 'Re-queued for retry').finally(() => setBusy(null))
+              }}
+              title="Reset retry counter and re-queue this piece for immediate publish attempt"
+            >
+              {busy === p.id ? '…' : '↺ Retry'}
+            </button>
+            {(p.retry_count ?? 0) > 0 && (
+              <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 8, color: 'var(--nx-text-4)', marginTop: 2 }}>
+                {p.retry_count} auto-retry{(p.retry_count ?? 0) !== 1 ? 's' : ''} attempted
+              </div>
+            )}
+          </div>
         )}
       </div>
     ),

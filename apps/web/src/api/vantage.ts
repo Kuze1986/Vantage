@@ -57,6 +57,11 @@ export type TopPiece = {
   preview: string;
 };
 
+export type VerticalBreakdownEntry = {
+  published_7d: number;
+  published_today: number;
+};
+
 export type DashboardOverview = {
   activityLast24h: { id: string; source: string; summary: string; occurred_at: string; event_type: string }[];
   queueDepth: Record<string, number>;
@@ -65,6 +70,7 @@ export type DashboardOverview = {
   channelBreakdown: Record<string, ChannelBreakdownEntry>;
   topPieces: TopPiece[];
   recentEngagement: unknown[];
+  verticalBreakdown: Record<string, VerticalBreakdownEntry>;
 };
 
 export type Subscriber = {
@@ -125,7 +131,12 @@ export const vantageApi = {
       id: string; status: string; channel_slug: string; format: string;
       content_payload: Record<string, unknown>; audit_notes: string | null;
       audit_iterations: number; created_at: string;
+      retry_count?: number; retry_after?: string | null;
     }[] }>,
+
+  // 3A-6: Retry a permanently-failed piece
+  retryPiece: (id: string) =>
+    vantageFetch(`/v1/queue/${id}/retry`, { method: "POST" }) as Promise<{ ok: boolean }>,
 
   // ── Dashboard ─────────────────────────────────────────────────────────────
   dashboardOverview: () =>

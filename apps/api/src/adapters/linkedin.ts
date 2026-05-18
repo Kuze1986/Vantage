@@ -6,6 +6,7 @@ const LI_AUTH   = "https://www.linkedin.com/oauth/v2/authorization";
 const LI_TOKEN  = "https://www.linkedin.com/oauth/v2/accessToken";
 const LI_ME     = "https://api.linkedin.com/v2/userinfo";
 const LI_POSTS  = "https://api.linkedin.com/v2/ugcPosts";
+const LI_ASSETS = "https://api.linkedin.com/v2/assets?action=registerUpload";
 
 type LinkedInAuthState = {
   pending_oauth?: { state: string; created_at: string };
@@ -82,15 +83,71 @@ async function getAccessToken(): Promise<{ token: string; personUrn: string }> {
   return { token: auth.access_token, personUrn };
 }
 
-export async function postLinkedIn(body: string, _headline?: string): Promise<{ id: string }> {
+// ── 3A-3: Upload an image URL to LinkedIn and return the asset URN ────────────
+async function uploadImageToLinkedIn(imageUrl: string, token: string, personUrn: string): Promise<string> {
+  // Step 1: Register the upload
+  const registerBody = {
+    registerUploadRequest: {
+      recipes: ["urn:li:digitalmediaRecipe:feedshare-image"],
+      owner: personUrn,
+      serviceRelationships: [{ relationshipType: "OWNER", identifier: "urn:li:userGeneratedContent" }],
+    },
+  };
+  const regRes = await fetch(LI_ASSETS, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "X-Restli-Protocol-Version": "2.0.0" },
+    body: JSON.stringify(registerBody),
+  });
+  const regJson = (await regRes.json()) as {
+    value?: { uploadMechanism?: { "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"?: { uploadUrl?: string } }; asset?: string }
+  };
+  const uploadUrl = regJson.value?.uploadMechanism?.["com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"]?.uploadUrl;
+  const assetUrn  = regJson.value?.asset;
+  if (!uploadUrl || !assetUrn) {
+    throw new Error("LinkedIn media register failed: missing uploadUrl or asset URN");
+  }
+
+  // Step 2: Download the source image and re-upload to LinkedIn's URL
+  const imgRes  = await fetch(imageUrl);
+  if (!imgRes.ok) throw new Error(`Failed to fetch image for LinkedIn upload: ${imgRes.status}`);
+  const imgBuf  = await imgRes.arrayBuffer();
+  const putRes  = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": imgRes.headers.get("content-type") ?? "image/jpeg" },
+    body: imgBuf,
+  });
+  if (!putRes.ok) {
+    throw new Error(`LinkedIn image upload PUT failed: ${putRes.status}`);
+  }
+
+  return assetUrn;
+}
+
+export async function postLinkedIn(body: string, _headline?: string, imageUrl?: string): Promise<{ id: string }> {
   const { token, personUrn } = await getAccessToken();
+
+  // 3A-3: Include image media if provided
+  let shareMedia: unknown[] = [];
+  let shareMediaCategory = "NONE";
+  if (imageUrl) {
+    try {
+      const assetUrn = await uploadImageToLinkedIn(imageUrl, token, personUrn);
+      shareMedia = [{ status: "READY", description: { text: "" }, media: assetUrn, title: { text: "" } }];
+      shareMediaCategory = "IMAGE";
+    } catch (imgErr) {
+      // Log but don't fail the post — fall back to text-only
+      await logActivity({ source: "adapter:linkedin", source_type: "adapter", event_type: "image_upload_failed", summary: String(imgErr), payload: { imageUrl } });
+    }
+  }
+
   const payload = {
     author: personUrn,
     lifecycleState: "PUBLISHED",
     specificContent: {
       "com.linkedin.ugc.ShareContent": {
         shareCommentary: { text: body },
-        shareMediaCategory: "NONE",
+        shareMediaCategory,
+        ...(shareMedia.length > 0 ? { media: shareMedia } : {}),
       },
     },
     visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
@@ -106,7 +163,7 @@ export async function postLinkedIn(body: string, _headline?: string): Promise<{ 
     throw new Error(`LinkedIn post failed: ${res.status} ${text.slice(0, 200)}`);
   }
   const id = res.headers.get("x-restli-id") ?? createHash("sha256").update(body).digest("hex").slice(0, 12);
-  await logActivity({ source: "adapter:linkedin", source_type: "adapter", event_type: "post_success", summary: `LinkedIn post ${id}`, payload: { id } });
+  await logActivity({ source: "adapter:linkedin", source_type: "adapter", event_type: "post_success", summary: `LinkedIn post ${id}`, payload: { id, hasImage: !!imageUrl } });
   return { id };
 }
 

@@ -11,7 +11,7 @@ dashboardRoutes.get("/overview", async (c) => {
   const since7d    = new Date(Date.now() - 7  * 24 * 60 * 60 * 1000).toISOString();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
-  const [activityRes, piecesRes, engagementRes, channelsRes, topPiecesRes] = await Promise.all([
+  const [activityRes, piecesRes, engagementRes, channelsRes, topPiecesRes, verticalRes] = await Promise.all([
     sb.from("activity_events")
       .select("id, source, source_type, event_type, summary, occurred_at")
       .gte("occurred_at", since24h)
@@ -36,10 +36,17 @@ dashboardRoutes.get("/overview", async (c) => {
       .gte("published_at", since7d)
       .order("published_at", { ascending: false })
       .limit(100),
+
+    // 3A-8: Per-vertical breakdown — join content_pieces → topics
+    sb.from("content_pieces")
+      .select("id, status, published_at, topics!inner(vertical)")
+      .not("topics.vertical", "is", null)
+      .gte("published_at", since7d),
   ]);
 
   if (activityRes.error)   throw new HTTPException(500, { message: activityRes.error.message });
   if (engagementRes.error) throw new HTTPException(500, { message: engagementRes.error.message });
+  // verticalRes errors are non-fatal — just produce an empty breakdown
 
   // Queue depth by status
   const queueDepth: Record<string, number> = {
@@ -128,13 +135,29 @@ dashboardRoutes.get("/overview", async (c) => {
     }]),
   );
 
+  // 3A-8: Per-vertical breakdown — aggregate published counts by vertical for last 7d
+  type VerticalStats = { published_7d: number; published_today: number };
+  const verticalBreakdown: Record<string, VerticalStats> = {};
+  for (const row of (verticalRes.data ?? []) as { status: string; published_at: string | null; topics: { vertical: string } | null }[]) {
+    const vertical = row.topics?.vertical;
+    if (!vertical) continue;
+    if (!verticalBreakdown[vertical]) verticalBreakdown[vertical] = { published_7d: 0, published_today: 0 };
+    if (row.status === "published") {
+      verticalBreakdown[vertical].published_7d += 1;
+      if (row.published_at && row.published_at >= todayStart) {
+        verticalBreakdown[vertical].published_today += 1;
+      }
+    }
+  }
+
   return c.json({
-    activityLast24h:  activityRes.data ?? [],
+    activityLast24h:   activityRes.data ?? [],
     queueDepth,
     publishedToday,
     channelStatus,
     channelBreakdown,
     topPieces,
-    recentEngagement: engagementRes.data ?? [],
+    recentEngagement:  engagementRes.data ?? [],
+    verticalBreakdown,
   });
 });

@@ -5,6 +5,7 @@ import { auditContent } from "./ilita.js";
 import { pickNextTopic } from "./source.js";
 import { refreshTopicsFromPulse } from "./pulse.js";
 import { runBioLoop } from "./bioloop.js";
+import { pollRedditEngagement } from "./reddit-engagement.js";
 import { loadSettings } from "../lib/settings.js";
 import { channelFormatMap } from "@vantage/prompts";
 import type { ChannelSlug } from "@vantage/prompts";
@@ -15,10 +16,11 @@ import { postLinkedIn } from "../adapters/linkedin.js";
 import { postToSubreddit } from "../adapters/reddit.js";
 import { sendEmail } from "../adapters/email.js";
 
-const TICK_MS        = 60_000;            // check queue every 60 seconds
-const AUTO_GEN_TICK  = 300_000;           // check auto-generate every 5 minutes
-const PULSE_TICK_MS  = 30 * 60_000;       // pulse reactor every 30 minutes
-const BIOLOOP_TICK_MS = 24 * 60 * 60_000; // BioLoop weight update every 24 hours
+const TICK_MS               = 60_000;            // check queue every 60 seconds
+const AUTO_GEN_TICK         = 300_000;           // check auto-generate every 5 minutes
+const PULSE_TICK_MS         = 30 * 60_000;       // pulse reactor every 30 minutes
+const BIOLOOP_TICK_MS       = 24 * 60 * 60_000;  // BioLoop weight update every 24 hours
+const REDDIT_ENGAGE_TICK_MS = 2  * 60 * 60_000;  // Reddit engagement poll every 2 hours
 
 type ChannelRow = {
   slug: string;
@@ -37,7 +39,11 @@ type ContentPieceRow = {
   channel_slug: string;
   format: string;
   content_payload: Record<string, unknown>;
+  retry_count: number;
 };
+
+// 3A-6: Exponential backoff delays — [0]=5m, [1]=15m, [2]=1h, then give up
+const RETRY_DELAYS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000];
 
 // ── Manual schedule: mark a piece queued with optional time ──────────────────
 export async function scheduleContentPiece(contentPieceId: string, scheduledForIso?: string): Promise<void> {
@@ -83,14 +89,24 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
       case "linkedin": {
         const body     = String(payload.body ?? "");
         const headline = payload.headline ? String(payload.headline) : undefined;
-        const { id }   = await postLinkedIn(body, headline);
+        // 3A-3: pass image_url for LinkedIn image card
+        const imageUrl = typeof payload.image_url === "string" ? payload.image_url : undefined;
+        const { id }   = await postLinkedIn(body, headline, imageUrl);
         externalId = id;
         break;
       }
       case "reddit": {
-        const subs = channelRow.cadence_config.subreddits ?? [];
+        const cadence = channelRow.cadence_config as { subreddits?: string[]; subreddit_index?: number };
+        const subs = cadence.subreddits ?? [];
         if (subs.length === 0) throw new Error("No subreddits configured for Reddit channel");
-        const subreddit = subs[Math.floor(Math.random() * subs.length)]; // round-robin would be better
+        // 3A-4: round-robin index instead of random
+        const idx       = (cadence.subreddit_index ?? 0) % subs.length;
+        const subreddit = subs[idx];
+        const nextIndex = (idx + 1) % subs.length;
+        const sbAdmin   = getSupabaseAdmin();
+        await sbAdmin.from("channels").update({
+          cadence_config: { ...cadence, subreddit_index: nextIndex },
+        }).eq("slug", "reddit");
         const { id } = await postToSubreddit({
           subreddit,
           title: String(payload.title ?? payload.body ?? "").slice(0, 300),
@@ -101,9 +117,11 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
         break;
       }
       case "email": {
+        // 3A-2: pass pieceId for UTM tagging
         const { id } = await sendEmail({
           subject: String(payload.subject ?? "NEXUS Newsletter"),
           html:    String(payload.body ?? ""),
+          pieceId: piece.id,
         });
         externalId = id;
         break;
@@ -124,16 +142,41 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
       payload: { content_piece_id: piece.id, external_post_id: externalId, channel: slug },
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    await sb.from("content_pieces").update({
-      status: "failed", audit_notes: msg, updated_at: new Date().toISOString(),
-    }).eq("id", piece.id);
-    await logActivity({
-      source: `adapter:${slug}`, source_type: "adapter",
-      event_type: "cadence_publish_failed",
-      summary: msg.slice(0, 500),
-      payload: { content_piece_id: piece.id, channel: slug },
-    });
+    const msg          = e instanceof Error ? e.message : String(e);
+    const retryCount   = piece.retry_count ?? 0;
+    const delayMs      = RETRY_DELAYS_MS[retryCount];
+    const willRetry    = delayMs !== undefined;
+    const now          = new Date();
+
+    if (willRetry) {
+      // 3A-6: Schedule a retry with exponential backoff — keep status "queued"
+      const retryAfter = new Date(now.getTime() + delayMs).toISOString();
+      await sb.from("content_pieces").update({
+        retry_count: retryCount + 1,
+        retry_after: retryAfter,
+        audit_notes: `Retry ${retryCount + 1}: ${msg.slice(0, 400)}`,
+        updated_at:  now.toISOString(),
+      }).eq("id", piece.id);
+      await logActivity({
+        source: `adapter:${slug}`, source_type: "adapter",
+        event_type: "cadence_publish_retry",
+        summary: `Retry ${retryCount + 1}/3 for ${slug} piece ${piece.id} — next at ${retryAfter}`,
+        payload: { content_piece_id: piece.id, channel: slug, retry_count: retryCount + 1, retry_after: retryAfter },
+      });
+    } else {
+      // Max retries exhausted — mark as failed
+      await sb.from("content_pieces").update({
+        status:      "failed",
+        audit_notes: `Failed after ${retryCount} retries: ${msg.slice(0, 400)}`,
+        updated_at:  now.toISOString(),
+      }).eq("id", piece.id);
+      await logActivity({
+        source: `adapter:${slug}`, source_type: "adapter",
+        event_type: "cadence_publish_failed",
+        summary: `Permanently failed after ${retryCount} retries: ${msg.slice(0, 400)}`,
+        payload: { content_piece_id: piece.id, channel: slug, retry_count: retryCount },
+      });
+    }
     throw e;
   }
 }
@@ -143,11 +186,13 @@ async function cadenceTick(): Promise<void> {
   const sb  = getSupabaseAdmin();
   const now = new Date().toISOString();
 
+  // 3A-6: also check retry_after — only pick up pieces whose retry window has elapsed
   const { data: pieces, error } = await sb
     .from("content_pieces")
-    .select("id, channel_slug, format, content_payload")
+    .select("id, channel_slug, format, content_payload, retry_count")
     .eq("status", "queued")
     .lte("scheduled_for", now)
+    .or(`retry_after.is.null,retry_after.lte.${now}`)
     .limit(20);
 
   if (error) {
@@ -357,10 +402,11 @@ async function biloopTick(): Promise<void> {
 }
 
 // ── Engine boot ───────────────────────────────────────────────────────────────
-let cadenceTimer:  ReturnType<typeof setInterval> | null = null;
-let autoGenTimer:  ReturnType<typeof setInterval> | null = null;
-let pulseTimer:    ReturnType<typeof setInterval> | null = null;
-let biloopTimer:   ReturnType<typeof setInterval> | null = null;
+let cadenceTimer:      ReturnType<typeof setInterval> | null = null;
+let autoGenTimer:      ReturnType<typeof setInterval> | null = null;
+let pulseTimer:        ReturnType<typeof setInterval> | null = null;
+let biloopTimer:       ReturnType<typeof setInterval> | null = null;
+let redditEngageTimer: ReturnType<typeof setInterval> | null = null;
 
 export function startCadenceEngine(): void {
   if (cadenceTimer) return; // already running
@@ -388,12 +434,19 @@ export function startCadenceEngine(): void {
     void biloopTick();
   }, BIOLOOP_TICK_MS);
 
-  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | bioloop 24h");
+  // 3A-7: Reddit engagement poll every 2 hours (first run after startup)
+  void pollRedditEngagement().catch((e) => console.error("[reddit-engage] initial poll error:", e));
+  redditEngageTimer = setInterval(() => {
+    void pollRedditEngagement().catch((e) => console.error("[reddit-engage] poll error:", e));
+  }, REDDIT_ENGAGE_TICK_MS);
+
+  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | reddit-engage 2h | bioloop 24h");
 }
 
 export function stopCadenceEngine(): void {
-  if (cadenceTimer)  { clearInterval(cadenceTimer);  cadenceTimer  = null; }
-  if (autoGenTimer)  { clearInterval(autoGenTimer);  autoGenTimer  = null; }
-  if (pulseTimer)    { clearInterval(pulseTimer);    pulseTimer    = null; }
-  if (biloopTimer)   { clearInterval(biloopTimer);   biloopTimer   = null; }
+  if (cadenceTimer)      { clearInterval(cadenceTimer);      cadenceTimer      = null; }
+  if (autoGenTimer)      { clearInterval(autoGenTimer);      autoGenTimer      = null; }
+  if (pulseTimer)        { clearInterval(pulseTimer);        pulseTimer        = null; }
+  if (biloopTimer)       { clearInterval(biloopTimer);       biloopTimer       = null; }
+  if (redditEngageTimer) { clearInterval(redditEngageTimer); redditEngageTimer = null; }
 }

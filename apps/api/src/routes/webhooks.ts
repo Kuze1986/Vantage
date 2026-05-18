@@ -18,6 +18,18 @@ webhooksRoutes.get("/x", async (c) => {
 
 webhooksRoutes.post("/x", async (c) => {
   const raw = await c.req.text();
+
+  // ── 3A-1: Verify HMAC-SHA256 signature ──────────────────────────────────
+  const secret = process.env.X_WEBHOOK_SECRET ?? process.env.X_CLIENT_SECRET;
+  if (secret) {
+    const sigHeader = c.req.header("x-twitter-webhooks-signature") ?? "";
+    // Header format: "sha256=<base64>"
+    const expected = "sha256=" + createHmac("sha256", secret).update(raw).digest("base64");
+    if (sigHeader !== expected) {
+      throw new HTTPException(401, { message: "invalid X webhook signature" });
+    }
+  }
+
   let payload: Record<string, unknown>;
   try {
     payload = JSON.parse(raw) as Record<string, unknown>;
@@ -41,7 +53,6 @@ webhooksRoutes.post("/x", async (c) => {
 
   if (tweetId) {
     const { data: piece } = await sb
-      
       .from("content_pieces")
       .select("id")
       .eq("external_post_id", tweetId)
@@ -49,13 +60,20 @@ webhooksRoutes.post("/x", async (c) => {
     contentPieceId = piece?.id ?? null;
   }
 
+  // ── 3A-5: Derive external_event_id for deduplication ────────────────────
+  const externalEventId = tweetId
+    ? `x_${eventType}_${tweetId}`
+    : null;
+
   const { error } = await sb.from("engagement_events").insert({
-    content_piece_id: contentPieceId,
-    event_type: eventType,
-    event_payload: payload,
-    occurred_at: new Date().toISOString(),
+    content_piece_id:  contentPieceId,
+    event_type:        eventType,
+    event_payload:     payload,
+    external_event_id: externalEventId,
+    occurred_at:       new Date().toISOString(),
   });
-  if (error) {
+  // Ignore conflict on external_event_id (duplicate delivery)
+  if (error && !error.message.includes("unique") && !error.message.includes("duplicate")) {
     await logActivity({
       source: "adapter:x",
       source_type: "adapter",
@@ -119,11 +137,18 @@ webhooksRoutes.post("/linkedin", async (c) => {
     contentPieceId = piece?.id ?? null;
   }
 
+  // 3A-5: external_event_id for deduplication
+  const liEventId = typeof payload.eventId === "string" ? payload.eventId : null;
+  const externalEventId = liEventId
+    ? `linkedin_${eventType}_${liEventId}`
+    : shareId ? `linkedin_${eventType}_${shareId}` : null;
+
   await sb.from("engagement_events").insert({
-    content_piece_id: contentPieceId,
-    event_type: eventType,
-    event_payload: payload,
-    occurred_at: new Date().toISOString(),
+    content_piece_id:  contentPieceId,
+    event_type:        eventType,
+    event_payload:     payload,
+    external_event_id: externalEventId,
+    occurred_at:       new Date().toISOString(),
   });
 
   await logActivity({
@@ -162,11 +187,15 @@ webhooksRoutes.post("/reddit", async (c) => {
     contentPieceId = piece?.id ?? null;
   }
 
+  // 3A-5: external_event_id for deduplication
+  const redditExternalId = postId ? `reddit_${eventType}_${postId}` : null;
+
   await sb.from("engagement_events").insert({
-    content_piece_id: contentPieceId,
-    event_type: eventType,
-    event_payload: payload,
-    occurred_at: new Date().toISOString(),
+    content_piece_id:  contentPieceId,
+    event_type:        eventType,
+    event_payload:     payload,
+    external_event_id: redditExternalId,
+    occurred_at:       new Date().toISOString(),
   });
 
   await logActivity({

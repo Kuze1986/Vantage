@@ -75,16 +75,25 @@ publishRoutes.post("/:channel", async (c) => {
       case "linkedin": {
         const body     = String(payload.body ?? "");
         const headline = payload.headline ? String(payload.headline) : undefined;
-        ({ id: externalId } = await postLinkedIn(body, headline));
+        // 3A-3: pass image_url so LinkedIn can include an image card
+        const imageUrl = typeof payload.image_url === "string" ? payload.image_url : undefined;
+        ({ id: externalId } = await postLinkedIn(body, headline, imageUrl));
         break;
       }
       case "reddit": {
-        // Load subreddit from channel cadence_config
+        // Load subreddit from channel cadence_config, using round-robin index (3A-4)
         const { data: ch } = await sb.from("channels")
           .select("cadence_config").eq("slug", "reddit").single();
-        const subs: string[] = (ch?.cadence_config as { subreddits?: string[] })?.subreddits ?? [];
+        const cadence = (ch?.cadence_config ?? {}) as { subreddits?: string[]; subreddit_index?: number };
+        const subs: string[] = cadence.subreddits ?? [];
         if (!subs.length) throw new Error("No subreddits configured for Reddit channel");
-        const subreddit = subs[Math.floor(Math.random() * subs.length)];
+        const idx        = (cadence.subreddit_index ?? 0) % subs.length;
+        const subreddit  = subs[idx];
+        const nextIndex  = (idx + 1) % subs.length;
+        // Persist the updated index back to cadence_config
+        await sb.from("channels").update({
+          cadence_config: { ...cadence, subreddit_index: nextIndex },
+        }).eq("slug", "reddit");
         ({ id: externalId } = await postToSubreddit({
           subreddit,
           title:        String(payload.title ?? payload.body ?? "").slice(0, 300),
@@ -94,9 +103,11 @@ publishRoutes.post("/:channel", async (c) => {
         break;
       }
       case "email": {
+        // 3A-2: pass pieceId so UTM tags are applied to links in the HTML body
         ({ id: externalId } = await sendEmail({
           subject: String(payload.subject ?? "NEXUS Newsletter"),
           html:    String(payload.body ?? ""),
+          pieceId: content_piece_id,
         }));
         break;
       }

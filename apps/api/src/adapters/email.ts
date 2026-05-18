@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
+import { tagUrls } from "../lib/utm.js";
 
 const RESEND_BASE = "https://api.resend.com";
 
@@ -15,7 +16,8 @@ function requireEnv(): { apiKey: string; fromAddress: string } {
 export async function sendEmail(params: {
   subject: string;
   html: string;
-  to?: string[]; // if omitted, sends to all active subscribers
+  to?: string[];      // if omitted, sends to all active subscribers
+  pieceId?: string;  // when set, UTM-tags all links in the HTML body
 }): Promise<{ id: string; recipient_count: number }> {
   const { apiKey, fromAddress } = requireEnv();
   const sb = getSupabaseAdmin();
@@ -36,13 +38,18 @@ export async function sendEmail(params: {
     throw new Error("No active email subscribers — add subscribers to vantage.newsletter_subscribers");
   }
 
+  // 3A-2: Apply UTM tags to all links in the HTML body if a pieceId is provided
+  const html = params.pieceId
+    ? tagUrls(params.html, "email", params.pieceId)
+    : params.html;
+
   // Resend supports batch sends via /emails/batch or individual sends.
   // For lists < 100 we'll use the batch endpoint.
   const payload = recipients.map((to) => ({
     from: fromAddress,
     to,
     subject: params.subject,
-    html: params.html,
+    html,
   }));
 
   const res = await fetch(`${RESEND_BASE}/emails/batch`, {

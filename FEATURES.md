@@ -689,7 +689,7 @@ table including defaults and FK constraints.
 
 ### 3A-1 — X Webhook Signature Verification
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** The `POST /v1/webhooks/x` endpoint accepts all payloads without verifying the
 `x-twitter-webhooks-signature` header. X signs every webhook delivery with
@@ -709,7 +709,7 @@ BioLoop weights and engagement counts.
 
 ### 3A-2 — UTM Tags in Email HTML Bodies
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** The `tagUrls()` utility correctly tags URL strings in flat JSON fields, but the
 email adapter sends the `body` HTML directly to Resend without running it through UTM
@@ -729,7 +729,7 @@ making it impossible to attribute newsletter clicks in any analytics tool.
 
 ### 3A-3 — LinkedIn Image Passthrough
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** When `generate_image: true` is used, DALL-E 3 generates an image and stores the
 URL in `content_pieces.image_url` and `content_payload.image_url`. However, the LinkedIn
@@ -749,7 +749,7 @@ even though the LinkedIn API fully supports image posts via `media[]` in the UGC
 
 ### 3A-4 — Subreddit Round-Robin
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** When multiple subreddits are configured, the scheduler uses `Math.random()` to
 select which subreddit to post to. This can result in consecutive posts going to the same
@@ -767,7 +767,7 @@ subreddit, uneven distribution, and missed subreddits if the random seed is unlu
 
 ### 3A-5 — Webhook Event Deduplication
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** Platforms (especially X) may redeliver webhook events. A redelivered event
 produces a duplicate row in `engagement_events`, which inflates BioLoop's engagement
@@ -786,7 +786,7 @@ counts and corrupts pattern weights. Currently there is no deduplication on inse
 
 ### 3A-6 — Retry Logic for Failed Pieces
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** When a publish attempt fails (e.g. rate limit, network error, expired token),
 the piece is permanently marked `failed`. There is no mechanism to retry, either
@@ -807,7 +807,7 @@ automatically or manually from the queue UI.
 
 ### 3A-7 — Reddit Engagement Polling
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** Reddit has no push webhook API. The webhook route comment says engagement is
 "collected via `pollRedditEngagement()` in the scheduler" but this function does not exist.
@@ -830,7 +830,7 @@ the Reddit channel and weights never update.
 
 ### 3A-8 — Per-Vertical Dashboard Breakdown
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** The spec says "Dashboard shows per-channel *and per-vertical* breakdown of
 activity and engagement." The dashboard currently has per-channel stats but never
