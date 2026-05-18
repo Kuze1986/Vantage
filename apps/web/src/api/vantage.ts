@@ -166,4 +166,57 @@ export const vantageApi = {
 
   removeSubscriber: (id: string) =>
     vantageFetch(`/v1/subscribers/${id}`, { method: "DELETE" }) as Promise<{ ok: boolean }>,
+
+  // ── Generate (Phase 2 additions) ─────────────────────────────────────────
+  generateWithImage: (channel: string, topic_id: string) =>
+    vantageFetch(`/v1/generate/${channel}`, {
+      method: "POST",
+      body: JSON.stringify({ topic_id, generate_image: true }),
+    }) as Promise<{ content_piece_id: string; format: string; status: string }>,
+
+  generateVariants: (channel: string, topic_id: string, count: 2 | 3) =>
+    vantageFetch(`/v1/generate/${channel}`, {
+      method: "POST",
+      body: JSON.stringify({ topic_id, variants: count }),
+    }) as Promise<{ variant_group_id: string; pieces: { content_piece_id: string; format: string; status: string }[] }>,
+
+  // ── BioLoop ───────────────────────────────────────────────────────────────
+  runBioLoop: () =>
+    vantageFetch("/v1/bioloop/run", { method: "POST" }) as Promise<{ ok: boolean; analyzed: number; updated: number }>,
+
+  getBioLoopWeights: (channel?: string) =>
+    vantageFetch(`/v1/bioloop/weights${channel ? `?channel=${channel}` : ""}`) as Promise<{
+      weights: { channel_slug: string; pattern_key: string; weight: number; sample_size: number; last_updated: string }[]
+    }>,
+
+  // ── Music library ─────────────────────────────────────────────────────────
+  listMusicTracks: (mood?: string, use_case?: string) => {
+    const params = new URLSearchParams();
+    if (mood)     params.set("mood", mood);
+    if (use_case) params.set("use_case", use_case);
+    const qs = params.toString();
+    return vantageFetch(`/v1/music${qs ? `?${qs}` : ""}`) as Promise<{
+      tracks: { id: string; title: string; artist: string | null; mood: string; use_case: string; duration_secs: number | null; bpm: number | null }[]
+    }>;
+  },
+
+  // ── DemoForge ─────────────────────────────────────────────────────────────
+  createDemoForgeJob: (body: {
+    content_piece_id?: string;
+    target_format: "tiktok" | "linkedin" | "instagram";
+    url: string;
+    script: { action: string; selector?: string; text?: string; ms?: number; narration: string }[];
+    music_track_id?: string;
+  }) =>
+    vantageFetch("/v1/demoforge/jobs", { method: "POST", body: JSON.stringify(body) }) as Promise<{ job_id: string; status: string }>,
+
+  getDemoForgeJob: (jobId: string) =>
+    vantageFetch(`/v1/demoforge/jobs/${jobId}`) as Promise<{
+      id: string; status: string; target_format: string; output_url: string | null; error_message: string | null; updated_at: string
+    }>,
+
+  listDemoForgeJobs: () =>
+    vantageFetch("/v1/demoforge/jobs") as Promise<{
+      jobs: { id: string; content_piece_id: string | null; status: string; target_format: string; output_url: string | null; error_message: string | null; created_at: string }[]
+    }>,
 };

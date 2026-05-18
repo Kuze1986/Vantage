@@ -4,6 +4,7 @@ import { generateContent } from "./kuze.js";
 import { auditContent } from "./ilita.js";
 import { pickNextTopic } from "./source.js";
 import { refreshTopicsFromPulse } from "./pulse.js";
+import { runBioLoop } from "./bioloop.js";
 import { channelFormatMap } from "@vantage/prompts";
 import type { ChannelSlug } from "@vantage/prompts";
 
@@ -13,9 +14,10 @@ import { postLinkedIn } from "../adapters/linkedin.js";
 import { postToSubreddit } from "../adapters/reddit.js";
 import { sendEmail } from "../adapters/email.js";
 
-const TICK_MS        = 60_000;       // check queue every 60 seconds
-const AUTO_GEN_TICK  = 300_000;      // check auto-generate every 5 minutes
-const PULSE_TICK_MS  = 30 * 60_000;  // pulse reactor every 30 minutes
+const TICK_MS        = 60_000;            // check queue every 60 seconds
+const AUTO_GEN_TICK  = 300_000;           // check auto-generate every 5 minutes
+const PULSE_TICK_MS  = 30 * 60_000;       // pulse reactor every 30 minutes
+const BIOLOOP_TICK_MS = 24 * 60 * 60_000; // BioLoop weight update every 24 hours
 
 type ChannelRow = {
   slug: string;
@@ -338,10 +340,21 @@ async function pulseTick(): Promise<void> {
   }
 }
 
+// ── BioLoop tick: update generation weights daily ─────────────────────────────
+async function biloopTick(): Promise<void> {
+  try {
+    const { analyzed, updated } = await runBioLoop();
+    console.log(`[bioloop] tick complete — analyzed=${analyzed} updated=${updated}`);
+  } catch (e) {
+    console.error("[bioloop] tick error:", e instanceof Error ? e.message : e);
+  }
+}
+
 // ── Engine boot ───────────────────────────────────────────────────────────────
 let cadenceTimer:  ReturnType<typeof setInterval> | null = null;
 let autoGenTimer:  ReturnType<typeof setInterval> | null = null;
 let pulseTimer:    ReturnType<typeof setInterval> | null = null;
+let biloopTimer:   ReturnType<typeof setInterval> | null = null;
 
 export function startCadenceEngine(): void {
   if (cadenceTimer) return; // already running
@@ -364,11 +377,17 @@ export function startCadenceEngine(): void {
     void pulseTick().catch((e) => console.error("[pulse] tick error:", e));
   }, PULSE_TICK_MS);
 
-  console.log("[cadence] engine started — tick every 60s, auto-gen check every 5m, pulse every 30m");
+  // BioLoop: update generation weights daily (first run after 1h to let data accumulate)
+  biloopTimer = setInterval(() => {
+    void biloopTick();
+  }, BIOLOOP_TICK_MS);
+
+  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | bioloop 24h");
 }
 
 export function stopCadenceEngine(): void {
-  if (cadenceTimer) { clearInterval(cadenceTimer); cadenceTimer = null; }
-  if (autoGenTimer) { clearInterval(autoGenTimer); autoGenTimer = null; }
-  if (pulseTimer)   { clearInterval(pulseTimer);   pulseTimer   = null; }
+  if (cadenceTimer)  { clearInterval(cadenceTimer);  cadenceTimer  = null; }
+  if (autoGenTimer)  { clearInterval(autoGenTimer);  autoGenTimer  = null; }
+  if (pulseTimer)    { clearInterval(pulseTimer);    pulseTimer    = null; }
+  if (biloopTimer)   { clearInterval(biloopTimer);   biloopTimer   = null; }
 }

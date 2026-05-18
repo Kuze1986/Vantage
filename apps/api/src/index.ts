@@ -18,6 +18,9 @@ import { webhooksRoutes } from "./routes/webhooks.js";
 import { channelsAuthedRoutes } from "./routes/channels.js";
 import { queueRoutes } from "./routes/queue.js";
 import { subscribersRoutes } from "./routes/subscribers.js";
+import { biloopRoutes } from "./routes/bioloop.js";
+import { musicRoutes } from "./routes/music.js";
+import { demoforgeRoutes } from "./routes/demoforge.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
 import { startCadenceEngine } from "./services/scheduler.js";
 
@@ -53,6 +56,9 @@ authedV1.route("/dashboard", dashboardRoutes);
 authedV1.route("/channels", channelsAuthedRoutes);
 authedV1.route("/queue", queueRoutes);
 authedV1.route("/subscribers", subscribersRoutes);
+authedV1.route("/bioloop", biloopRoutes);
+authedV1.route("/music", musicRoutes);
+authedV1.route("/demoforge", demoforgeRoutes);
 
 app.route("/v1", authedV1);
 
