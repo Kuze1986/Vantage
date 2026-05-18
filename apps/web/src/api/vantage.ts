@@ -1,14 +1,15 @@
 import { supabase } from "../lib/supabase";
 
-const base = import.meta.env.VITE_VANTAGE_API_URL as string;
+const base = ((import.meta.env.VITE_VANTAGE_API_URL as string | undefined) ?? "").replace(/\/$/, "");
 
 async function vantageFetch(path: string, init: RequestInit = {}) {
+  if (!base) throw new Error("VITE_VANTAGE_API_URL is not set — add it to apps/web/.env.local");
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(`${base.replace(/\/$/, "")}${path}`, { ...init, headers });
+  const res = await fetch(`${base}${path}`, { ...init, headers });
   const text = await res.text();
   let body: unknown = null;
   try {
