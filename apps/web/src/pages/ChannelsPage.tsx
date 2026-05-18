@@ -234,17 +234,25 @@ export function ChannelsPage() {
             Vantage generates scripts and captions, packaged for one-click manual upload.
           </p>
           <div className="vg-channel-grid">
-            {manualChannels.map(({ slug, meta }) => (
-              <ModeTile
-                key={slug}
-                name={slug.charAt(0).toUpperCase() + slug.slice(1)}
-                description={meta.description}
-                icon={meta.icon}
-                accent={meta.accent}
-                meta={meta.meta}
-                badge={{ label: 'Queue only', variant: 'default' }}
-                disabled
-              />
+            {manualChannels.map(({ slug, meta, row }) => (
+              <div key={slug} style={{ display: 'flex', flexDirection: 'column' }}>
+                <ModeTile
+                  name={slug.charAt(0).toUpperCase() + slug.slice(1)}
+                  description={meta.description}
+                  icon={meta.icon}
+                  accent={meta.accent}
+                  meta={meta.meta}
+                  badge={{ label: 'Queue only', variant: 'default' }}
+                  onClick={() => setExpanded(expanded === slug ? null : slug)}
+                />
+                {expanded === slug && row && (
+                  <CadenceForm
+                    slug={slug}
+                    config={row.cadence_config}
+                    onSave={(patch) => saveCadence(slug, patch)}
+                  />
+                )}
+              </div>
             ))}
           </div>
         </Panel>
