@@ -1,7 +1,6 @@
 import { getSupabaseAdmin, getSupabaseForSchema } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
-
-const DEDUP_DAYS = Number(process.env.TOPIC_DEDUP_DAYS ?? "30");
+import { loadSettings } from "../lib/settings.js";
 
 type ShiftRow = Record<string, unknown>;
 
@@ -27,9 +26,9 @@ function rowVertical(row: ShiftRow): string | null {
 }
 
 /** Check if a source_ref was already ingested within the dedup window. */
-async function isDuplicate(sourceProduct: string, sourceRef: string): Promise<boolean> {
+async function isDuplicate(sourceProduct: string, sourceRef: string, dedupDays: number): Promise<boolean> {
   const sb = getSupabaseAdmin();
-  const cutoff = new Date(Date.now() - DEDUP_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const cutoff = new Date(Date.now() - dedupDays * 24 * 60 * 60 * 1000).toISOString();
   const { data } = await sb
     
     .from("topics")
@@ -72,9 +71,9 @@ async function insertTopic(params: {
   return true;
 }
 
-/** Pull topics from shift.questions — all verticals with 30-day dedup. */
+/** Pull topics from shift.questions — respects active_verticals and dedup_days settings. */
 export async function refreshTopicsFromShift(): Promise<{ inserted: number; scanned: number }> {
-  const sb = getSupabaseAdmin();
+  const { dedup_days, active_verticals } = await loadSettings();
   const { data: rows, error } = await getSupabaseForSchema("shift").from("questions").select("*").limit(500);
 
   if (error) {
@@ -96,11 +95,12 @@ export async function refreshTopicsFromShift(): Promise<{ inserted: number; scan
     const topicText  = rowTopicText(row);
     const vertical   = rowVertical(row);
 
-    // Skip rows with no usable content
     if (topicText.length < 15) continue;
 
-    // 30-day deduplication
-    if (sourceRef && await isDuplicate("shift", sourceRef)) continue;
+    // Filter to active verticals if configured
+    if (active_verticals.length > 0 && vertical && !active_verticals.includes(vertical)) continue;
+
+    if (sourceRef && await isDuplicate("shift", sourceRef, dedup_days)) continue;
 
     const ok = await insertTopic({
       source_product:  "shift",
@@ -118,14 +118,18 @@ export async function refreshTopicsFromShift(): Promise<{ inserted: number; scan
     source_type: "system",
     event_type: "shift_pull_complete",
     summary: `Shift pull: ${inserted} inserted, ${list.length} scanned`,
-    payload: { scanned: list.length, inserted },
+    payload: { scanned: list.length, inserted, dedup_days, active_verticals },
   });
 
   return { inserted, scanned: list.length };
 }
 
-/** Pull topics from scripta.lessons — all verticals with 30-day dedup. */
+/** Pull topics from scripta.lessons — respects scripta_enabled and dedup_days settings. */
 export async function refreshTopicsFromScripta(): Promise<{ inserted: number; scanned: number }> {
+  const { dedup_days, scripta_enabled } = await loadSettings();
+  if (!scripta_enabled) {
+    return { inserted: 0, scanned: 0 };
+  }
   const sb = getSupabaseAdmin();
 
   // Scripta schema is flexible — try common table names
@@ -160,7 +164,7 @@ export async function refreshTopicsFromScripta(): Promise<{ inserted: number; sc
     const vertical  = rowVertical(row);
 
     if (topicText.length < 15) continue;
-    if (sourceRef && await isDuplicate("scripta", sourceRef)) continue;
+    if (sourceRef && await isDuplicate("scripta", sourceRef, dedup_days)) continue;
 
     const ok = await insertTopic({
       source_product:  "scripta",

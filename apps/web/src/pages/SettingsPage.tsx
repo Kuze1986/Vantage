@@ -1,4 +1,11 @@
-import { Panel, Badge } from '../ds'
+import React from 'react'
+import { vantageApi } from '../api/vantage'
+import { Panel, Badge, Button } from '../ds'
+
+const ALL_VERTICALS = [
+  'pharmacy-tech', 'healthcare', 'biotech', 'fintech', 'edtech',
+  'legaltech', 'proptech', 'insurtech', 'ai', 'saas', 'marketing', 'hr-tech',
+]
 
 const ENV_VARS = [
   { key: 'VITE_VANTAGE_API_URL',  label: 'API Base URL',       hint: 'Set at build time' },
@@ -12,7 +19,60 @@ function envPresent(key: string): boolean {
   return !!val && val !== 'undefined'
 }
 
+type Settings = {
+  dedup_days:       number
+  scripta_enabled:  boolean
+  bioloop_enabled:  boolean
+  active_verticals: string[]
+}
+
 export function SettingsPage() {
+  const [settings, setSettings]   = React.useState<Settings | null>(null)
+  const [draft, setDraft]         = React.useState<Settings | null>(null)
+  const [saving, setSaving]       = React.useState(false)
+  const [saved, setSaved]         = React.useState(false)
+  const [err, setErr]             = React.useState<string | null>(null)
+
+  const load = React.useCallback(async () => {
+    try {
+      const r = await vantageApi.getSettings()
+      setSettings(r.settings)
+      setDraft(r.settings)
+    } catch (e) {
+      setErr(String((e as Error).message))
+    }
+  }, [])
+
+  React.useEffect(() => { void load() }, [load])
+
+  const handleSave = async () => {
+    if (!draft) return
+    setSaving(true); setErr(null)
+    try {
+      const r = await vantageApi.patchSettings(draft)
+      setSettings(r.settings)
+      setDraft(r.settings)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (e) {
+      setErr(String((e as Error).message))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const patch = <K extends keyof Settings>(key: K, value: Settings[K]) =>
+    setDraft((prev) => prev ? { ...prev, [key]: value } : prev)
+
+  const toggleVertical = (v: string) => {
+    if (!draft) return
+    const current = draft.active_verticals
+    const next = current.includes(v) ? current.filter((x) => x !== v) : [...current, v]
+    patch('active_verticals', next)
+  }
+
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(settings)
+
   return (
     <>
       <div className="vg-page-header">
@@ -20,8 +80,170 @@ export function SettingsPage() {
         <p className="vg-page-sub">System configuration and environment status</p>
       </div>
 
+      {err && <div className="vg-error" style={{ marginBottom: 16 }}>{err}</div>}
+
       <div className="vg-stack">
-        {/* Environment */}
+
+        {/* ── Pipeline configuration ─────────────────────────────────────── */}
+        <Panel title="Pipeline Configuration" titleAccent="amber">
+          {!draft ? (
+            <p className="vg-empty">Loading…</p>
+          ) : (
+            <div style={{ display: 'grid', gap: 16 }}>
+
+              {/* Topic dedup window */}
+              <div>
+                <label className="vg-label" style={{ display: 'block', marginBottom: 6 }}>
+                  Topic deduplication window (days)
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input
+                    type="number"
+                    className="vg-input"
+                    min={1} max={365}
+                    value={draft.dedup_days}
+                    onChange={(e) => patch('dedup_days', Math.max(1, Math.min(365, parseInt(e.target.value, 10) || 30)))}
+                    style={{ width: 80 }}
+                  />
+                  <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)' }}>
+                    Same source_ref won't be re-ingested within this window
+                  </span>
+                </div>
+              </div>
+
+              {/* Scripta toggle */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontFamily: 'var(--nx-sans)', fontSize: 13, color: 'var(--nx-text-1)', marginBottom: 2 }}>
+                    Scripta integration
+                  </div>
+                  <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)' }}>
+                    Pull lesson highlights from scripta.lessons as topic source
+                  </div>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={draft.scripta_enabled}
+                    onChange={(e) => patch('scripta_enabled', e.target.checked)}
+                    style={{ accentColor: 'var(--nx-amber)', width: 16, height: 16 }}
+                  />
+                  <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: draft.scripta_enabled ? 'var(--nx-amber)' : 'var(--nx-text-4)' }}>
+                    {draft.scripta_enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </label>
+              </div>
+
+              {/* BioLoop toggle */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontFamily: 'var(--nx-sans)', fontSize: 13, color: 'var(--nx-text-1)', marginBottom: 2 }}>
+                    BioLoop learning
+                  </div>
+                  <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)' }}>
+                    Daily cron updates generation_weights from engagement patterns
+                  </div>
+                </div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={draft.bioloop_enabled}
+                    onChange={(e) => patch('bioloop_enabled', e.target.checked)}
+                    style={{ accentColor: 'var(--nx-amber)', width: 16, height: 16 }}
+                  />
+                  <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: draft.bioloop_enabled ? 'var(--nx-amber)' : 'var(--nx-text-4)' }}>
+                    {draft.bioloop_enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                </label>
+              </div>
+
+              {/* Active verticals */}
+              <div>
+                <label className="vg-label" style={{ display: 'block', marginBottom: 6 }}>
+                  Active Shift verticals
+                  <span style={{ fontFamily: 'var(--nx-mono)', fontWeight: 400, fontSize: 9, color: 'var(--nx-text-4)', marginLeft: 8 }}>
+                    {draft.active_verticals.length === 0 ? 'all verticals' : `${draft.active_verticals.length} selected`}
+                  </span>
+                </label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {ALL_VERTICALS.map((v) => {
+                    const active = draft.active_verticals.length === 0 || draft.active_verticals.includes(v)
+                    const selected = draft.active_verticals.includes(v)
+                    return (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => toggleVertical(v)}
+                        style={{
+                          fontFamily:  'var(--nx-mono)',
+                          fontSize:    10,
+                          padding:     '3px 10px',
+                          border:      `1px solid ${selected ? 'var(--nx-amber)' : 'var(--nx-border)'}`,
+                          borderRadius: 4,
+                          background:  selected ? 'rgba(245,158,11,0.12)' : 'transparent',
+                          color:       selected ? 'var(--nx-amber)' : active ? 'var(--nx-text-3)' : 'var(--nx-text-4)',
+                          cursor:      'pointer',
+                          opacity:     draft.active_verticals.length > 0 && !selected ? 0.5 : 1,
+                        }}
+                      >
+                        {v}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginTop: 6 }}>
+                  Deselect all to pull from every vertical. Select specific ones to filter Shift pulls.
+                </div>
+                {draft.active_verticals.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => patch('active_verticals', [])}
+                    style={{ marginTop: 6, fontFamily: 'var(--nx-mono)', fontSize: 9, background: 'none', border: 'none', color: 'var(--nx-text-4)', cursor: 'pointer', padding: 0 }}
+                  >
+                    ✕ Clear selection (use all verticals)
+                  </button>
+                )}
+              </div>
+
+              {/* Implemented-elsewhere note */}
+              <div style={{ borderTop: '1px solid var(--nx-border)', paddingTop: 12 }}>
+                <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', letterSpacing: '0.08em', marginBottom: 8 }}>
+                  CONFIGURED PER CHANNEL (IN CHANNELS PAGE)
+                </div>
+                <div style={{ display: 'grid', gap: 6 }}>
+                  {[
+                    { label: 'Auto-approve toggle', note: 'Channels → expand channel → Cadence form' },
+                    { label: 'Posting cadence (posts per day)', note: 'Channels → expand channel → Cadence form' },
+                  ].map(({ label, note }) => (
+                    <div key={label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <span style={{ fontFamily: 'var(--nx-sans)', fontSize: 12, color: 'var(--nx-text-2)' }}>{label}</span>
+                        <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginLeft: 10 }}>{note}</span>
+                      </div>
+                      <Badge label="Active" variant="active" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Save */}
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <Button
+                  label={saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save Settings'}
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleSave()}
+                  disabled={saving || !isDirty}
+                />
+                {isDirty && !saving && (
+                  <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-amber)' }}>Unsaved changes</span>
+                )}
+              </div>
+            </div>
+          )}
+        </Panel>
+
+        {/* ── Environment ────────────────────────────────────────────────── */}
         <Panel title="Environment" titleAccent="amber">
           <div style={{ display: 'grid', gap: 10 }}>
             {ENV_VARS.map(({ key, label, hint }) => {
@@ -43,7 +265,7 @@ export function SettingsPage() {
           </div>
         </Panel>
 
-        {/* API config */}
+        {/* ── API config ─────────────────────────────────────────────────── */}
         <Panel title="API Configuration">
           <div style={{ display: 'grid', gap: 10 }}>
             {[
@@ -62,33 +284,15 @@ export function SettingsPage() {
           </div>
         </Panel>
 
-        {/* Build info */}
+        {/* ── Build ──────────────────────────────────────────────────────── */}
         <Panel title="Build">
           <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', letterSpacing: '0.06em', margin: 0 }}>
             All API keys (Anthropic, X OAuth, LinkedIn, Reddit, Resend, OpenAI, ElevenLabs) are set
-            server-side on the <span style={{ color: 'var(--nx-amber)' }}>axis-api</span> Railway service.
+            server-side on the <span style={{ color: 'var(--nx-amber)' }}>vantage-api</span> Railway service.
             No sensitive keys are bundled into this SPA.
           </p>
         </Panel>
 
-        {/* Upcoming settings */}
-        <Panel title="Upcoming Configuration" titleAccent="cyan">
-          <div style={{ display: 'grid', gap: 8 }}>
-            {[
-              'Auto-approve toggle (per channel)',
-              'Posting cadence (posts per day / week per channel)',
-              'Topic deduplication window (days)',
-              'Active Shift verticals (source weighting)',
-              'Scripta integration toggle',
-              'BioLoop learning toggle',
-            ].map((item) => (
-              <div key={item} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontFamily: 'var(--nx-sans)', fontSize: 12.5, color: 'var(--nx-text-2)' }}>{item}</span>
-                <Badge label="Phase 1" variant="soon" />
-              </div>
-            ))}
-          </div>
-        </Panel>
       </div>
     </>
   )

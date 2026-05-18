@@ -167,6 +167,33 @@ export const vantageApi = {
   removeSubscriber: (id: string) =>
     vantageFetch(`/v1/subscribers/${id}`, { method: "DELETE" }) as Promise<{ ok: boolean }>,
 
+  // ── Settings ──────────────────────────────────────────────────────────────
+  getSettings: () =>
+    vantageFetch("/v1/settings") as Promise<{
+      settings: {
+        dedup_days: number;
+        scripta_enabled: boolean;
+        bioloop_enabled: boolean;
+        active_verticals: string[];
+      }
+    }>,
+
+  patchSettings: (patch: {
+    dedup_days?:       number;
+    scripta_enabled?:  boolean;
+    bioloop_enabled?:  boolean;
+    active_verticals?: string[];
+  }) =>
+    vantageFetch("/v1/settings", { method: "PATCH", body: JSON.stringify(patch) }) as Promise<{
+      ok: boolean;
+      settings: {
+        dedup_days: number;
+        scripta_enabled: boolean;
+        bioloop_enabled: boolean;
+        active_verticals: string[];
+      }
+    }>,
+
   // ── Generate (Phase 2 additions) ─────────────────────────────────────────
   generateWithImage: (channel: string, topic_id: string) =>
     vantageFetch(`/v1/generate/${channel}`, {

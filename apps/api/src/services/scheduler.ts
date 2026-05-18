@@ -5,6 +5,7 @@ import { auditContent } from "./ilita.js";
 import { pickNextTopic } from "./source.js";
 import { refreshTopicsFromPulse } from "./pulse.js";
 import { runBioLoop } from "./bioloop.js";
+import { loadSettings } from "../lib/settings.js";
 import { channelFormatMap } from "@vantage/prompts";
 import type { ChannelSlug } from "@vantage/prompts";
 
@@ -343,6 +344,11 @@ async function pulseTick(): Promise<void> {
 // ── BioLoop tick: update generation weights daily ─────────────────────────────
 async function biloopTick(): Promise<void> {
   try {
+    const { bioloop_enabled } = await loadSettings();
+    if (!bioloop_enabled) {
+      console.log("[bioloop] skipped — disabled via settings");
+      return;
+    }
     const { analyzed, updated } = await runBioLoop();
     console.log(`[bioloop] tick complete — analyzed=${analyzed} updated=${updated}`);
   } catch (e) {
