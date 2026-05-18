@@ -17,6 +17,7 @@ import { dashboardRoutes } from "./routes/dashboard.js";
 import { webhooksRoutes } from "./routes/webhooks.js";
 import { channelsAuthedRoutes } from "./routes/channels.js";
 import { queueRoutes } from "./routes/queue.js";
+import { subscribersRoutes } from "./routes/subscribers.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
 import { startCadenceEngine } from "./services/scheduler.js";
 
@@ -31,7 +32,7 @@ app.use(
   cors({
     origin: (origin) => (corsOrigins.includes(origin) ? origin : corsOrigins[0]),
     allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+    allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
   }),
 );
@@ -51,6 +52,7 @@ authedV1.route("/schedule", scheduleRoutes);
 authedV1.route("/dashboard", dashboardRoutes);
 authedV1.route("/channels", channelsAuthedRoutes);
 authedV1.route("/queue", queueRoutes);
+authedV1.route("/subscribers", subscribersRoutes);
 
 app.route("/v1", authedV1);
 

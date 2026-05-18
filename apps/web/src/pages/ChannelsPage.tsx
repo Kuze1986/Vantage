@@ -1,6 +1,6 @@
 import React from 'react'
 import { vantageApi } from '../api/vantage'
-import type { ChannelStatus } from '../api/vantage'
+import type { ChannelStatus, Subscriber } from '../api/vantage'
 import { Panel, ModeTile, Badge, Button } from '../ds'
 
 const CHANNEL_META: Record<string, {
@@ -104,6 +104,115 @@ function CadenceForm({ slug, config, onSave }: {
         onClick={() => void handleSave()}
         disabled={saving}
       />
+    </div>
+  )
+}
+
+function SubscribersPanel() {
+  const [subscribers, setSubscribers] = React.useState<Subscriber[]>([])
+  const [email, setEmail]             = React.useState('')
+  const [name, setName]               = React.useState('')
+  const [adding, setAdding]           = React.useState(false)
+  const [err, setErr]                 = React.useState<string | null>(null)
+
+  const load = React.useCallback(async () => {
+    try {
+      const r = await vantageApi.listSubscribers()
+      setSubscribers(r.subscribers)
+    } catch (e) { setErr(String((e as Error).message)) }
+  }, [])
+
+  React.useEffect(() => { void load() }, [load])
+
+  const handleAdd = async () => {
+    if (!email.trim()) return
+    setAdding(true); setErr(null)
+    try {
+      await vantageApi.addSubscriber(email.trim(), name.trim() || undefined)
+      setEmail(''); setName('')
+      await load()
+    } catch (e) { setErr(String((e as Error).message)) }
+    finally { setAdding(false) }
+  }
+
+  const handleRemove = async (id: string) => {
+    try {
+      await vantageApi.removeSubscriber(id)
+      await load()
+    } catch (e) { setErr(String((e as Error).message)) }
+  }
+
+  const active = subscribers.filter((s) => !s.unsubscribed_at)
+  const inactive = subscribers.filter((s) => s.unsubscribed_at)
+
+  return (
+    <div style={{ marginTop: 12, borderTop: '1px solid var(--nx-border)', paddingTop: 12 }}>
+      <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-3)', letterSpacing: '0.08em', marginBottom: 8 }}>
+        NEWSLETTER SUBSCRIBERS — {active.length} active{inactive.length > 0 ? `, ${inactive.length} unsubscribed` : ''}
+      </div>
+      {err && <div className="vg-error" style={{ marginBottom: 8, fontSize: 11 }}>{err}</div>}
+
+      {/* Add subscriber */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        <input
+          type="email"
+          className="vg-input"
+          placeholder="email@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void handleAdd() }}
+          style={{ flex: 2 }}
+        />
+        <input
+          type="text"
+          className="vg-input"
+          placeholder="Name (optional)"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          style={{ flex: 1 }}
+        />
+        <Button
+          label={adding ? '…' : '+ Add'}
+          variant="secondary"
+          size="sm"
+          onClick={() => void handleAdd()}
+          disabled={adding || !email.trim()}
+        />
+      </div>
+
+      {/* Subscriber list */}
+      {active.length === 0 ? (
+        <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)' }}>No active subscribers yet</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto' }}>
+          {active.map((s) => (
+            <div
+              key={s.id}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '4px 8px', background: 'var(--nx-surface-2)',
+                borderRadius: 4, border: '1px solid var(--nx-border)',
+              }}
+            >
+              <div>
+                <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-text-1)' }}>{s.email}</span>
+                {s.name && <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', marginLeft: 8 }}>{s.name}</span>}
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleRemove(s.id)}
+                style={{
+                  fontFamily: 'var(--nx-mono)', fontSize: 10, background: 'none',
+                  border: 'none', color: 'var(--nx-text-4)', cursor: 'pointer', padding: '2px 4px',
+                }}
+                title="Unsubscribe"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -212,11 +321,14 @@ export function ChannelsPage() {
 
               {/* Cadence config (expandable) */}
               {expanded === slug && row && (
-                <CadenceForm
-                  slug={slug}
-                  config={row.cadence_config}
-                  onSave={(patch) => saveCadence(slug, patch)}
-                />
+                <>
+                  <CadenceForm
+                    slug={slug}
+                    config={row.cadence_config}
+                    onSave={(patch) => saveCadence(slug, patch)}
+                  />
+                  {slug === 'email' && <SubscribersPanel />}
+                </>
               )}
               {expanded === slug && !row && (
                 <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', marginTop: 8 }}>

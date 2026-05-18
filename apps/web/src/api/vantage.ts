@@ -42,12 +42,38 @@ export type ChannelStatus = {
   connected_at: string | null;
 };
 
+export type ChannelBreakdownEntry = {
+  published_today: number;
+  published_7d: number;
+  auditing: number;
+  queued: number;
+};
+
+export type TopPiece = {
+  id: string;
+  channel_slug: string;
+  published_at: string;
+  engagement_count: number;
+  preview: string;
+};
+
 export type DashboardOverview = {
   activityLast24h: { id: string; source: string; summary: string; occurred_at: string; event_type: string }[];
   queueDepth: Record<string, number>;
   publishedToday: Record<string, number>;
-  channelStatus: { slug: string; enabled: boolean; connected: boolean; posts_per_day: number }[];
+  channelStatus: { slug: string; enabled: boolean; connected: boolean; posts_per_day: number; published_today: number; published_7d: number; auditing: number; queued: number }[];
+  channelBreakdown: Record<string, ChannelBreakdownEntry>;
+  topPieces: TopPiece[];
   recentEngagement: unknown[];
+};
+
+export type Subscriber = {
+  id: string;
+  email: string;
+  name: string | null;
+  tags: string[];
+  subscribed_at: string;
+  unsubscribed_at: string | null;
 };
 
 export const vantageApi = {
@@ -127,4 +153,17 @@ export const vantageApi = {
   // Legacy alias
   startXOAuth: () =>
     vantageFetch("/v1/channels/x/auth/start", { method: "POST" }) as Promise<{ authorize_url: string }>,
+
+  // ── Subscribers ───────────────────────────────────────────────────────────
+  listSubscribers: () =>
+    vantageFetch("/v1/subscribers") as Promise<{ subscribers: Subscriber[] }>,
+
+  addSubscriber: (email: string, name?: string, tags?: string[]) =>
+    vantageFetch("/v1/subscribers", {
+      method: "POST",
+      body: JSON.stringify({ email, ...(name ? { name } : {}), ...(tags ? { tags } : {}) }),
+    }) as Promise<{ ok: boolean; subscriber: { id: string; email: string } }>,
+
+  removeSubscriber: (id: string) =>
+    vantageFetch(`/v1/subscribers/${id}`, { method: "DELETE" }) as Promise<{ ok: boolean }>,
 };

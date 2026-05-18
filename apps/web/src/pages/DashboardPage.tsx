@@ -94,6 +94,7 @@ export function DashboardPage() {
   const publishedToday = overview?.publishedToday ?? {}
   const activity       = overview?.activityLast24h ?? []
   const channelStatus  = overview?.channelStatus ?? []
+  const topPieces      = overview?.topPieces ?? []
 
   const totalActive = Object.values(queueDepth).reduce((s, v) => s + v, 0)
   const totalQueued = (queueDepth['queued'] ?? 0) + (queueDepth['approved'] ?? 0)
@@ -294,6 +295,46 @@ export function DashboardPage() {
                     {count}
                   </span>
                 </span>
+              ))}
+            </div>
+          </Panel>
+        </div>
+      )}
+
+      {/* Top performing pieces (last 7d) */}
+      {topPieces.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Panel title="Top Pieces — 7d" titleAccent="green">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {topPieces.map((p) => (
+                <div
+                  key={p.id}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 10,
+                    padding: '8px 10px',
+                    background: 'var(--nx-surface-2)',
+                    border: '1px solid var(--nx-border)',
+                    borderRadius: 6,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-text-2)', marginBottom: 2 }}>
+                      {p.preview || '(no preview)'}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)' }}>{p.channel_slug}</span>
+                      <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)' }}>
+                        {new Date(p.published_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                    <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 16, fontWeight: 700, color: 'var(--nx-green, #22c55e)' }}>
+                      {p.engagement_count}
+                    </div>
+                    <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)' }}>events</div>
+                  </div>
+                </div>
               ))}
             </div>
           </Panel>
