@@ -1,4 +1,7 @@
 import "dotenv/config";
+// Node.js < 22 has no native WebSocket — polyfill before supabase-js loads.
+import { WebSocket as _WS } from "ws";
+if (!("WebSocket" in globalThis)) (globalThis as Record<string, unknown>).WebSocket = _WS;
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
