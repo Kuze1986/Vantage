@@ -4,7 +4,7 @@ import type { DashboardOverview } from '../api/vantage'
 import { supabase } from '../lib/supabase'
 import { StatCard, Panel, Badge } from '../ds'
 
-type Topic = { id: string; topic_text: string; vertical: string | null }
+type Topic = { id: string; topic_text: string; vertical: string | null; source_product?: string; priority?: number }
 type ActivityEvent = DashboardOverview['activityLast24h'][number]
 
 const CHANNEL_SLUGS = ['x', 'linkedin', 'reddit', 'email', 'tiktok', 'instagram', 'facebook'] as const
@@ -22,6 +22,7 @@ export function DashboardPage() {
   const [msg, setMsg]             = React.useState<string | null>(null)
   const [generating, setGenerating] = React.useState<string | null>(null) // `${topicId}:${channel}`
   const [pulling, setPulling]     = React.useState(false)
+  const [pulsing, setPulsing]     = React.useState(false)
   const [genChannel, setGenChannel] = React.useState<ChannelSlug>('x')
 
   const loadDash = React.useCallback(async () => {
@@ -66,6 +67,16 @@ export function DashboardPage() {
       await loadTopics(); await loadDash()
     } catch (e) { setErr(String((e as Error).message)) }
     finally { setPulling(false) }
+  }
+
+  const handlePulseScan = async () => {
+    setPulsing(true); setErr(null); setMsg(null)
+    try {
+      const r = await vantageApi.pulseScan()
+      setMsg(`Pulse scan complete — ${r.inserted} new signals from ${r.scanned} scanned`)
+      await loadTopics(); await loadDash()
+    } catch (e) { setErr(String((e as Error).message)) }
+    finally { setPulsing(false) }
   }
 
   const handleGenerate = async (topicId: string) => {
@@ -132,6 +143,18 @@ export function DashboardPage() {
           titleAccent="amber"
           action={{ label: pulling ? 'Pulling…' : 'Pull Topics', onClick: () => void handlePullTopics() }}
         >
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+            <button
+              type="button"
+              className="nx-btn nx-btn--ghost nx-btn--sm"
+              disabled={pulsing}
+              onClick={() => void handlePulseScan()}
+              title="Scan HN, Reddit, and news for trending external signals"
+              style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, letterSpacing: '0.06em' }}
+            >
+              {pulsing ? '⚡ Scanning…' : '⚡ Pulse Reactor'}
+            </button>
+          </div>
           {/* Channel selector for generation */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
             <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', alignSelf: 'center', marginRight: 2 }}>
@@ -170,7 +193,12 @@ export function DashboardPage() {
                       <div className="vg-topic-text">
                         {t.topic_text.slice(0, 160)}{t.topic_text.length > 160 ? '…' : ''}
                       </div>
-                      {t.vertical && <div className="vg-topic-vert">{t.vertical}</div>}
+                      <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                        {t.vertical && <div className="vg-topic-vert">{t.vertical}</div>}
+                        {t.source_product === 'pulse' && (
+                          <div className="vg-topic-vert" style={{ color: 'var(--nx-cyan)', borderColor: 'var(--nx-cyan)' }}>⚡ pulse</div>
+                        )}
+                      </div>
                     </div>
                     <button
                       type="button"

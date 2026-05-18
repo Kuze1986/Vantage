@@ -3,6 +3,7 @@ import { logActivity } from "../lib/activity.js";
 import { generateContent } from "./kuze.js";
 import { auditContent } from "./ilita.js";
 import { pickNextTopic } from "./source.js";
+import { refreshTopicsFromPulse } from "./pulse.js";
 import { channelFormatMap } from "@vantage/prompts";
 import type { ChannelSlug } from "@vantage/prompts";
 
@@ -12,8 +13,9 @@ import { postLinkedIn } from "../adapters/linkedin.js";
 import { postToSubreddit } from "../adapters/reddit.js";
 import { sendEmail } from "../adapters/email.js";
 
-const TICK_MS        = 60_000;  // check queue every 60 seconds
-const AUTO_GEN_TICK  = 300_000; // check auto-generate every 5 minutes
+const TICK_MS        = 60_000;       // check queue every 60 seconds
+const AUTO_GEN_TICK  = 300_000;      // check auto-generate every 5 minutes
+const PULSE_TICK_MS  = 30 * 60_000;  // pulse reactor every 30 minutes
 
 type ChannelRow = {
   slug: string;
@@ -315,28 +317,58 @@ async function autoGenerateTick(): Promise<void> {
   }
 }
 
+// ── Pulse tick: ingest external signals every 30 min ─────────────────────────
+async function pulseTick(): Promise<void> {
+  const sb = getSupabaseAdmin();
+  const { data: ch } = await sb
+    .from("channels")
+    .select("cadence_config")
+    .eq("slug", "reddit")
+    .maybeSingle();
+  const subreddits: string[] =
+    (ch?.cadence_config as { subreddits?: string[] } | null)?.subreddits ?? [];
+
+  try {
+    const { inserted, scanned } = await refreshTopicsFromPulse(subreddits);
+    if (inserted > 0) {
+      console.log(`[pulse] ${inserted} new signals inserted from ${scanned} scanned`);
+    }
+  } catch (e) {
+    console.error("[pulse] tick error:", e instanceof Error ? e.message : e);
+  }
+}
+
 // ── Engine boot ───────────────────────────────────────────────────────────────
-let cadenceTimer:     ReturnType<typeof setInterval> | null = null;
-let autoGenTimer:     ReturnType<typeof setInterval> | null = null;
+let cadenceTimer:  ReturnType<typeof setInterval> | null = null;
+let autoGenTimer:  ReturnType<typeof setInterval> | null = null;
+let pulseTimer:    ReturnType<typeof setInterval> | null = null;
 
 export function startCadenceEngine(): void {
   if (cadenceTimer) return; // already running
 
-  // Run immediately, then on interval
+  // Cadence: publish due pieces every 60s
   void cadenceTick().catch((e) => console.error("[cadence] tick error:", e));
   cadenceTimer = setInterval(() => {
     void cadenceTick().catch((e) => console.error("[cadence] tick error:", e));
   }, TICK_MS);
 
+  // Auto-generate: fill quotas every 5m
   void autoGenerateTick().catch((e) => console.error("[auto-gen] tick error:", e));
   autoGenTimer = setInterval(() => {
     void autoGenerateTick().catch((e) => console.error("[auto-gen] tick error:", e));
   }, AUTO_GEN_TICK);
 
-  console.log("[cadence] engine started — tick every 60s, auto-gen check every 5m");
+  // Pulse reactor: ingest external signals every 30m
+  void pulseTick().catch((e) => console.error("[pulse] initial tick error:", e));
+  pulseTimer = setInterval(() => {
+    void pulseTick().catch((e) => console.error("[pulse] tick error:", e));
+  }, PULSE_TICK_MS);
+
+  console.log("[cadence] engine started — tick every 60s, auto-gen check every 5m, pulse every 30m");
 }
 
 export function stopCadenceEngine(): void {
   if (cadenceTimer) { clearInterval(cadenceTimer); cadenceTimer = null; }
   if (autoGenTimer) { clearInterval(autoGenTimer); autoGenTimer = null; }
+  if (pulseTimer)   { clearInterval(pulseTimer);   pulseTimer   = null; }
 }

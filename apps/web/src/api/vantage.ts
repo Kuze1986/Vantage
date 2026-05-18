@@ -59,6 +59,11 @@ export const vantageApi = {
       shift: { inserted: number; scanned: number };
       scripta: { inserted: number; scanned: number };
     }>,
+  pulseScan: () =>
+    vantageFetch("/v1/source/pulse", { method: "POST" }) as Promise<{
+      inserted: number;
+      scanned: number;
+    }>,
 
   // ── Generate ──────────────────────────────────────────────────────────────
   generate: (channel: string, topic_id: string, opts?: { subreddit?: string }) =>
