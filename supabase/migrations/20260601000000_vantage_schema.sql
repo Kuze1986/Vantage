@@ -17,9 +17,12 @@ create table vantage.channels (
   display_name text not null,
   auth_method text not null check (auth_method in ('oauth','api_key','manual')),
   auth_state jsonb,
+  access_token_hash text,
   enabled boolean default false,
   cadence_config jsonb not null default '{}',
-  created_at timestamptz default now()
+  connected_at timestamptz,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
 );
 
 create table vantage.topics (
@@ -90,9 +93,15 @@ create table vantage.activity_events (
 
 create index activity_events_time_idx on vantage.activity_events (occurred_at desc);
 
--- Seed channel row for X
-insert into vantage.channels (slug, display_name, auth_method, enabled, cadence_config)
-values ('x', 'X (Twitter)', 'oauth', false, '{}');
+-- Seed all channels
+insert into vantage.channels (slug, display_name, auth_method, enabled, cadence_config) values
+  ('x',         'X (Twitter)',  'oauth',   false, '{"posts_per_day":3,"posting_hours":[9,13,18]}'),
+  ('linkedin',  'LinkedIn',     'oauth',   false, '{"posts_per_day":1,"posting_hours":[9]}'),
+  ('reddit',    'Reddit',       'oauth',   false, '{"posts_per_day":2,"posting_hours":[10,17],"subreddits":[]}'),
+  ('email',     'Email',        'api_key', false, '{"newsletter_day":"tuesday"}'),
+  ('tiktok',    'TikTok',       'manual',  false, '{}'),
+  ('instagram', 'Instagram',    'manual',  false, '{}'),
+  ('facebook',  'Facebook',     'manual',  false, '{}');
 
 alter table vantage.brand_voice enable row level security;
 alter table vantage.channels enable row level security;
