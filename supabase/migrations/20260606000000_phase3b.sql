@@ -14,7 +14,7 @@ CREATE OR REPLACE VIEW public.topics AS
     id, source_product, source_ref,
     vertical, topic_text, priority,
     context_payload, used_at, recycle_after,
-    created_at, updated_at
+    created_at
   FROM vantage.topics;
 
 GRANT SELECT ON public.topics TO anon, authenticated;

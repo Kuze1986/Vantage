@@ -261,7 +261,6 @@ export async function identifyEvergreenTopics(): Promise<{ scanned: number; mark
       await sb.from("topics").update({
         recycle_after: recycleAfter,
         used_at:       null, // reset so it can be picked again after the recycle window
-        updated_at:    new Date().toISOString(),
       }).eq("id", topicId);
       marked++;
     }
