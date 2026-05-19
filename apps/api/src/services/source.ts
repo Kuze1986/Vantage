@@ -208,13 +208,17 @@ export async function listNextTopics(limit: number): Promise<{
   priority: number;
   source_ref: string | null;
   source_product: string;
+  recycle_after?: string | null;
 }[]> {
-  const sb = getSupabaseAdmin();
+  const sb  = getSupabaseAdmin();
+  const now = new Date().toISOString();
+
+  // 3B-6: Include topics that are either unused (used_at IS NULL) OR
+  // are marked for recycling and have passed their recycle_after window.
   const { data, error } = await sb
-    
     .from("topics")
-    .select("id, topic_text, vertical, priority, source_ref, source_product")
-    .is("used_at", null)
+    .select("id, topic_text, vertical, priority, source_ref, source_product, recycle_after")
+    .or(`used_at.is.null,recycle_after.lte.${now}`)
     .order("priority", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -222,6 +226,7 @@ export async function listNextTopics(limit: number): Promise<{
   return (data ?? []) as {
     id: string; topic_text: string; vertical: string | null;
     priority: number; source_ref: string | null; source_product: string;
+    recycle_after?: string | null;
   }[];
 }
 

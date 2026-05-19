@@ -1,6 +1,7 @@
 import React from 'react'
 import { vantageApi } from '../api/vantage'
 import { Panel, Badge, DataTable } from '../ds'
+import { PreviewModal } from '../ds/PreviewModal'
 import type { BadgeVariant } from '../ds'
 import type { ReactNode } from 'react'
 
@@ -130,6 +131,7 @@ export function QueuePage() {
   const [busy, setBusy]           = React.useState<string | null>(null)
   const [manualUrl, setManualUrl] = React.useState<Record<string, string>>({})
   const [expandedScript, setExpandedScript] = React.useState<Set<string>>(new Set())
+  const [previewPiece, setPreviewPiece] = React.useState<Piece | null>(null)
 
   const load = React.useCallback(async () => {
     setErr(null)
@@ -230,6 +232,15 @@ export function QueuePage() {
     ),
     actions: (
       <div className="vg-row">
+        {/* 3B-5: Preview button — opens per-format preview modal */}
+        <button
+          type="button"
+          className="nx-btn nx-btn--ghost nx-btn--sm"
+          onClick={() => setPreviewPiece(p)}
+          title="Preview how this content will render on the platform"
+        >
+          👁 Preview
+        </button>
         {p.status === 'auditing' && (
           <button
             type="button"
@@ -323,6 +334,10 @@ export function QueuePage() {
 
   return (
     <>
+      {/* 3B-5: Preview modal */}
+      {previewPiece && (
+        <PreviewModal piece={previewPiece} onClose={() => setPreviewPiece(null)} />
+      )}
       <div className="vg-page-header">
         <h1 className="vg-page-title">Content Queue</h1>
         <p className="vg-page-sub">Review, audit, and publish generated content</p>

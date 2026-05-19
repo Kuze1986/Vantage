@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
+import { RateLimitError, parseRetryAfter } from "../lib/rate-limit-error.js";
 
 const LI_AUTH   = "https://www.linkedin.com/oauth/v2/authorization";
 const LI_TOKEN  = "https://www.linkedin.com/oauth/v2/accessToken";
@@ -159,6 +160,11 @@ export async function postLinkedIn(body: string, _headline?: string, imageUrl?: 
   });
   const text = await res.text();
   if (!res.ok) {
+    // 3B-4: rate limit detection
+    if (res.status === 429) {
+      const delayMs = parseRetryAfter(res.headers.get("retry-after") ?? res.headers.get("x-li-retry-after"), 5 * 60_000);
+      throw new RateLimitError(`LinkedIn rate limit — retry after ${Math.round(delayMs / 60000)}m`, delayMs);
+    }
     await logActivity({ source: "adapter:linkedin", source_type: "adapter", event_type: "post_failed", summary: text.slice(0, 500), payload: {} });
     throw new Error(`LinkedIn post failed: ${res.status} ${text.slice(0, 200)}`);
   }

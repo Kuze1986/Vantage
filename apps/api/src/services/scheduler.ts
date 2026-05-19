@@ -4,9 +4,11 @@ import { generateContent } from "./kuze.js";
 import { auditContent } from "./ilita.js";
 import { pickNextTopic } from "./source.js";
 import { refreshTopicsFromPulse } from "./pulse.js";
-import { runBioLoop } from "./bioloop.js";
+import { runBioLoop, identifyEvergreenTopics } from "./bioloop.js";
 import { pollRedditEngagement } from "./reddit-engagement.js";
 import { loadSettings } from "../lib/settings.js";
+import { sendAlert } from "../lib/alert.js";
+import { RateLimitError } from "../lib/rate-limit-error.js";
 import { channelFormatMap } from "@vantage/prompts";
 import type { ChannelSlug } from "@vantage/prompts";
 
@@ -142,11 +144,29 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
       payload: { content_piece_id: piece.id, external_post_id: externalId, channel: slug },
     });
   } catch (e) {
-    const msg          = e instanceof Error ? e.message : String(e);
+    const msg        = e instanceof Error ? e.message : String(e);
+    const now        = new Date();
+
+    // 3B-4: Rate-limit errors reschedule without burning a retry slot
+    if (e instanceof RateLimitError) {
+      const retryAfter = e.retryAfter.toISOString();
+      await sb.from("content_pieces").update({
+        retry_after: retryAfter,
+        audit_notes: `Rate limited: ${msg.slice(0, 400)}`,
+        updated_at:  now.toISOString(),
+      }).eq("id", piece.id);
+      await logActivity({
+        source: `adapter:${slug}`, source_type: "adapter",
+        event_type: "rate_limit_rescheduled",
+        summary: `Rate limited — rescheduled ${slug} piece ${piece.id} for ${retryAfter}`,
+        payload: { content_piece_id: piece.id, channel: slug, retry_after: retryAfter },
+      });
+      throw e;
+    }
+
     const retryCount   = piece.retry_count ?? 0;
     const delayMs      = RETRY_DELAYS_MS[retryCount];
     const willRetry    = delayMs !== undefined;
-    const now          = new Date();
 
     if (willRetry) {
       // 3A-6: Schedule a retry with exponential backoff — keep status "queued"
@@ -164,7 +184,7 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
         payload: { content_piece_id: piece.id, channel: slug, retry_count: retryCount + 1, retry_after: retryAfter },
       });
     } else {
-      // Max retries exhausted — mark as failed
+      // Max retries exhausted — mark as failed permanently
       await sb.from("content_pieces").update({
         status:      "failed",
         audit_notes: `Failed after ${retryCount} retries: ${msg.slice(0, 400)}`,
@@ -176,6 +196,12 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
         summary: `Permanently failed after ${retryCount} retries: ${msg.slice(0, 400)}`,
         payload: { content_piece_id: piece.id, channel: slug, retry_count: retryCount },
       });
+      // 3B-1: Alert on permanent failure
+      void sendAlert(
+        `Publish failed: ${slug}`,
+        `Piece ${piece.id} permanently failed after ${retryCount} retries.\n\nError: ${msg}`,
+        `publish_fail_${slug}`,
+      );
     }
     throw e;
   }
@@ -386,7 +412,7 @@ async function pulseTick(): Promise<void> {
   }
 }
 
-// ── BioLoop tick: update generation weights daily ─────────────────────────────
+// ── BioLoop tick: update generation weights + evergreen recycling daily ───────
 async function biloopTick(): Promise<void> {
   try {
     const { bioloop_enabled } = await loadSettings();
@@ -396,6 +422,10 @@ async function biloopTick(): Promise<void> {
     }
     const { analyzed, updated } = await runBioLoop();
     console.log(`[bioloop] tick complete — analyzed=${analyzed} updated=${updated}`);
+
+    // 3B-6: Run evergreen recycling in the same daily tick
+    const { scanned, marked } = await identifyEvergreenTopics();
+    if (marked > 0) console.log(`[bioloop] evergreen: scanned=${scanned} marked=${marked}`);
   } catch (e) {
     console.error("[bioloop] tick error:", e instanceof Error ? e.message : e);
   }

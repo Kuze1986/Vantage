@@ -861,7 +861,7 @@ aggregates by vertical. Topics and content pieces both carry a `vertical` field.
 
 ### 3B-1 — Pipeline Failure Alerting
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** When pieces fail to publish or the scheduler crashes, the only way to know is
 to check the dashboard. For an automated pipeline, silent failures can mean days of missed
@@ -885,7 +885,7 @@ posts before they're noticed.
 
 ### 3B-2 — Content Calendar View
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** The queue is a flat list. There is no way to see the distribution of scheduled
 posts over time — clustering, gaps, or channel conflicts are invisible.
@@ -906,7 +906,7 @@ posts over time — clustering, gaps, or channel conflicts are invisible.
 
 ### 3B-3 — Engagement Trend Charts
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** The "Top Pieces — 7d" panel shows aggregate counts. There is no time-series
 view of engagement — no way to see whether performance is improving, which posting hours
@@ -931,7 +931,7 @@ drive the most events, or how channels compare over weeks.
 
 ### 3B-4 — Platform Rate Limit Handling
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** X API v2 enforces hard posting limits (varies by tier). LinkedIn and Reddit
 have their own rate limits. When a publish call returns 429 Too Many Requests, the piece
@@ -952,7 +952,7 @@ is currently marked `failed` with a permanent error. It should be rescheduled au
 
 ### 3B-5 — Publish Preview
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** Operators approve raw JSON payloads in the queue. There is no rendered preview
 showing how the content will actually look on the platform — character counts,
@@ -976,7 +976,7 @@ formatting issues, or broken HTML in email bodies are invisible until after publ
 
 ### 3B-6 — Topic Recycling / Evergreen Content
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** Topics are marked `used_at` after first generation and never touched again.
 High-performing topics — those whose generated content received strong engagement — are
@@ -1001,7 +1001,7 @@ valuable evergreen assets that should be recycled periodically with fresh genera
 
 ### 3B-7 — DemoForge Job Submission UI
 
-**Status:** 🔴 Not started
+**Status:** ✅ Shipped
 
 **Problem:** The DemoForge pipeline (Playwright + ElevenLabs + FFmpeg) is fully operational
 via API, but there is no page in the web app to create a job. Using DemoForge currently
@@ -1025,4 +1025,4 @@ requires direct API calls.
 
 ---
 
-*Last updated: Phase 3A/3B planning. Update this file as each item ships.*
+*Last updated: Phase 3A and 3B fully shipped. All 15 planned items complete.*

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
+import { RateLimitError, parseRetryAfter } from "../lib/rate-limit-error.js";
 
 const REDDIT_AUTH  = "https://www.reddit.com/api/v1/authorize";
 const REDDIT_TOKEN = "https://www.reddit.com/api/v1/access_token";
@@ -130,6 +131,11 @@ export async function postToSubreddit(params: {
     body: formBody,
   });
   const json = (await res.json()) as { json?: { data?: { id?: string; url?: string }; errors?: [string, string, string][] } };
+  // 3B-4: rate limit detection (Reddit uses x-ratelimit-remaining header too)
+  if (res.status === 429) {
+    const delayMs = parseRetryAfter(res.headers.get("retry-after"), 5 * 60_000);
+    throw new RateLimitError(`Reddit rate limit — retry after ${Math.round(delayMs / 60000)}m`, delayMs);
+  }
   const errors = json.json?.errors;
   if (errors && errors.length > 0) {
     const detail = errors.map(([_code, msg]) => msg).join("; ");

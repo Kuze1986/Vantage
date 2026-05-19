@@ -4,6 +4,26 @@ import { getSupabaseAdmin } from "../lib/supabase.js";
 
 export const queueRoutes = new Hono();
 
+// 3B-2: Calendar endpoint — pieces with scheduled_for in a date range
+queueRoutes.get("/calendar", async (c) => {
+  const sb   = getSupabaseAdmin();
+  const from = c.req.query("from"); // ISO date string
+  const to   = c.req.query("to");   // ISO date string
+  if (!from || !to) return c.json({ error: "from and to query params are required" }, 400);
+
+  const { data, error } = await sb
+    .from("content_pieces")
+    .select("id, status, channel_slug, format, content_payload, scheduled_for, published_at")
+    .in("status", ["queued", "published"])
+    .gte("scheduled_for", from)
+    .lte("scheduled_for", to)
+    .order("scheduled_for", { ascending: true })
+    .limit(500);
+
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json({ pieces: data ?? [] });
+});
+
 queueRoutes.get("/", async (c) => {
   const limit = Math.min(Number(c.req.query("limit") ?? "100"), 500);
   const sb = getSupabaseAdmin();

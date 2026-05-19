@@ -9,13 +9,19 @@ import { QueuePage } from './pages/QueuePage'
 import { ChannelsPage } from './pages/ChannelsPage'
 import { VoicePage } from './pages/VoicePage'
 import { SettingsPage } from './pages/SettingsPage'
+import { CalendarPage } from './pages/CalendarPage'
+import { AnalyticsPage } from './pages/AnalyticsPage'
+import { DemoForgePage } from './pages/DemoForgePage'
 
 const NAV = [
-  { label: 'Dashboard', path: '/',         icon: '◈' },
-  { label: 'Queue',     path: '/queue',     icon: '≋' },
-  { label: 'Channels',  path: '/channels',  icon: '⊕' },
-  { label: 'Voice',     path: '/voice',     icon: '◆' },
-  { label: 'Settings',  path: '/settings',  icon: '⚙' },
+  { label: 'Dashboard', path: '/',          icon: '◈' },
+  { label: 'Queue',     path: '/queue',      icon: '≋' },
+  { label: 'Calendar',  path: '/calendar',   icon: '▦' },
+  { label: 'Analytics', path: '/analytics',  icon: '▲' },
+  { label: 'DemoForge', path: '/demoforge',  icon: '⬡' },
+  { label: 'Channels',  path: '/channels',   icon: '⊕' },
+  { label: 'Voice',     path: '/voice',      icon: '◆' },
+  { label: 'Settings',  path: '/settings',   icon: '⚙' },
 ]
 
 function Sidebar() {
@@ -113,11 +119,14 @@ export function App() {
             </RequireAuth>
           }
         >
-          <Route path="/"         element={<DashboardPage />} />
-          <Route path="/queue"    element={<QueuePage />} />
-          <Route path="/channels" element={<ChannelsPage />} />
-          <Route path="/voice"    element={<VoicePage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/"           element={<DashboardPage />} />
+          <Route path="/queue"      element={<QueuePage />} />
+          <Route path="/calendar"   element={<CalendarPage />} />
+          <Route path="/analytics"  element={<AnalyticsPage />} />
+          <Route path="/demoforge"  element={<DemoForgePage />} />
+          <Route path="/channels"   element={<ChannelsPage />} />
+          <Route path="/voice"      element={<VoicePage />} />
+          <Route path="/settings"   element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

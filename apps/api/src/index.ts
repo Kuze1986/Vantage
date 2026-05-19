@@ -22,6 +22,7 @@ import { biloopRoutes } from "./routes/bioloop.js";
 import { musicRoutes } from "./routes/music.js";
 import { demoforgeRoutes } from "./routes/demoforge.js";
 import { settingsRoutes } from "./routes/settings.js";
+import { analyticsRoutes } from "./routes/analytics.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
 import { startCadenceEngine } from "./services/scheduler.js";
 
@@ -61,6 +62,7 @@ authedV1.route("/bioloop", biloopRoutes);
 authedV1.route("/music", musicRoutes);
 authedV1.route("/demoforge", demoforgeRoutes);
 authedV1.route("/settings", settingsRoutes);
+authedV1.route("/analytics", analyticsRoutes);
 
 app.route("/v1", authedV1);
 

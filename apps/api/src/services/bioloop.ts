@@ -9,6 +9,7 @@
  */
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
+import { loadSettings } from "../lib/settings.js";
 
 // ── Pattern extraction ────────────────────────────────────────────────────────
 
@@ -206,4 +207,74 @@ export async function runBioLoop(): Promise<{ analyzed: number; updated: number 
 
   console.log(`[bioloop] analyzed=${pieces.length} updated=${updatedCount}`);
   return { analyzed: pieces.length, updated: updatedCount };
+}
+
+// ── 3B-6: Evergreen topic recycling ──────────────────────────────────────────
+/**
+ * Identifies high-performing topics and marks them for recycling.
+ * Topics whose published pieces received >= evergreen_threshold engagement events
+ * in the last 90 days have their recycle_after set and used_at cleared,
+ * making them eligible for fresh generation after the recycle window.
+ */
+export async function identifyEvergreenTopics(): Promise<{ scanned: number; marked: number }> {
+  const sb = getSupabaseAdmin();
+  const { evergreen_threshold, evergreen_recycle_days } = await loadSettings();
+  const since90d = new Date(Date.now() - 90 * 24 * 60 * 60_000).toISOString();
+
+  // Load published pieces in last 90d that have a topic_id
+  const { data: pieces, error } = await sb
+    .from("content_pieces")
+    .select("id, topic_id")
+    .eq("status", "published")
+    .gte("published_at", since90d)
+    .not("topic_id", "is", null);
+
+  if (error || !pieces?.length) return { scanned: 0, marked: 0 };
+
+  // Count engagement events per piece
+  const pieceIds = pieces.map((p) => p.id as string);
+  const { data: engagements } = await sb
+    .from("engagement_events")
+    .select("content_piece_id")
+    .in("content_piece_id", pieceIds);
+
+  const engageCount: Record<string, number> = {};
+  for (const ev of engagements ?? []) {
+    const pid = ev.content_piece_id as string;
+    engageCount[pid] = (engageCount[pid] ?? 0) + 1;
+  }
+
+  // Group by topic_id, sum engagement
+  const topicEngagement: Record<string, number> = {};
+  for (const piece of pieces) {
+    const tid = piece.topic_id as string;
+    const eng = engageCount[piece.id as string] ?? 0;
+    topicEngagement[tid] = (topicEngagement[tid] ?? 0) + eng;
+  }
+
+  // Mark qualifying topics for recycling
+  const recycleAfter = new Date(Date.now() + evergreen_recycle_days * 24 * 60 * 60_000).toISOString();
+  let marked = 0;
+
+  for (const [topicId, totalEng] of Object.entries(topicEngagement)) {
+    if (totalEng >= evergreen_threshold) {
+      await sb.from("topics").update({
+        recycle_after: recycleAfter,
+        used_at:       null, // reset so it can be picked again after the recycle window
+        updated_at:    new Date().toISOString(),
+      }).eq("id", topicId);
+      marked++;
+    }
+  }
+
+  if (marked > 0) {
+    await logActivity({
+      source: "bioloop", source_type: "system",
+      event_type: "evergreen_recycled",
+      summary: `Evergreen: marked ${marked} high-performing topics for recycling in ${evergreen_recycle_days}d`,
+      payload: { scanned: pieces.length, marked, threshold: evergreen_threshold },
+    });
+  }
+
+  return { scanned: Object.keys(topicEngagement).length, marked };
 }

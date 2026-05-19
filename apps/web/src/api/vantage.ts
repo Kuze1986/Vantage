@@ -205,6 +205,33 @@ export const vantageApi = {
       }
     }>,
 
+  // ── Calendar ──────────────────────────────────────────────────────────────
+  // 3B-2: pieces with scheduled_for in a date range
+  getCalendar: (from: string, to: string) =>
+    vantageFetch(`/v1/queue/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`) as Promise<{
+      pieces: {
+        id: string; status: string; channel_slug: string; format: string;
+        content_payload: Record<string, unknown>; scheduled_for: string | null; published_at: string | null;
+      }[]
+    }>,
+
+  // ── Analytics ─────────────────────────────────────────────────────────────
+  // 3B-3: engagement trend data
+  getEngagementTrend: (params?: { channel?: string; vertical?: string; period?: string; group_by?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.channel)  qs.set('channel',  params.channel)
+    if (params?.vertical) qs.set('vertical', params.vertical)
+    if (params?.period)   qs.set('period',   params.period)
+    if (params?.group_by) qs.set('group_by', params.group_by)
+    return vantageFetch(`/v1/analytics/engagement${qs.toString() ? `?${qs}` : ''}`) as Promise<{
+      period: string; group_by: string; data: { label: string; count: number }[]
+    }>
+  },
+  getPostingHours: (channel?: string) =>
+    vantageFetch(`/v1/analytics/posting-hours${channel ? `?channel=${channel}` : ''}`) as Promise<{
+      channel: string; data: { hour: number; piece_count: number; total_engagement: number; avg_engagement: number }[]
+    }>,
+
   // ── Generate (Phase 2 additions) ─────────────────────────────────────────
   generateWithImage: (channel: string, topic_id: string) =>
     vantageFetch(`/v1/generate/${channel}`, {

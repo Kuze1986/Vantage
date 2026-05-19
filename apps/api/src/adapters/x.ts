@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
+import { RateLimitError, parseRetryAfter } from "../lib/rate-limit-error.js";
 
 const X_AUTH = "https://twitter.com/i/oauth2/authorize";
 const X_TOKEN = "https://api.twitter.com/2/oauth2/token";
@@ -189,6 +190,11 @@ export async function postTweet(text: string): Promise<{ id: string }> {
     detail?: string;
   };
   if (!res.ok) {
+    // 3B-4: surface rate limits as a typed error so the scheduler can reschedule
+    if (res.status === 429) {
+      const delayMs = parseRetryAfter(res.headers.get("retry-after"), 15 * 60_000);
+      throw new RateLimitError(`X rate limit — retry after ${Math.round(delayMs / 60000)}m`, delayMs);
+    }
     const detail = json.errors?.[0]?.detail ?? json.detail ?? JSON.stringify(json);
     await logActivity({
       source: "adapter:x",

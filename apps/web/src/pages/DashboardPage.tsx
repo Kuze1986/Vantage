@@ -4,7 +4,7 @@ import type { DashboardOverview } from '../api/vantage'
 import { supabase } from '../lib/supabase'
 import { StatCard, Panel, Badge } from '../ds'
 
-type Topic = { id: string; topic_text: string; vertical: string | null; source_product?: string; priority?: number }
+type Topic = { id: string; topic_text: string; vertical: string | null; source_product?: string; priority?: number; recycle_after?: string | null }
 type ActivityEvent = DashboardOverview['activityLast24h'][number]
 
 const CHANNEL_SLUGS = ['x', 'linkedin', 'reddit', 'email', 'tiktok', 'instagram', 'facebook'] as const
@@ -199,6 +199,10 @@ export function DashboardPage() {
                         {t.vertical && <div className="vg-topic-vert">{t.vertical}</div>}
                         {t.source_product === 'pulse' && (
                           <div className="vg-topic-vert" style={{ color: 'var(--nx-cyan)', borderColor: 'var(--nx-cyan)' }}>⚡ pulse</div>
+                        )}
+                        {/* 3B-6: badge recycled (evergreen) topics */}
+                        {t.recycle_after && (
+                          <div className="vg-topic-vert" style={{ color: '#22c55e', borderColor: '#22c55e' }}>♻ evergreen</div>
                         )}
                       </div>
                     </div>
