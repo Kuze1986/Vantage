@@ -138,8 +138,8 @@ dashboardRoutes.get("/overview", async (c) => {
   // 3A-8: Per-vertical breakdown — aggregate published counts by vertical for last 7d
   type VerticalStats = { published_7d: number; published_today: number };
   const verticalBreakdown: Record<string, VerticalStats> = {};
-  for (const row of (verticalRes.data ?? []) as { status: string; published_at: string | null; topics: { vertical: string } | null }[]) {
-    const vertical = row.topics?.vertical;
+  for (const row of (verticalRes.data ?? []) as unknown as { status: string; published_at: string | null; topics: { vertical: string }[] }[]) {
+    const vertical = row.topics?.[0]?.vertical;
     if (!vertical) continue;
     if (!verticalBreakdown[vertical]) verticalBreakdown[vertical] = { published_7d: 0, published_today: 0 };
     if (row.status === "published") {
