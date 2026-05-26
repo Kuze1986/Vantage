@@ -66,6 +66,52 @@ Rules: Community tone. Open with a question or relatable observation to drive co
   return `${base}\n${schemas[format]}`
 }
 
+// ── BioLoop pattern key → human-readable instruction ─────────────────────────
+// Keeps prompt guidance legible for the model. Keys must match extractPatterns()
+// in supabase/functions/bioloop/index.ts.
+const PATTERN_INSTRUCTIONS: Record<string, string> = {
+  // Length
+  length_short:            'keep the content concise — under 150 characters in the body',
+  length_medium:           'aim for a medium-length body — 150–400 characters',
+  length_long:             'write a longer, more detailed body — over 400 characters',
+  // Structural
+  has_question:            'include at least one direct question to the reader',
+  has_cta:                 'include a clear, natural call-to-action (try, join, learn, sign up, etc.)',
+  has_numbers:             'anchor the content with a specific number, stat, or percentage',
+  has_hashtags:            'include relevant hashtags',
+  // Openers
+  opener_emotional:        'open with an emotional hook — "imagine", "what if", "ever wonder", "did you know", etc.',
+  opener_question:         'open with a direct question as the very first line',
+  opener_number:           'open with a number or statistic as the very first word or phrase',
+  // Format-specific
+  tweet_punchy:            'keep the tweet under 120 characters — punchy and self-contained',
+  linkedin_has_headline:   'include a bold headline field as a standalone first-line hook',
+  email_has_preview_text:  'include a compelling preview_text field (shown in inbox before opening)',
+  tiktok_strong_hook:      'write a very strong hook field — it must stop a scroll in under 3 seconds',
+  reddit_concise_title:    'keep the Reddit post title under 80 characters',
+  instagram_hashtag_rich:  'include at least 5 targeted hashtags',
+  // Angles
+  angle_how_to:            'frame the content as a how-to, step-by-step guide, or tip',
+  angle_data_driven:       'anchor the content in data, a published study, research, or a survey',
+  angle_personal_story:    'use a first-person or personal-story framing ("when I", "my", "I learned")',
+}
+
+function weightsToInstructions(raw: string): string {
+  // raw format from loadWeights(): "pattern_key: 1.52 (n=14)\n..."
+  const lines = raw.trim().split('\n')
+  const instructions: string[] = []
+  for (const line of lines) {
+    const match = line.match(/^(\S+):\s*([\d.]+)\s*\(n=(\d+)\)/)
+    if (!match) continue
+    const [, key, weight, n] = match
+    const instruction = PATTERN_INSTRUCTIONS[key]
+    if (instruction) {
+      instructions.push(`- ${instruction}  [${parseFloat(weight).toFixed(2)}× lift, n=${n}]`)
+    }
+  }
+  return instructions.join('\n')
+}
+
 export function kuzeUserPrompt(params: {
   format: ContentFormat
   topic_text: string
@@ -85,7 +131,12 @@ export function kuzeUserPrompt(params: {
     parts.push(`Target subreddit: r/${params.extras.subreddit}`)
   }
   if (params.extras?.weights) {
-    parts.push(`Current performance weights (bias toward high-weighted patterns):\n${params.extras.weights}`)
+    const instructions = weightsToInstructions(params.extras.weights)
+    if (instructions) {
+      parts.push(
+        `High-performing content patterns (ranked by engagement lift — apply as many as naturally fit):\n${instructions}`
+      )
+    }
   }
 
   parts.push(`Generate the ${params.format} JSON now.`)

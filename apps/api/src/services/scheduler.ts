@@ -4,7 +4,6 @@ import { generateContent } from "./kuze.js";
 import { auditContent } from "./ilita.js";
 import { pickNextTopic } from "./source.js";
 import { refreshTopicsFromPulse } from "./pulse.js";
-import { runBioLoop, identifyEvergreenTopics } from "./bioloop.js";
 import { pollRedditEngagement } from "./reddit-engagement.js";
 import { loadSettings } from "../lib/settings.js";
 import { sendAlert } from "../lib/alert.js";
@@ -21,7 +20,6 @@ import { sendEmail } from "../adapters/email.js";
 const TICK_MS               = 60_000;            // check queue every 60 seconds
 const AUTO_GEN_TICK         = 300_000;           // check auto-generate every 5 minutes
 const PULSE_TICK_MS         = 30 * 60_000;       // pulse reactor every 30 minutes
-const BIOLOOP_TICK_MS       = 24 * 60 * 60_000;  // BioLoop weight update every 24 hours
 const REDDIT_ENGAGE_TICK_MS = 2  * 60 * 60_000;  // Reddit engagement poll every 2 hours
 
 type ChannelRow = {
@@ -412,30 +410,10 @@ async function pulseTick(): Promise<void> {
   }
 }
 
-// ── BioLoop tick: update generation weights + evergreen recycling daily ───────
-async function biloopTick(): Promise<void> {
-  try {
-    const { bioloop_enabled } = await loadSettings();
-    if (!bioloop_enabled) {
-      console.log("[bioloop] skipped — disabled via settings");
-      return;
-    }
-    const { analyzed, updated } = await runBioLoop();
-    console.log(`[bioloop] tick complete — analyzed=${analyzed} updated=${updated}`);
-
-    // 3B-6: Run evergreen recycling in the same daily tick
-    const { scanned, marked } = await identifyEvergreenTopics();
-    if (marked > 0) console.log(`[bioloop] evergreen: scanned=${scanned} marked=${marked}`);
-  } catch (e) {
-    console.error("[bioloop] tick error:", e instanceof Error ? e.message : e);
-  }
-}
-
 // ── Engine boot ───────────────────────────────────────────────────────────────
 let cadenceTimer:      ReturnType<typeof setInterval> | null = null;
 let autoGenTimer:      ReturnType<typeof setInterval> | null = null;
 let pulseTimer:        ReturnType<typeof setInterval> | null = null;
-let biloopTimer:       ReturnType<typeof setInterval> | null = null;
 let redditEngageTimer: ReturnType<typeof setInterval> | null = null;
 
 export function startCadenceEngine(): void {
@@ -459,10 +437,8 @@ export function startCadenceEngine(): void {
     void pulseTick().catch((e) => console.error("[pulse] tick error:", e));
   }, PULSE_TICK_MS);
 
-  // BioLoop: update generation weights daily (first run after 1h to let data accumulate)
-  biloopTimer = setInterval(() => {
-    void biloopTick();
-  }, BIOLOOP_TICK_MS);
+  // Note: BioLoop runs as a Supabase Edge Function on a daily pg_cron schedule.
+  // See supabase/functions/bioloop/index.ts and the 20260607000000 migration.
 
   // 3A-7: Reddit engagement poll every 2 hours (first run after startup)
   void pollRedditEngagement().catch((e) => console.error("[reddit-engage] initial poll error:", e));
@@ -470,7 +446,7 @@ export function startCadenceEngine(): void {
     void pollRedditEngagement().catch((e) => console.error("[reddit-engage] poll error:", e));
   }, REDDIT_ENGAGE_TICK_MS);
 
-  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | reddit-engage 2h | bioloop 24h");
+  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | reddit-engage 2h | bioloop via edge function");
 }
 
 export function stopCadenceEngine(): void {
