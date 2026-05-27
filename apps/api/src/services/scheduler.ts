@@ -453,6 +453,5 @@ export function stopCadenceEngine(): void {
   if (cadenceTimer)      { clearInterval(cadenceTimer);      cadenceTimer      = null; }
   if (autoGenTimer)      { clearInterval(autoGenTimer);      autoGenTimer      = null; }
   if (pulseTimer)        { clearInterval(pulseTimer);        pulseTimer        = null; }
-  if (biloopTimer)       { clearInterval(biloopTimer);       biloopTimer       = null; }
   if (redditEngageTimer) { clearInterval(redditEngageTimer); redditEngageTimer = null; }
 }
