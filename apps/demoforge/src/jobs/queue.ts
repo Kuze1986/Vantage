@@ -69,9 +69,11 @@ async function drain(): Promise<void> {
     }).eq("id", job.id);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    await sb.from("demoforge_jobs").update({
-      status: "failed", error_message: msg.slice(0, 1000), updated_at: new Date().toISOString(),
-    }).eq("id", job.id).catch(() => undefined);
+    try {
+      await sb.from("demoforge_jobs").update({
+        status: "failed", error_message: msg.slice(0, 1000), updated_at: new Date().toISOString(),
+      }).eq("id", job.id);
+    } catch { /* best-effort status update — ignore if it fails */ }
     console.error(`[demoforge] job ${job.id} failed:`, msg);
   } finally {
     processing = false;
