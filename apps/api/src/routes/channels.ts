@@ -83,20 +83,47 @@ channelsAuthedRoutes.post("/:slug/auth/start", async (c) => {
 
   switch (slug) {
     case "x": {
-      const { verifier, challenge } = generatePkce();
-      await xSavePending(state, verifier);
-      const url = xAuthorizeUrl({ state, code_challenge: challenge });
-      return c.json({ authorize_url: url, state });
+      try {
+        const { verifier, challenge } = generatePkce();
+        await xSavePending(state, verifier);
+        const url = xAuthorizeUrl({ state, code_challenge: challenge });
+        return c.json({ authorize_url: url, state });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("Missing")) {
+          const base = process.env.API_BASE_URL ?? "https://your-api.railway.app";
+          throw new HTTPException(503, {
+            message: `X OAuth not configured. Set X_CLIENT_ID, X_CLIENT_SECRET, and X_REDIRECT_URI in Railway. Callback URL: ${base}/v1/channels/x/auth/callback`,
+          });
+        }
+        throw e;
+      }
     }
     case "linkedin": {
-      await liSavePending(state);
-      const url = liAuthorizeUrl(state);
-      return c.json({ authorize_url: url, state });
+      try {
+        await liSavePending(state);
+        const url = liAuthorizeUrl(state);
+        return c.json({ authorize_url: url, state });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("Missing")) {
+          throw new HTTPException(503, { message: "LinkedIn OAuth not configured. Set LI_CLIENT_ID, LI_CLIENT_SECRET, and LI_REDIRECT_URI in Railway." });
+        }
+        throw e;
+      }
     }
     case "reddit": {
-      await redditSavePending(state);
-      const url = redditAuthorizeUrl(state);
-      return c.json({ authorize_url: url, state });
+      try {
+        await redditSavePending(state);
+        const url = redditAuthorizeUrl(state);
+        return c.json({ authorize_url: url, state });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("Missing")) {
+          throw new HTTPException(503, { message: "Reddit OAuth not configured. Set REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, and REDDIT_REDIRECT_URI in Railway." });
+        }
+        throw e;
+      }
     }
     default:
       throw new HTTPException(400, { message: `OAuth not supported for channel: ${slug}` });

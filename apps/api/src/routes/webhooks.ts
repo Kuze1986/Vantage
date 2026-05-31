@@ -10,8 +10,24 @@ export const webhooksRoutes = new Hono();
 webhooksRoutes.get("/x", async (c) => {
   const crc = c.req.query("crc_token");
   if (!crc) throw new HTTPException(400, { message: "missing crc_token" });
-  const secret = process.env.X_WEBHOOK_SECRET ?? process.env.X_CLIENT_SECRET;
-  if (!secret) throw new HTTPException(500, { message: "Missing X_WEBHOOK_SECRET or X_CLIENT_SECRET" });
+
+  // X CRC challenge must be signed with the Consumer Secret (API Key Secret),
+  // not the OAuth 2.0 Client Secret — they are different credentials.
+  // Set X_CONSUMER_SECRET in Railway (value from: Developer Portal → App →
+  // Keys and Tokens → Consumer Keys → API Key Secret).
+  const secret =
+    process.env.X_CONSUMER_SECRET ??
+    process.env.X_WEBHOOK_SECRET ??
+    process.env.X_CLIENT_SECRET;
+
+  if (!secret) {
+    throw new HTTPException(503, {
+      message:
+        "X webhook not configured. Set X_CONSUMER_SECRET in Railway " +
+        "(API Key Secret from Twitter Developer Portal → your app → Keys and Tokens → Consumer Keys).",
+    });
+  }
+
   const response_token = crcResponseToken(crc, secret);
   return c.json({ response_token });
 });
@@ -20,7 +36,10 @@ webhooksRoutes.post("/x", async (c) => {
   const raw = await c.req.text();
 
   // ── 3A-1: Verify HMAC-SHA256 signature ──────────────────────────────────
-  const secret = process.env.X_WEBHOOK_SECRET ?? process.env.X_CLIENT_SECRET;
+  const secret =
+    process.env.X_CONSUMER_SECRET ??
+    process.env.X_WEBHOOK_SECRET ??
+    process.env.X_CLIENT_SECRET;
   if (secret) {
     const sigHeader = c.req.header("x-twitter-webhooks-signature") ?? "";
     // Header format: "sha256=<base64>"

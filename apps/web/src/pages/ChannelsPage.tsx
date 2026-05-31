@@ -240,7 +240,13 @@ export function ChannelsPage() {
       const { authorize_url } = await vantageApi.startOAuth(slug)
       window.location.href = authorize_url
     } catch (e) {
-      setErr(String((e as Error).message))
+      const msg = String((e as Error).message)
+      // 503 means env vars aren't set — surface the setup instructions directly
+      if (msg.includes('not configured') || msg.includes('Missing')) {
+        setErr(msg)
+      } else {
+        setErr(`OAuth failed for ${slug}: ${msg}`)
+      }
     }
   }
 
@@ -314,9 +320,16 @@ export function ChannelsPage() {
                   className="nx-btn nx-btn--secondary nx-btn--sm nx-btn--full"
                   style={{ marginTop: 6 }}
                   onClick={() => void connectOAuth(slug)}
+                  title={`Connect ${slug} via OAuth 2.0`}
                 >
                   Connect {slug === 'x' ? '𝕏' : slug} via OAuth
                 </button>
+              )}
+              {/* Already connected — show disconnect hint */}
+              {meta.authMethod === 'oauth' && OAUTH_CHANNELS.includes(slug) && connected && (
+                <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', marginTop: 6, textAlign: 'center' }}>
+                  ✓ Connected — click tile to configure cadence
+                </p>
               )}
 
               {/* Cadence config (expandable) */}
