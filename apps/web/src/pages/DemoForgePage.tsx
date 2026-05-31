@@ -13,7 +13,6 @@ type ScriptStep = {
 type MusicTrack = { id: string; title: string; artist: string | null; mood: string; use_case: string }
 type JobStatus = { id: string; status: string; output_url: string | null; error_message: string | null; updated_at: string }
 
-// Must match the action enum in apps/api/src/routes/demoforge.ts scriptStepSchema
 const ACTIONS = ['navigate', 'click', 'fill', 'wait', 'scroll', 'narrate']
 const FORMATS: Format[] = ['tiktok', 'linkedin', 'instagram']
 
@@ -29,18 +28,234 @@ const STATUS_COLOR: Record<string, string> = {
 
 const DEFAULT_STEP: ScriptStep = { action: 'click', selector: '', narration: '' }
 
+// ── Template gallery ──────────────────────────────────────────────────────────
+// Each template records a specific Vantage feature story.
+// {BASE} is replaced with the operator-supplied base URL on load.
+
+type VantageTemplate = {
+  id: string
+  name: string
+  tagline: string
+  audience: string
+  format: Format
+  estimatedSec: number
+  steps: ScriptStep[]
+}
+
+const VANTAGE_TEMPLATES: VantageTemplate[] = [
+  // ── A: Full pipeline (flagship) ───────────────────────────────────────────
+  {
+    id: 'full-pipeline',
+    name: 'The Full Pipeline',
+    tagline: 'Content lifecycle end-to-end — from topic to published post.',
+    audience: 'B2B prospects · investors · agency demos',
+    format: 'linkedin',
+    estimatedSec: 90,
+    steps: [
+      { action: 'navigate', selector: '{BASE}/',           narration: 'This is Vantage — an automated content pipeline that runs across seven channels simultaneously.' },
+      { action: 'wait',     ms: 2500,                      narration: '' },
+      { action: 'scroll',   selector: '',                  narration: 'The dashboard shows live pipeline health: topics ingested, pieces auditing, and today\'s publish count vs. target.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/queue',      narration: 'Every generated piece flows through a strict status machine — draft, auditing, approved, queued, published.' },
+      { action: 'wait',     ms: 2500,                      narration: '' },
+      { action: 'scroll',   selector: '',                  narration: 'Ilita, our AI brand-safety auditor, reviews every piece. Failed content is regenerated with the feedback inline.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/calendar',   narration: 'The calendar shows exactly how posts are distributed across the week — no clustering, no gaps.' },
+      { action: 'wait',     ms: 2500,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/analytics',  narration: 'BioLoop closes the loop. Engagement data feeds back into generation weights so Kuze learns which patterns perform.' },
+      { action: 'wait',     ms: 2500,                      narration: '' },
+      { action: 'scroll',   selector: '',                  narration: 'Engagement by posting hour tells us exactly when our audience is active — so the cadence engine schedules accordingly.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/',           narration: 'Vantage runs 24/7. Cadence tick every 60 seconds. Auto-generate every 5 minutes. Pulse scans every 30. Automated content. Real signal.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+    ],
+  },
+
+  // ── B: 60-second tour ─────────────────────────────────────────────────────
+  {
+    id: '60s-tour',
+    name: '60-Second Tour',
+    tagline: 'Fast sweep of every page. Hook-first, no filler.',
+    audience: 'Social media · awareness campaigns · TikTok/Reels',
+    format: 'tiktok',
+    estimatedSec: 60,
+    steps: [
+      { action: 'navigate', selector: '{BASE}/',           narration: 'Seven channels. One pipeline. Zero manual posts.' },
+      { action: 'wait',     ms: 1800,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/queue',      narration: 'Every piece of content flows through a strict status machine.' },
+      { action: 'wait',     ms: 1800,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/calendar',   narration: 'See exactly when every post goes out, weeks in advance.' },
+      { action: 'wait',     ms: 1800,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/analytics',  narration: 'And engagement data feeds straight back into the AI.' },
+      { action: 'wait',     ms: 1800,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/channels',   narration: 'X. LinkedIn. Reddit. Email. TikTok. Instagram. Facebook.' },
+      { action: 'wait',     ms: 1800,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/voice',      narration: 'Your brand voice shapes every word Kuze writes.' },
+      { action: 'wait',     ms: 1800,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/',           narration: 'Vantage. Automated content. Real signal. No noise.' },
+      { action: 'wait',     ms: 1800,                      narration: '' },
+    ],
+  },
+
+  // ── C: BioLoop ────────────────────────────────────────────────────────────
+  {
+    id: 'bioloop',
+    name: 'BioLoop: AI That Learns',
+    tagline: 'The feedback loop that makes content measurably better over time.',
+    audience: 'Technical buyers · growth teams · AI-curious prospects',
+    format: 'linkedin',
+    estimatedSec: 75,
+    steps: [
+      { action: 'navigate', selector: '{BASE}/',           narration: 'Most content tools generate and forget. Vantage learns.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'narrate',  selector: '',                  narration: 'BioLoop is a closed-loop feedback system. Every published piece is tracked. Every engagement event — click, share, reply — is recorded and attributed to the content patterns that drove it.' },
+      { action: 'navigate', selector: '{BASE}/analytics',  narration: 'Here\'s what that data looks like. Engagement over time, broken down by channel and vertical.' },
+      { action: 'wait',     ms: 2500,                      narration: '' },
+      { action: 'scroll',   selector: '',                  narration: 'Posting hour analysis reveals exactly when your audience is active.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'narrate',  selector: '',                  narration: 'BioLoop computes 13 content patterns per piece — whether it opens with a question, has a call to action, is data-driven. Patterns that correlate with engagement get higher weights. Kuze reads those weights before every generation.' },
+      { action: 'navigate', selector: '{BASE}/',           narration: 'The result: content that gets measurably better over time. Automatically. Vantage — content intelligence that compounds.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+    ],
+  },
+
+  // ── D: Queue deep-dive ────────────────────────────────────────────────────
+  {
+    id: 'queue-dive',
+    name: 'Queue Deep Dive',
+    tagline: 'The operator workflow — audit, preview, schedule, publish.',
+    audience: 'Content managers · marketing ops · operator demos',
+    format: 'instagram',
+    estimatedSec: 60,
+    steps: [
+      { action: 'navigate', selector: '{BASE}/queue',      narration: 'Every piece of content Vantage generates lands here.' },
+      { action: 'wait',     ms: 2500,                      narration: '' },
+      { action: 'scroll',   selector: '',                  narration: 'Filter by status. See exactly what\'s auditing, what\'s approved, and what\'s queued for publish.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'narrate',  selector: '',                  narration: 'Ilita — our AI brand-safety auditor — reviews every piece before it moves forward. Fail once, Kuze regenerates with the feedback inline. Fail twice, it\'s marked rejected.' },
+      { action: 'scroll',   selector: '',                  narration: 'A/B variants share a variant group, so you can see which version performed before scaling it.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'narrate',  selector: '',                  narration: 'For API channels — X, LinkedIn, Reddit, Email — one click publishes directly. For manual channels, the upload script is right here.' },
+      { action: 'wait',     ms: 1500,                      narration: '' },
+    ],
+  },
+
+  // ── E: Channel setup ──────────────────────────────────────────────────────
+  {
+    id: 'channel-setup',
+    name: 'Channel Setup',
+    tagline: 'Connect your platforms and configure automated cadence.',
+    audience: 'New users · onboarding · channel partners',
+    format: 'tiktok',
+    estimatedSec: 50,
+    steps: [
+      { action: 'navigate', selector: '{BASE}/channels',   narration: 'Connect your channels. Vantage supports seven platforms out of the box.' },
+      { action: 'wait',     ms: 2500,                      narration: '' },
+      { action: 'scroll',   selector: '',                  narration: 'X, LinkedIn, and Reddit use full OAuth. Email sends through Resend to your subscriber list.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'scroll',   selector: '',                  narration: 'For each channel, configure how many posts per day, which UTC hours to schedule, and whether to auto-approve Ilita-passing content.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'narrate',  selector: '',                  narration: 'With auto-approve on, Vantage runs end-to-end without any manual steps. Content flows from topic to published post, automatically.' },
+      { action: 'wait',     ms: 1500,                      narration: '' },
+    ],
+  },
+
+  // ── F: Brand voice ────────────────────────────────────────────────────────
+  {
+    id: 'brand-voice',
+    name: 'Brand Voice',
+    tagline: 'The config that makes every Kuze output sound like you.',
+    audience: 'Brand managers · creative directors · founder-led demos',
+    format: 'linkedin',
+    estimatedSec: 45,
+    steps: [
+      { action: 'navigate', selector: '{BASE}/voice',      narration: 'Kuze — our AI copywriter — writes in your brand\'s voice, not a generic one.' },
+      { action: 'wait',     ms: 2500,                      narration: '' },
+      { action: 'scroll',   selector: '',                  narration: 'You define the brand identity: who you are, what you stand for, and what you never say.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'narrate',  selector: '',                  narration: 'Per-channel tone lets you sound professional on LinkedIn and punchy on X — from a single config. Off-topics are hard stops. Kuze will never write about them, regardless of the source topic.' },
+      { action: 'navigate', selector: '{BASE}/voice',      narration: 'Every generation call loads the brand voice first. Your identity shapes every word.' },
+      { action: 'wait',     ms: 2000,                      narration: '' },
+    ],
+  },
+]
+
+// ── Template card ─────────────────────────────────────────────────────────────
+
+function formatLabel(f: Format) {
+  if (f === 'tiktok')    return 'TikTok · 9:16'
+  if (f === 'linkedin')  return 'LinkedIn · 16:9'
+  return 'Instagram · 9:16'
+}
+
+function TemplateCard({
+  tpl, isLoaded, onLoad,
+}: {
+  tpl: VantageTemplate; isLoaded: boolean; onLoad: () => void
+}) {
+  return (
+    <div style={{
+      border: isLoaded ? '1px solid var(--nx-amber)' : '1px solid var(--nx-border)',
+      background: isLoaded ? 'rgba(239,160,32,0.06)' : 'var(--nx-surface)',
+      borderRadius: 6, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 6,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 12, fontWeight: 700, color: isLoaded ? 'var(--nx-amber)' : 'var(--nx-text)', lineHeight: 1.3 }}>
+          {tpl.name}
+        </p>
+        <span style={{
+          fontFamily: 'var(--nx-mono)', fontSize: 9, letterSpacing: '0.1em',
+          padding: '2px 7px', border: `1px solid ${isLoaded ? 'var(--nx-amber)' : 'var(--nx-border)'}`,
+          color: isLoaded ? 'var(--nx-amber)' : 'var(--nx-text-3)', borderRadius: 2, whiteSpace: 'nowrap', flexShrink: 0,
+        }}>
+          {formatLabel(tpl.format)}
+        </span>
+      </div>
+      <p style={{ fontSize: 12, color: 'var(--nx-text-2)', lineHeight: 1.5 }}>{tpl.tagline}</p>
+      <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', letterSpacing: '0.1em' }}>
+        {tpl.audience}
+      </p>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+        <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)' }}>
+          {tpl.steps.length} steps · ~{tpl.estimatedSec}s
+        </span>
+        <button
+          type="button"
+          onClick={onLoad}
+          style={{
+            fontFamily: 'var(--nx-mono)', fontSize: 10, letterSpacing: '0.1em',
+            padding: '4px 12px', cursor: 'pointer',
+            background: isLoaded ? 'rgba(239,160,32,0.15)' : 'transparent',
+            border: `1px solid ${isLoaded ? 'var(--nx-amber)' : 'var(--nx-border-strong)'}`,
+            color: isLoaded ? 'var(--nx-amber)' : 'var(--nx-text-2)',
+            borderRadius: 3, transition: 'all 120ms',
+          }}
+        >
+          {isLoaded ? '✓ Loaded' : 'Load →'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
 export function DemoForgePage() {
-  const [url, setUrl]       = React.useState('')
-  const [format, setFormat] = React.useState<Format>('tiktok')
-  const [steps, setSteps]   = React.useState<ScriptStep[]>([{ ...DEFAULT_STEP }])
-  const [tracks, setTracks] = React.useState<MusicTrack[]>([])
-  const [trackId, setTrackId] = React.useState<string>('')
-  const [job, setJob]       = React.useState<JobStatus | null>(null)
-  const [history, setHistory] = React.useState<JobStatus[]>([])
+  const [mode, setMode]         = React.useState<'templates' | 'custom'>('templates')
+  const [baseUrl, setBaseUrl]   = React.useState(() => typeof window !== 'undefined' ? window.location.origin : '')
+  const [loadedTplId, setLoadedTplId] = React.useState<string | null>(null)
+
+  const [url, setUrl]           = React.useState('')
+  const [format, setFormat]     = React.useState<Format>('linkedin')
+  const [steps, setSteps]       = React.useState<ScriptStep[]>([{ ...DEFAULT_STEP }])
+  const [tracks, setTracks]     = React.useState<MusicTrack[]>([])
+  const [trackId, setTrackId]   = React.useState<string>('')
+  const [job, setJob]           = React.useState<JobStatus | null>(null)
+  const [history, setHistory]   = React.useState<JobStatus[]>([])
   const [submitting, setSubmitting] = React.useState(false)
   const [polling, setPolling]       = React.useState(false)
-  const [err, setErr]     = React.useState<string | null>(null)
-  const [msg, setMsg]     = React.useState<string | null>(null)
+  const [err, setErr]           = React.useState<string | null>(null)
+  const [msg, setMsg]           = React.useState<string | null>(null)
   const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Load music tracks + job history on mount
@@ -49,7 +264,6 @@ export function DemoForgePage() {
     void vantageApi.listDemoForgeJobs().then((r) => setHistory(r.jobs as unknown as JobStatus[])).catch(() => {})
   }, [])
 
-  // Stop polling on unmount
   React.useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
 
   const startPolling = (jobId: string) => {
@@ -72,6 +286,20 @@ export function DemoForgePage() {
     }, 5000)
   }
 
+  // Load a template — interpolate {BASE} with the current baseUrl
+  const loadTemplate = (tpl: VantageTemplate) => {
+    const base = baseUrl.replace(/\/$/, '')
+    const interpolated = tpl.steps.map((s) => ({
+      ...s,
+      selector: s.selector?.replace('{BASE}', base) ?? s.selector,
+    }))
+    setSteps(interpolated)
+    setFormat(tpl.format)
+    setUrl(base)
+    setLoadedTplId(tpl.id)
+    setMode('custom') // switch to editor so operator can review/tweak
+  }
+
   const handleSubmit = async () => {
     if (!url || steps.length === 0) return
     setSubmitting(true); setErr(null); setMsg(null); setJob(null)
@@ -80,7 +308,7 @@ export function DemoForgePage() {
         target_format: format,
         url,
         script: steps.map((s) => ({
-          action:    s.action,
+          action: s.action,
           narration: s.narration,
           ...(s.selector ? { selector: s.selector } : {}),
           ...(s.text     ? { text: s.text }         : {}),
@@ -97,9 +325,9 @@ export function DemoForgePage() {
   // Step helpers
   const updateStep = (i: number, patch: Partial<ScriptStep>) =>
     setSteps((prev) => prev.map((s, j) => j === i ? { ...s, ...patch } : s))
-  const addStep = () => setSteps((prev) => [...prev, { ...DEFAULT_STEP }])
+  const addStep    = () => setSteps((prev) => [...prev, { ...DEFAULT_STEP }])
   const removeStep = (i: number) => setSteps((prev) => prev.filter((_, j) => j !== i))
-  const moveStep = (i: number, dir: -1 | 1) => setSteps((prev) => {
+  const moveStep   = (i: number, dir: -1 | 1) => setSteps((prev) => {
     const arr = [...prev]; const tmp = arr[i + dir]; arr[i + dir] = arr[i]; arr[i] = tmp; return arr
   })
 
@@ -107,215 +335,283 @@ export function DemoForgePage() {
     <>
       <div className="vg-page-header">
         <h1 className="vg-page-title">DemoForge</h1>
-        <p className="vg-page-sub">Record a browser demo, add AI narration, and render a platform-ready video</p>
+        <p className="vg-page-sub">Record a Vantage demo, add AI narration, and render a platform-ready video</p>
       </div>
 
       {err && <div className="vg-error" style={{ marginBottom: 16 }}>{err}</div>}
       {msg && <div className="vg-success" style={{ marginBottom: 16 }}>{msg}</div>}
 
+      {/* Mode tabs */}
+      <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid var(--nx-border)' }}>
+        {(['templates', 'custom'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMode(m)}
+            style={{
+              fontFamily: 'var(--nx-mono)', fontSize: 10, letterSpacing: '0.14em',
+              padding: '8px 16px', cursor: 'pointer', background: 'none',
+              border: 'none', borderBottom: `2px solid ${mode === m ? 'var(--nx-amber)' : 'transparent'}`,
+              color: mode === m ? 'var(--nx-amber)' : 'var(--nx-text-3)',
+              textTransform: 'uppercase', transition: 'all 120ms', marginBottom: -1,
+            }}
+          >
+            {m === 'templates' ? '⬡ Templates' : '✎ Custom'}
+          </button>
+        ))}
+      </div>
+
       <div className="vg-grid-60-40">
 
-        {/* ── Job builder ──────────────────────────────────────────────────── */}
         <div className="vg-stack">
 
-          <Panel title="Target" titleAccent="amber">
-            <div style={{ display: 'grid', gap: 12 }}>
-              <div>
-                <label className="vg-label" style={{ display: 'block', marginBottom: 4 }}>URL to record</label>
-                <input
-                  type="url"
-                  className="vg-input"
-                  placeholder="https://yourproduct.com/feature"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  style={{ width: '100%' }}
-                />
-              </div>
-              <div>
-                <label className="vg-label" style={{ display: 'block', marginBottom: 6 }}>Output format</label>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  {FORMATS.map((f) => (
-                    <button
-                      key={f}
-                      type="button"
-                      onClick={() => setFormat(f)}
-                      style={{
-                        fontFamily: 'var(--nx-mono)', fontSize: 10, padding: '3px 10px',
-                        border: `1px solid ${format === f ? 'var(--nx-amber)' : 'var(--nx-border)'}`,
-                        borderRadius: 4,
-                        background: format === f ? 'rgba(245,158,11,0.12)' : 'transparent',
-                        color: format === f ? 'var(--nx-amber)' : 'var(--nx-text-3)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {f === 'tiktok' ? 'TikTok (9:16)' : f === 'linkedin' ? 'LinkedIn (16:9)' : 'Instagram (9:16)'}
-                    </button>
+          {/* ── TEMPLATE GALLERY ────────────────────────────────────────────── */}
+          {mode === 'templates' && (
+            <>
+              <Panel title="Base URL" titleAccent="amber">
+                <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-3)', marginBottom: 10, letterSpacing: '0.08em' }}>
+                  The Vantage instance Playwright will record. Auto-filled from your current origin.
+                </p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="url"
+                    className="vg-input"
+                    value={baseUrl}
+                    onChange={(e) => setBaseUrl(e.target.value)}
+                    placeholder="https://app.vantage.your-domain.com"
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    className="vg-input"
+                    onClick={() => setBaseUrl(window.location.origin)}
+                    style={{ whiteSpace: 'nowrap', cursor: 'pointer', fontSize: 10, fontFamily: 'var(--nx-mono)', background: 'none' }}
+                  >
+                    Use this origin
+                  </button>
+                </div>
+              </Panel>
+
+              <Panel title="Demo Templates">
+                <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-3)', marginBottom: 14, letterSpacing: '0.08em', lineHeight: 1.6 }}>
+                  Pre-built scripts for each Vantage feature story. Load one → review and tweak in the editor → submit.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {VANTAGE_TEMPLATES.map((tpl) => (
+                    <TemplateCard
+                      key={tpl.id}
+                      tpl={tpl}
+                      isLoaded={loadedTplId === tpl.id}
+                      onLoad={() => loadTemplate(tpl)}
+                    />
                   ))}
                 </div>
-              </div>
-            </div>
-          </Panel>
+              </Panel>
+            </>
+          )}
 
-          <Panel title="Script Steps">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {steps.map((step, i) => (
-                <div
-                  key={i}
-                  style={{
-                    background: 'var(--nx-surface-2)', border: '1px solid var(--nx-border)',
-                    borderRadius: 6, padding: '10px 12px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                    <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', minWidth: 20 }}>#{i + 1}</span>
-                    <select
-                      className="vg-input"
-                      value={step.action}
-                      onChange={(e) => updateStep(i, { action: e.target.value })}
-                      style={{ width: 90, fontSize: 10 }}
-                    >
-                      {ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
-                    </select>
-                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-                      {i > 0 && (
-                        <button type="button" onClick={() => moveStep(i, -1)}
-                          style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, background: 'none', border: '1px solid var(--nx-border)', borderRadius: 3, padding: '2px 5px', cursor: 'pointer', color: 'var(--nx-text-4)' }}>
-                          ↑
-                        </button>
-                      )}
-                      {i < steps.length - 1 && (
-                        <button type="button" onClick={() => moveStep(i, 1)}
-                          style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, background: 'none', border: '1px solid var(--nx-border)', borderRadius: 3, padding: '2px 5px', cursor: 'pointer', color: 'var(--nx-text-4)' }}>
-                          ↓
-                        </button>
-                      )}
-                      <button type="button" onClick={() => removeStep(i)}
-                        style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, background: 'none', border: '1px solid var(--nx-border)', borderRadius: 3, padding: '2px 5px', cursor: 'pointer', color: '#ef4444' }}>
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-                  {/* navigate → URL input; click/fill/scroll → CSS selector; wait → ms; narrate → no extra field */}
-                  {step.action === 'navigate' && (
+          {/* ── CUSTOM SCRIPT EDITOR ────────────────────────────────────────── */}
+          {mode === 'custom' && (
+            <>
+              {loadedTplId && (
+                <div style={{
+                  fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-amber)',
+                  padding: '8px 12px', border: '1px solid var(--nx-amber)',
+                  background: 'rgba(239,160,32,0.06)', borderRadius: 4, letterSpacing: '0.1em',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                }}>
+                  <span>✓ Template loaded: {VANTAGE_TEMPLATES.find(t => t.id === loadedTplId)?.name}</span>
+                  <button type="button" onClick={() => setMode('templates')}
+                    style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--nx-amber)', cursor: 'pointer', fontSize: 10, fontFamily: 'var(--nx-mono)' }}>
+                    ← Back to templates
+                  </button>
+                </div>
+              )}
+
+              <Panel title="Target" titleAccent="amber">
+                <div style={{ display: 'grid', gap: 12 }}>
+                  <div>
+                    <label className="vg-label" style={{ display: 'block', marginBottom: 4 }}>Entry URL (first page to load)</label>
                     <input
                       type="url"
                       className="vg-input"
-                      placeholder="URL to navigate to (e.g. https://example.com/feature)"
-                      value={step.selector ?? ''}
-                      onChange={(e) => updateStep(i, { selector: e.target.value })}
-                      style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
+                      placeholder="https://app.vantage.your-domain.com"
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      style={{ width: '100%' }}
                     />
-                  )}
-                  {(step.action === 'click' || step.action === 'fill' || step.action === 'scroll') && (
-                    <input
-                      type="text"
-                      className="vg-input"
-                      placeholder="CSS selector (e.g. #button-id or .nav-link)"
-                      value={step.selector ?? ''}
-                      onChange={(e) => updateStep(i, { selector: e.target.value })}
-                      style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
-                    />
-                  )}
-                  {step.action === 'fill' && (
-                    <input
-                      type="text"
-                      className="vg-input"
-                      placeholder="Text to type into the field"
-                      value={step.text ?? ''}
-                      onChange={(e) => updateStep(i, { text: e.target.value })}
-                      style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
-                    />
-                  )}
-                  {step.action === 'wait' && (
-                    <input
-                      type="number"
-                      className="vg-input"
-                      placeholder="Milliseconds to pause (e.g. 1500)"
-                      value={step.ms ?? ''}
-                      onChange={(e) => updateStep(i, { ms: parseInt(e.target.value) || undefined })}
-                      style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
-                    />
-                  )}
-                  <textarea
-                    className="vg-input"
-                    placeholder="Narration for this step (spoken by ElevenLabs voice)…"
-                    value={step.narration}
-                    onChange={(e) => updateStep(i, { narration: e.target.value })}
-                    rows={2}
-                    style={{ width: '100%', resize: 'vertical', fontSize: 10 }}
-                  />
+                  </div>
+                  <div>
+                    <label className="vg-label" style={{ display: 'block', marginBottom: 6 }}>Output format</label>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {FORMATS.map((f) => (
+                        <button
+                          key={f}
+                          type="button"
+                          onClick={() => setFormat(f)}
+                          style={{
+                            fontFamily: 'var(--nx-mono)', fontSize: 10, padding: '3px 10px',
+                            border: `1px solid ${format === f ? 'var(--nx-amber)' : 'var(--nx-border)'}`,
+                            borderRadius: 4,
+                            background: format === f ? 'rgba(245,158,11,0.12)' : 'transparent',
+                            color: format === f ? 'var(--nx-amber)' : 'var(--nx-text-3)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {f === 'tiktok' ? 'TikTok (9:16)' : f === 'linkedin' ? 'LinkedIn (16:9)' : 'Instagram (9:16)'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              ))}
-              <button
-                type="button"
-                onClick={addStep}
-                style={{
-                  fontFamily: 'var(--nx-mono)', fontSize: 10, padding: '6px',
-                  border: '1px dashed var(--nx-border)', borderRadius: 6, background: 'none',
-                  color: 'var(--nx-text-4)', cursor: 'pointer',
-                }}
-              >
-                + Add step
-              </button>
-            </div>
-          </Panel>
+              </Panel>
 
-          <Panel title="Music">
-            {tracks.length === 0 ? (
-              <p className="vg-empty" style={{ margin: 0 }}>No music tracks — upload via the Music Library API</p>
-            ) : (
-              <div style={{ display: 'grid', gap: 6 }}>
-                <button
-                  type="button"
-                  onClick={() => setTrackId('')}
-                  style={{
-                    fontFamily: 'var(--nx-mono)', fontSize: 10, padding: '4px 10px',
-                    border: `1px solid ${trackId === '' ? 'var(--nx-amber)' : 'var(--nx-border)'}`,
-                    borderRadius: 4,
-                    background: trackId === '' ? 'rgba(245,158,11,0.12)' : 'transparent',
-                    color: trackId === '' ? 'var(--nx-amber)' : 'var(--nx-text-4)',
-                    cursor: 'pointer', textAlign: 'left',
-                  }}
-                >
-                  No music
-                </button>
-                {tracks.map((t) => (
+              <Panel title="Script Steps">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {steps.map((step, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        background: 'var(--nx-surface-2)', border: '1px solid var(--nx-border)',
+                        borderRadius: 6, padding: '10px 12px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                        <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', minWidth: 20 }}>#{i + 1}</span>
+                        <select
+                          className="vg-input"
+                          value={step.action}
+                          onChange={(e) => updateStep(i, { action: e.target.value })}
+                          style={{ width: 90, fontSize: 10 }}
+                        >
+                          {ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
+                        </select>
+                        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                          {i > 0 && (
+                            <button type="button" onClick={() => moveStep(i, -1)}
+                              style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, background: 'none', border: '1px solid var(--nx-border)', borderRadius: 3, padding: '2px 5px', cursor: 'pointer', color: 'var(--nx-text-4)' }}>
+                              ↑
+                            </button>
+                          )}
+                          {i < steps.length - 1 && (
+                            <button type="button" onClick={() => moveStep(i, 1)}
+                              style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, background: 'none', border: '1px solid var(--nx-border)', borderRadius: 3, padding: '2px 5px', cursor: 'pointer', color: 'var(--nx-text-4)' }}>
+                              ↓
+                            </button>
+                          )}
+                          <button type="button" onClick={() => removeStep(i)}
+                            style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, background: 'none', border: '1px solid var(--nx-border)', borderRadius: 3, padding: '2px 5px', cursor: 'pointer', color: '#ef4444' }}>
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                      {step.action === 'navigate' && (
+                        <input
+                          type="url"
+                          className="vg-input"
+                          placeholder="URL to navigate to"
+                          value={step.selector ?? ''}
+                          onChange={(e) => updateStep(i, { selector: e.target.value })}
+                          style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
+                        />
+                      )}
+                      {(step.action === 'click' || step.action === 'fill' || step.action === 'scroll') && (
+                        <input
+                          type="text"
+                          className="vg-input"
+                          placeholder="CSS selector (e.g. .nx-panel__head or button[type='submit'])"
+                          value={step.selector ?? ''}
+                          onChange={(e) => updateStep(i, { selector: e.target.value })}
+                          style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
+                        />
+                      )}
+                      {step.action === 'fill' && (
+                        <input
+                          type="text"
+                          className="vg-input"
+                          placeholder="Text to type"
+                          value={step.text ?? ''}
+                          onChange={(e) => updateStep(i, { text: e.target.value })}
+                          style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
+                        />
+                      )}
+                      {step.action === 'wait' && (
+                        <input
+                          type="number"
+                          className="vg-input"
+                          placeholder="Milliseconds (e.g. 2000)"
+                          value={step.ms ?? ''}
+                          onChange={(e) => updateStep(i, { ms: parseInt(e.target.value) || undefined })}
+                          style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
+                        />
+                      )}
+                      <textarea
+                        className="vg-input"
+                        placeholder="Narration for this step (spoken by ElevenLabs voice). Leave blank for silent steps."
+                        value={step.narration}
+                        onChange={(e) => updateStep(i, { narration: e.target.value })}
+                        rows={2}
+                        style={{ width: '100%', resize: 'vertical', fontSize: 10 }}
+                      />
+                    </div>
+                  ))}
                   <button
-                    key={t.id}
                     type="button"
-                    onClick={() => setTrackId(t.id)}
+                    onClick={addStep}
                     style={{
-                      fontFamily: 'var(--nx-mono)', fontSize: 10, padding: '4px 10px',
-                      border: `1px solid ${trackId === t.id ? 'var(--nx-amber)' : 'var(--nx-border)'}`,
-                      borderRadius: 4,
-                      background: trackId === t.id ? 'rgba(245,158,11,0.12)' : 'transparent',
-                      color: trackId === t.id ? 'var(--nx-amber)' : 'var(--nx-text-3)',
-                      cursor: 'pointer', textAlign: 'left',
+                      fontFamily: 'var(--nx-mono)', fontSize: 10, padding: '6px',
+                      border: '1px dashed var(--nx-border)', borderRadius: 6, background: 'none',
+                      color: 'var(--nx-text-4)', cursor: 'pointer',
                     }}
                   >
-                    {t.title}{t.artist ? ` — ${t.artist}` : ''}&ensp;
-                    <span style={{ color: 'var(--nx-text-4)', fontSize: 9 }}>{t.mood} · {t.use_case}</span>
+                    + Add step
                   </button>
-                ))}
-              </div>
-            )}
-          </Panel>
+                </div>
+              </Panel>
 
-          <div>
-            <Button
-              label={submitting ? 'Submitting…' : 'Submit Job'}
-              variant="primary"
-              size="sm"
-              disabled={submitting || !url || steps.length === 0 || polling}
-              onClick={() => void handleSubmit()}
-            />
-          </div>
+              <Panel title="Music">
+                {tracks.length === 0 ? (
+                  <p className="vg-empty" style={{ margin: 0 }}>No music tracks — upload via the Music Library API</p>
+                ) : (
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {[{ id: '', title: 'No music', artist: null, mood: '', use_case: '' }, ...tracks].map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setTrackId(t.id)}
+                        style={{
+                          fontFamily: 'var(--nx-mono)', fontSize: 10, padding: '4px 10px',
+                          border: `1px solid ${trackId === t.id ? 'var(--nx-amber)' : 'var(--nx-border)'}`,
+                          borderRadius: 4,
+                          background: trackId === t.id ? 'rgba(245,158,11,0.12)' : 'transparent',
+                          color: trackId === t.id ? 'var(--nx-amber)' : 'var(--nx-text-3)',
+                          cursor: 'pointer', textAlign: 'left',
+                        }}
+                      >
+                        {t.title}{t.artist ? ` — ${t.artist}` : ''}&ensp;
+                        {t.mood && <span style={{ color: 'var(--nx-text-4)', fontSize: 9 }}>{t.mood} · {t.use_case}</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </Panel>
+
+              <div>
+                <Button
+                  label={submitting ? 'Submitting…' : 'Submit Job'}
+                  variant="primary"
+                  size="sm"
+                  disabled={submitting || !url || steps.length === 0 || polling}
+                  onClick={() => void handleSubmit()}
+                />
+              </div>
+            </>
+          )}
         </div>
 
         {/* ── Status + history ─────────────────────────────────────────────── */}
         <div className="vg-stack">
 
-          {/* Active job status */}
           {job && (
             <Panel title="Job Status" titleAccent={job.status === 'done' ? 'green' : 'amber'}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
@@ -332,8 +628,7 @@ export function DemoForgePage() {
               <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginBottom: 8 }}>
                 Job ID: {job.id}
               </div>
-              {/* Pipeline steps */}
-              {['pending','recording','synthesizing','mixing','uploading','done'].map((s, i, arr) => {
+              {['pending','recording','synthesizing','mixing','uploading','done'].map((s) => {
                 const statuses = ['pending','recording','synthesizing','mixing','uploading','done']
                 const currentIdx = statuses.indexOf(job.status)
                 const stepIdx    = statuses.indexOf(s)
@@ -357,12 +652,8 @@ export function DemoForgePage() {
               })}
               {job.output_url && (
                 <div style={{ marginTop: 12 }}>
-                  <a
-                    href={job.output_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-cyan)', textDecoration: 'underline' }}
-                  >
+                  <a href={job.output_url} target="_blank" rel="noopener noreferrer"
+                    style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-cyan)', textDecoration: 'underline' }}>
                     ↓ Download video
                   </a>
                 </div>
@@ -375,7 +666,6 @@ export function DemoForgePage() {
             </Panel>
           )}
 
-          {/* Job history */}
           {history.length > 0 && (
             <Panel title="Recent Jobs">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -409,6 +699,17 @@ export function DemoForgePage() {
             </Panel>
           )}
 
+          {mode === 'templates' && !job && (
+            <Panel title="How it works">
+              <ol style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-3)', lineHeight: 2, paddingLeft: 16, letterSpacing: '0.08em' }}>
+                <li>Set the Vantage base URL above</li>
+                <li>Pick a template and click Load</li>
+                <li>Review and tweak steps in the editor</li>
+                <li>Select a music track (optional)</li>
+                <li>Submit — Playwright records, ElevenLabs narrates, FFmpeg renders</li>
+              </ol>
+            </Panel>
+          )}
         </div>
       </div>
     </>
