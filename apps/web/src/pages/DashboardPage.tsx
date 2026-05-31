@@ -20,10 +20,13 @@ export function DashboardPage() {
   const [topics, setTopics]       = React.useState<Topic[]>([])
   const [err, setErr]             = React.useState<string | null>(null)
   const [msg, setMsg]             = React.useState<string | null>(null)
-  const [generating, setGenerating] = React.useState<string | null>(null) // `${topicId}:${channel}`
-  const [pulling, setPulling]     = React.useState(false)
-  const [pulsing, setPulsing]     = React.useState(false)
+  const [generating, setGenerating] = React.useState<string | null>(null) // `${topicId}:${channel}:${variants}`
+  const [pulling, setPulling]       = React.useState(false)
+  const [pulsing, setPulsing]       = React.useState(false)
+  const [biolooping, setBiolooping] = React.useState(false)
   const [genChannel, setGenChannel] = React.useState<ChannelSlug>('x')
+  const [genImage, setGenImage]     = React.useState(false)
+  const [genVariants, setGenVariants] = React.useState<1 | 2 | 3>(1)
 
   const loadDash = React.useCallback(async () => {
     try {
@@ -79,12 +82,31 @@ export function DashboardPage() {
     finally { setPulsing(false) }
   }
 
+  const handleBioLoop = async () => {
+    setBiolooping(true); setErr(null); setMsg(null)
+    try {
+      const r = await vantageApi.runBioLoop()
+      setMsg(`BioLoop complete — analyzed ${r.analyzed} pieces, updated ${r.updated} weights`)
+      await loadDash()
+    } catch (e) { setErr(String((e as Error).message)) }
+    finally { setBiolooping(false) }
+  }
+
   const handleGenerate = async (topicId: string) => {
-    const key = `${topicId}:${genChannel}`
+    const key = `${topicId}:${genChannel}:${genVariants}`
     setGenerating(key); setErr(null); setMsg(null)
     try {
-      await vantageApi.generate(genChannel, topicId)
-      setMsg(`Draft created for ${genChannel} — check Queue to audit`)
+      if (genVariants > 1) {
+        const r = await vantageApi.generateVariants(genChannel, topicId, genVariants)
+        setMsg(`${genVariants} variants created for ${genChannel} — check Queue to audit`)
+        console.log('[generate] variant group:', r.variant_group_id)
+      } else if (genImage) {
+        await vantageApi.generateWithImage(genChannel, topicId)
+        setMsg(`Draft + image created for ${genChannel} — check Queue to audit`)
+      } else {
+        await vantageApi.generate(genChannel, topicId)
+        setMsg(`Draft created for ${genChannel} — check Queue to audit`)
+      }
       await loadDash()
     } catch (e) { setErr(String((e as Error).message)) }
     finally { setGenerating(null) }
@@ -145,7 +167,8 @@ export function DashboardPage() {
           titleAccent="amber"
           action={{ label: pulling ? 'Pulling…' : 'Pull Topics', onClick: () => void handlePullTopics() }}
         >
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+          {/* Toolbar: Pulse Reactor + BioLoop */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginBottom: 10 }}>
             <button
               type="button"
               className="nx-btn nx-btn--ghost nx-btn--sm"
@@ -156,9 +179,20 @@ export function DashboardPage() {
             >
               {pulsing ? '⚡ Scanning…' : '⚡ Pulse Reactor'}
             </button>
+            <button
+              type="button"
+              className="nx-btn nx-btn--ghost nx-btn--sm"
+              disabled={biolooping}
+              onClick={() => void handleBioLoop()}
+              title="Run BioLoop — analyze engagement and update generation weights"
+              style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, letterSpacing: '0.06em' }}
+            >
+              {biolooping ? '🧬 Running…' : '🧬 BioLoop'}
+            </button>
           </div>
-          {/* Channel selector for generation */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+
+          {/* Channel selector */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
             <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', alignSelf: 'center', marginRight: 2 }}>
               GEN FOR
             </span>
@@ -168,9 +202,7 @@ export function DashboardPage() {
                 type="button"
                 onClick={() => setGenChannel(slug)}
                 style={{
-                  fontFamily: 'var(--nx-mono)',
-                  fontSize: 10,
-                  padding: '2px 8px',
+                  fontFamily: 'var(--nx-mono)', fontSize: 10, padding: '2px 8px',
                   border: `1px solid ${genChannel === slug ? 'var(--nx-amber)' : 'var(--nx-border)'}`,
                   borderRadius: 4,
                   background: genChannel === slug ? 'rgba(245,158,11,0.12)' : 'transparent',
@@ -183,12 +215,52 @@ export function DashboardPage() {
             ))}
           </div>
 
+          {/* Generation options: + Image toggle + A/B variant selector */}
+          <div style={{ display: 'flex', gap: 10, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* + Image checkbox */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontFamily: 'var(--nx-mono)', fontSize: 10, color: genImage ? 'var(--nx-amber)' : 'var(--nx-text-4)' }}>
+              <input
+                type="checkbox"
+                checked={genImage}
+                onChange={(e) => { setGenImage(e.target.checked); if (e.target.checked) setGenVariants(1) }}
+                style={{ accentColor: 'var(--nx-amber)', width: 12, height: 12 }}
+              />
+              + Image (DALL·E 3)
+            </label>
+            {/* A/B variant selector */}
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)' }}>VARIANTS</span>
+              {([1, 2, 3] as const).map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => { setGenVariants(n); if (n > 1) setGenImage(false) }}
+                  style={{
+                    fontFamily: 'var(--nx-mono)', fontSize: 10, padding: '2px 7px',
+                    border: `1px solid ${genVariants === n ? 'var(--nx-amber)' : 'var(--nx-border)'}`,
+                    borderRadius: 4,
+                    background: genVariants === n ? 'rgba(245,158,11,0.12)' : 'transparent',
+                    color: genVariants === n ? 'var(--nx-amber)' : 'var(--nx-text-3)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {n === 1 ? '1×' : `A/B ×${n}`}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {topics.length === 0 ? (
             <p className="vg-empty">No topics loaded — pull from Shift to begin</p>
           ) : (
             <div className="vg-topic-list">
               {topics.map((t) => {
-                const key = `${t.id}:${genChannel}`
+                const key = `${t.id}:${genChannel}:${genVariants}`
+                const genLabel = genVariants > 1
+                  ? `A/B ×${genVariants} ${CHANNEL_LABEL[genChannel]}`
+                  : genImage
+                    ? `Gen + 🖼 ${CHANNEL_LABEL[genChannel]}`
+                    : `Gen ${CHANNEL_LABEL[genChannel]}`
                 return (
                   <div key={t.id} className="vg-topic-item">
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -200,7 +272,6 @@ export function DashboardPage() {
                         {t.source_product === 'pulse' && (
                           <div className="vg-topic-vert" style={{ color: 'var(--nx-cyan)', borderColor: 'var(--nx-cyan)' }}>⚡ pulse</div>
                         )}
-                        {/* 3B-6: badge recycled (evergreen) topics */}
                         {t.recycle_after && (
                           <div className="vg-topic-vert" style={{ color: '#22c55e', borderColor: '#22c55e' }}>♻ evergreen</div>
                         )}
@@ -213,7 +284,7 @@ export function DashboardPage() {
                       disabled={generating === key}
                       onClick={() => void handleGenerate(t.id)}
                     >
-                      {generating === key ? '…' : `Gen ${CHANNEL_LABEL[genChannel]}`}
+                      {generating === key ? '…' : genLabel}
                     </button>
                   </div>
                 )

@@ -163,8 +163,9 @@ for Instagram/Reddit, portrait (1024×1792) for TikTok.
 
 **UTM tagging:** After the piece is inserted (so the `piece.id` is known), all URL-like
 strings in `content_payload` are tagged with `utm_source=<channel>`, `utm_medium=social`,
-`utm_campaign=vantage`, `utm_content=<piece_id>`. ⚠️ Currently does not tag URLs inside
-HTML email bodies — only flat string fields.
+`utm_campaign=vantage`, `utm_content=<piece_id>`. The `tagUrls()` regex matches URLs
+inside HTML `href` attributes (stops at `"`) so email HTML bodies are correctly tagged
+at the adapter level before sending via Resend.
 
 **Files:**
 - `apps/api/src/services/kuze.ts` — main generation logic, weight loading
@@ -254,7 +255,8 @@ Supports text posts (`kind: "self"`) and link posts (`kind: "link"`). Returns th
 #### Email
 Sends via Resend API to all active subscribers (where `unsubscribed_at IS NULL`).
 Fetches subscriber list, sends one email per subscriber via Resend's single-send endpoint.
-Returns the Resend message ID. ⚠️ Does not run UTM tagging on HTML body links.
+Runs `tagUrls()` on the HTML body before sending so all `<a href="...">` links carry UTM
+parameters. Returns the Resend message ID.
 
 #### TikTok / Instagram / Facebook (manual)
 No direct API publish. These adapters package the `content_payload` into a structured
@@ -303,9 +305,10 @@ Calls `refreshTopicsFromPulse()` — fetches HN, Reddit, and optionally NewsAPI 
 deduplicates, and inserts new pulse topics. Loads subreddit list from the Reddit channel's
 `cadence_config`.
 
-#### BioLoop tick (every 24 hours)
-Calls `runBioLoop()` if `bioloop_enabled` is true in settings. Analyzes published pieces
-from the last 7 days against engagement events and updates pattern weights.
+#### BioLoop (Supabase Edge Function — daily at 02:00 UTC)
+Runs as `supabase/functions/bioloop/index.ts` on a pg_cron schedule. Calls `runBioLoop()`
+and `identifyEvergreenTopics()` in parallel if `bioloop_enabled` is true in settings.
+Can also be triggered manually via the Dashboard 🧬 BioLoop button or `POST /v1/bioloop/run`.
 
 **Files:**
 - `apps/api/src/services/scheduler.ts`
@@ -397,9 +400,9 @@ Handles the CRC challenge-response required by Twitter's Account Activity API.
 Computes `HMAC-SHA256(crc_token, X_WEBHOOK_SECRET)` and returns as `response_token`.
 
 #### X webhook (`POST /v1/webhooks/x`)
-⚠️ **Does not verify the `x-twitter-webhooks-signature` header** — accepts all POSTs.
-Parses the payload, extracts `event_type` and `tweet_id`, looks up the matching
-content piece, and inserts into `engagement_events`.
+Verifies the `x-twitter-webhooks-signature` header: `sha256=HMAC-SHA256(X_CONSUMER_SECRET, rawBody)`.
+Rejects unverified payloads with 401. Parses the payload, extracts `event_type` and
+`tweet_id`, looks up the matching content piece, and inserts into `engagement_events`.
 
 #### LinkedIn webhook (`GET /v1/webhooks/linkedin`)
 Echoes back `challengeCode` for LinkedIn subscription verification.
@@ -511,8 +514,9 @@ Processing is sequential (one job at a time) to avoid overloading the Railway wo
 - `GET /v1/demoforge/jobs/:id`
 - `GET /v1/demoforge/jobs` (lists recent jobs from DB)
 
-⚠️ **No frontend UI exists for submitting DemoForge jobs.** The API is functional but
-requires direct API calls or a future UI page.
+The DemoForge job submission UI lives at `/demoforge` in the web app (`DemoForgePage.tsx`).
+It includes the target URL input, format selector, step editor, music library picker,
+job submission, and a 5-second status poller showing pipeline progress.
 
 **Files:**
 - `apps/demoforge/src/index.ts` — Hono server
@@ -539,11 +543,14 @@ The primary operator view. Loads on login and auto-updates via Supabase realtime
 - Topics Available — unused topics in the pipeline
 
 **Source Pipeline panel (left):**
-- 🧬 BioLoop button — manually triggers weight update cycle
+- 🧬 BioLoop button — manually triggers `POST /v1/bioloop/run`, reports pieces analyzed and weights updated
 - ⚡ Pulse Reactor button — manually triggers external signal scan
-- Generate options: channel selector, `+ Image` checkbox (DALL-E 3), `1× / A/B×2 / A/B×3` variant buttons
+- Channel selector — pick which channel to generate for (𝕏, in, r/, ✉, ♪, ◉, f)
+- `+ Image (DALL·E 3)` checkbox — generates an image alongside text (single variant only)
+- Variant selector — `1×` (single), `A/B ×2`, `A/B ×3`; A/B pieces share a `variant_group_id`
 - Topic list — shows all loaded topics with vertical tag, ⚡ pulse badge for pulse-sourced
-  topics, and a per-topic generate button
+  topics, ♻ evergreen badge for recycled topics, and a per-topic generate button whose label
+  reflects the active channel, image, and variant settings
 
 **Live Activity panel (right):**
 - Real-time feed of `activity_events` inserted in the last 24h, auto-updated via
@@ -1025,4 +1032,4 @@ requires direct API calls.
 
 ---
 
-*Last updated: Phase 3A and 3B fully shipped. All 15 planned items complete.*
+*Last updated: Phase 3A and 3B fully shipped. All 15 planned items complete. Dashboard BioLoop button, + Image checkbox, and A/B variant selectors wired. BioLoop moved to Supabase Edge Function. Stale ⚠️ warnings removed.*
