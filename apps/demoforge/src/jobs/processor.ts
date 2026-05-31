@@ -57,8 +57,8 @@ async function recordBrowser(
     // Brief pause at the end so last state is visible
     await page.waitForTimeout(1500);
   } finally {
-    await page.close();
     const recording = await page.video()?.path();
+    await page.close();
     await context.close();
     await browser.close();
     if (recording && recording !== videoPath) {
@@ -193,8 +193,18 @@ async function uploadToStorage(
 
   if (error) throw new Error(`Storage upload failed: ${error.message}`);
 
+  // Try public URL first (works when bucket is public = true)
   const { data: urlData } = sb.storage.from("vantage-media").getPublicUrl(key);
-  return urlData.publicUrl;
+  if (urlData?.publicUrl) return urlData.publicUrl;
+
+  // Fallback: signed URL valid for 7 days (works on private buckets)
+  const { data: signedData, error: signErr } = await sb.storage
+    .from("vantage-media")
+    .createSignedUrl(key, 60 * 60 * 24 * 7);
+  if (signErr || !signedData?.signedUrl) {
+    throw new Error(`Failed to generate download URL: ${signErr?.message ?? "unknown"}`);
+  }
+  return signedData.signedUrl;
 }
 
 // ── Top-level processor ───────────────────────────────────────────────────────
