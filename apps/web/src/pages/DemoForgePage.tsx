@@ -13,7 +13,8 @@ type ScriptStep = {
 type MusicTrack = { id: string; title: string; artist: string | null; mood: string; use_case: string }
 type JobStatus = { id: string; status: string; output_url: string | null; error_message: string | null; updated_at: string }
 
-const ACTIONS = ['click', 'fill', 'hover', 'wait', 'navigate', 'scroll']
+// Must match the action enum in apps/api/src/routes/demoforge.ts scriptStepSchema
+const ACTIONS = ['navigate', 'click', 'fill', 'wait', 'scroll', 'narrate']
 const FORMATS: Format[] = ['tiktok', 'linkedin', 'instagram']
 
 const STATUS_COLOR: Record<string, string> = {
@@ -194,11 +195,22 @@ export function DemoForgePage() {
                       </button>
                     </div>
                   </div>
-                  {step.action !== 'wait' && (
+                  {/* navigate → URL input; click/fill/scroll → CSS selector; wait → ms; narrate → no extra field */}
+                  {step.action === 'navigate' && (
+                    <input
+                      type="url"
+                      className="vg-input"
+                      placeholder="URL to navigate to (e.g. https://example.com/feature)"
+                      value={step.selector ?? ''}
+                      onChange={(e) => updateStep(i, { selector: e.target.value })}
+                      style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
+                    />
+                  )}
+                  {(step.action === 'click' || step.action === 'fill' || step.action === 'scroll') && (
                     <input
                       type="text"
                       className="vg-input"
-                      placeholder="CSS selector (e.g. #button-id)"
+                      placeholder="CSS selector (e.g. #button-id or .nav-link)"
                       value={step.selector ?? ''}
                       onChange={(e) => updateStep(i, { selector: e.target.value })}
                       style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
@@ -208,7 +220,7 @@ export function DemoForgePage() {
                     <input
                       type="text"
                       className="vg-input"
-                      placeholder="Text to type"
+                      placeholder="Text to type into the field"
                       value={step.text ?? ''}
                       onChange={(e) => updateStep(i, { text: e.target.value })}
                       style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
@@ -218,7 +230,7 @@ export function DemoForgePage() {
                     <input
                       type="number"
                       className="vg-input"
-                      placeholder="Milliseconds (e.g. 1000)"
+                      placeholder="Milliseconds to pause (e.g. 1500)"
                       value={step.ms ?? ''}
                       onChange={(e) => updateStep(i, { ms: parseInt(e.target.value) || undefined })}
                       style={{ width: '100%', marginBottom: 6, fontSize: 10 }}

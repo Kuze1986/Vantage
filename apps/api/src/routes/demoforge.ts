@@ -14,8 +14,12 @@ import { logActivity } from "../lib/activity.js";
 export const demoforgeRoutes = new Hono();
 
 function getDemoForgeBase(): string {
-  const url = process.env.DEMOFORGE_URL;
-  if (!url) throw new HTTPException(503, { message: "DEMOFORGE_URL is not configured" });
+  let url = process.env.DEMOFORGE_URL;
+  if (!url) throw new HTTPException(503, { message: "DEMOFORGE_URL is not configured. Set it in Railway (e.g. https://demoforge-worker.up.railway.app)" });
+  // Normalize — Railway env vars are often set without the protocol prefix
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    url = `https://${url}`;
+  }
   return url.replace(/\/$/, "");
 }
 
