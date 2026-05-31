@@ -372,20 +372,26 @@ export function DemoForgePage() {
                 <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-3)', marginBottom: 10, letterSpacing: '0.08em' }}>
                   The Vantage instance Playwright will record. Auto-filled from your current origin.
                 </p>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <input
                     type="url"
                     className="vg-input"
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
                     placeholder="https://app.vantage.your-domain.com"
-                    style={{ flex: 1 }}
+                    style={{ flex: 1, minWidth: 0 }}
                   />
                   <button
                     type="button"
-                    className="vg-input"
                     onClick={() => setBaseUrl(window.location.origin)}
-                    style={{ whiteSpace: 'nowrap', cursor: 'pointer', fontSize: 10, fontFamily: 'var(--nx-mono)', background: 'none' }}
+                    style={{
+                      whiteSpace: 'nowrap', cursor: 'pointer',
+                      fontFamily: 'var(--nx-mono)', fontSize: 10, letterSpacing: '0.08em',
+                      padding: '7px 12px', flexShrink: 0,
+                      border: '1px solid var(--nx-border-strong)',
+                      background: 'var(--nx-surface-2)', color: 'var(--nx-text-3)',
+                      borderRadius: 4,
+                    }}
                   >
                     Use this origin
                   </button>
