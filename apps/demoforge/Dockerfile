@@ -3,14 +3,14 @@ FROM node:22-slim AS builder
 
 WORKDIR /app
 
-RUN npm install -g pnpm@9
-
+# Use npm directly — demoforge is a standalone service (not a pnpm workspace
+# consumer) so no root-level lockfile is available in the Docker build context.
 COPY package.json ./
-RUN pnpm install --frozen-lockfile
+RUN npm install
 
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
-RUN pnpm build
+RUN npm run build
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────────
 # Playwright image ships with Chromium + all deps pre-installed
@@ -26,7 +26,7 @@ RUN apt-get update && \
 # Copy built output and production deps
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
-COPY package.json ./
+COPY --from=builder /app/package.json ./
 
 # Playwright browsers (Chromium already in the base image)
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1

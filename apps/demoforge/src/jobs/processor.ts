@@ -77,7 +77,8 @@ async function executeStep(
 ): Promise<void> {
   switch (step.action) {
     case "navigate":
-      await page.goto(step.text ?? "", { waitUntil: "domcontentloaded", timeout: 15_000 });
+      // URL is stored in selector (as set by DemoForgePage.tsx); fall back to text
+      await page.goto(step.selector ?? step.text ?? "", { waitUntil: "domcontentloaded", timeout: 15_000 });
       break;
     case "click":
       if (step.selector) await page.click(step.selector, { timeout: 5_000 });

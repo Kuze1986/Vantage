@@ -35,9 +35,13 @@ async function demoFetch(path: string, init: RequestInit = {}): Promise<unknown>
   let body: unknown;
   try { body = text ? JSON.parse(text) : null; } catch { body = text; }
   if (!res.ok) {
-    const msg = typeof body === "object" && body && "error" in body
-      ? String((body as { error: string }).error) : text;
-    throw new HTTPException(res.status as 400 | 500, { message: msg });
+    // demoforge returns { error: "..." }; Railway 502s return { message: "..." }
+    const msg =
+      typeof body === "object" && body && "error"   in body ? String((body as { error:   string }).error)   :
+      typeof body === "object" && body && "message" in body ? String((body as { message: string }).message) :
+      text || `demoforge responded ${res.status}`;
+    const status = res.status >= 400 && res.status < 600 ? res.status as 400 | 500 : 500;
+    throw new HTTPException(status, { message: `DemoForge: ${msg}` });
   }
   return body;
 }

@@ -1,4 +1,14 @@
 import "dotenv/config";
+
+// Validate required env vars before anything else — crash fast with a clear message
+const REQUIRED_ENV = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"] as const;
+for (const key of REQUIRED_ENV) {
+  if (!process.env[key]) {
+    console.error(`[demoforge] FATAL: missing required env var ${key}`);
+    process.exit(1);
+  }
+}
+
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
