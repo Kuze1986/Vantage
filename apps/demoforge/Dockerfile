@@ -6,7 +6,9 @@ WORKDIR /app
 # Use npm directly — demoforge is a standalone service (not a pnpm workspace
 # consumer) so no root-level lockfile is available in the Docker build context.
 COPY package.json ./
-RUN npm install
+# Pin playwright to exactly match the runtime base image version (v1.49.0)
+# to avoid Chromium API mismatches. Other deps can float within package.json ranges.
+RUN npm install && npm install playwright@1.49.0 --save-exact
 
 COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
@@ -18,9 +20,12 @@ FROM mcr.microsoft.com/playwright:v1.49.0-noble AS runtime
 
 WORKDIR /app
 
-# FFmpeg for video mixing
+# Install Node.js 22 + FFmpeg
+# The Playwright base image (Ubuntu Noble) does not include Node.js.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends curl ffmpeg && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy built output and production deps
