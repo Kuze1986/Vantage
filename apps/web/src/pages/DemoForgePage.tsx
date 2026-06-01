@@ -238,6 +238,82 @@ function TemplateCard({
   )
 }
 
+// ── Script paste parser ───────────────────────────────────────────────────────
+// Accepts the plain-text "STEP N - ACTION" format and returns ScriptStep[].
+//
+// Format per block:
+//   STEP N - Navigate           → action: navigate, URL on next bare line
+//   STEP N - Click              → action: click, Selector: <css>
+//   STEP N - Fill               → action: fill,   Selector: <css>, Text: <value>
+//   STEP N - Scroll             → action: scroll
+//   STEP N - Wait               → action: wait,   Wait: <N>ms
+//   STEP N - Narrate            → action: narrate
+//   Narration: <text>           → narration field (any action)
+//   Wait: <N>ms (non-wait)      → appends an implicit wait step after
+
+function parseScriptText(raw: string): ScriptStep[] {
+  const out: ScriptStep[] = []
+
+  // Split on step headers — keep delimiter so each block starts with the action line
+  const blocks = raw.split(/^\s*STEP\s+\d+\s*[-–]\s*/im).filter((b) => b.trim())
+
+  for (const block of blocks) {
+    const lines = block.split('\n').map((l) => l.trim()).filter(Boolean)
+    if (!lines.length) continue
+
+    // First line is the action name (may include trailing text, e.g. "Navigate" or "Navigate\r")
+    const actionRaw = lines[0].toLowerCase().replace(/[^a-z]/g, '')
+    let action: ScriptStep['action'] = 'narrate'
+    if (actionRaw.includes('navigate')) action = 'navigate'
+    else if (actionRaw.includes('click'))    action = 'click'
+    else if (actionRaw.includes('fill'))     action = 'fill'
+    else if (actionRaw.includes('scroll'))   action = 'scroll'
+    else if (actionRaw.includes('wait'))     action = 'wait'
+    else if (actionRaw.includes('narrate'))  action = 'narrate'
+
+    let selector  = ''
+    let text      = ''
+    let ms: number | undefined
+    let narration = ''
+    let trailingWaitMs: number | undefined
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i]
+      const lower = line.toLowerCase()
+
+      if (lower.startsWith('narration:')) {
+        narration = line.slice('narration:'.length).trim()
+      } else if (lower.startsWith('selector:')) {
+        selector = line.slice('selector:'.length).trim()
+      } else if (lower.startsWith('text:')) {
+        text = line.slice('text:'.length).trim()
+      } else if (lower.startsWith('wait:')) {
+        const parsed = parseInt(line.slice('wait:'.length).trim().replace(/ms.*$/i, ''), 10)
+        if (!isNaN(parsed)) {
+          if (action === 'wait') ms = parsed
+          else trailingWaitMs = parsed
+        }
+      } else if (action === 'navigate' && !selector && (line.startsWith('http') || line.startsWith('/'))) {
+        // bare URL line for navigate steps
+        selector = line
+      }
+    }
+
+    const step: ScriptStep = { action, narration }
+    if (selector) step.selector = selector
+    if (text)     step.text     = text
+    if (ms !== undefined) step.ms = ms
+    out.push(step)
+
+    // Append implicit wait step for non-wait actions that specified Wait:
+    if (action !== 'wait' && trailingWaitMs !== undefined) {
+      out.push({ action: 'wait', narration: '', ms: trailingWaitMs })
+    }
+  }
+
+  return out
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function DemoForgePage() {
@@ -252,10 +328,13 @@ export function DemoForgePage() {
   const [trackId, setTrackId]   = React.useState<string>('')
   const [job, setJob]           = React.useState<JobStatus | null>(null)
   const [history, setHistory]   = React.useState<JobStatus[]>([])
-  const [submitting, setSubmitting] = React.useState(false)
-  const [polling, setPolling]       = React.useState(false)
-  const [err, setErr]           = React.useState<string | null>(null)
-  const [msg, setMsg]           = React.useState<string | null>(null)
+  const [submitting, setSubmitting]     = React.useState(false)
+  const [polling, setPolling]           = React.useState(false)
+  const [err, setErr]                   = React.useState<string | null>(null)
+  const [msg, setMsg]                   = React.useState<string | null>(null)
+  const [pasteOpen, setPasteOpen]       = React.useState(false)
+  const [pasteText, setPasteText]       = React.useState('')
+  const [parseError, setParseError]     = React.useState<string | null>(null)
   const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Load music tracks + job history on mount
@@ -320,6 +399,23 @@ export function DemoForgePage() {
       startPolling(r.job_id)
     } catch (e) { setErr(String((e as Error).message)) }
     finally { setSubmitting(false) }
+  }
+
+  const handleParseScript = () => {
+    setParseError(null)
+    try {
+      const parsed = parseScriptText(pasteText)
+      if (!parsed.length) { setParseError('No steps found — check the format (STEP 1 - Navigate, etc.)'); return }
+      setSteps(parsed)
+      // Auto-fill URL from the first navigate step
+      const firstNav = parsed.find((s) => s.action === 'navigate' && s.selector)
+      if (firstNav?.selector && !url) setUrl(firstNav.selector)
+      setLoadedTplId(null)
+      setPasteOpen(false)
+      setPasteText('')
+    } catch (e) {
+      setParseError(String((e as Error).message))
+    }
   }
 
   // Step helpers
@@ -471,6 +567,82 @@ export function DemoForgePage() {
                   </div>
                 </div>
               </Panel>
+
+              {/* ── Paste-to-parse ──────────────────────────────────────────── */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => { setPasteOpen((o) => !o); setParseError(null) }}
+                  style={{
+                    width: '100%', textAlign: 'left', cursor: 'pointer',
+                    fontFamily: 'var(--nx-mono)', fontSize: 10, letterSpacing: '0.1em',
+                    padding: '8px 12px',
+                    border: `1px solid ${pasteOpen ? 'var(--nx-amber)' : 'var(--nx-border)'}`,
+                    borderRadius: 4,
+                    background: pasteOpen ? 'rgba(239,160,32,0.06)' : 'var(--nx-surface-2)',
+                    color: pasteOpen ? 'var(--nx-amber)' : 'var(--nx-text-3)',
+                  }}
+                >
+                  {pasteOpen ? '▾' : '▸'}&ensp;📋 PASTE SCRIPT — import from text format
+                </button>
+
+                {pasteOpen && (
+                  <div style={{ marginTop: 6, border: '1px solid var(--nx-amber)', borderRadius: 4, padding: 12, background: 'rgba(239,160,32,0.04)' }}>
+                    <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginBottom: 8, lineHeight: 1.7, letterSpacing: '0.06em' }}>
+                      FORMAT &mdash; one block per step, separated by a blank line:<br />
+                      <span style={{ color: 'var(--nx-amber)' }}>STEP 1 - Navigate</span><br />
+                      https://example.com<br />
+                      Narration: Your narration here.<br />
+                      Wait: 2000ms<br /><br />
+                      <span style={{ color: 'var(--nx-amber)' }}>STEP 2 - Click</span><br />
+                      Selector: .my-button<br />
+                      Narration: Clicking the button.<br /><br />
+                      <span style={{ color: 'var(--nx-amber)' }}>STEP 3 - Wait</span><br />
+                      Wait: 1500ms
+                    </p>
+                    <textarea
+                      className="vg-input"
+                      rows={14}
+                      placeholder={"STEP 1 - Navigate\nhttps://example.com\nNarration: Welcome!\nWait: 2000ms\n\nSTEP 2 - Scroll\nNarration: Scrolling down...\nWait: 1500ms"}
+                      value={pasteText}
+                      onChange={(e) => setPasteText(e.target.value)}
+                      style={{ width: '100%', resize: 'vertical', fontSize: 10, fontFamily: 'var(--nx-mono)', marginBottom: 8 }}
+                    />
+                    {parseError && (
+                      <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: '#ef4444', marginBottom: 8 }}>
+                        {parseError}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={handleParseScript}
+                        disabled={!pasteText.trim()}
+                        style={{
+                          fontFamily: 'var(--nx-mono)', fontSize: 10, letterSpacing: '0.08em',
+                          padding: '6px 16px', cursor: pasteText.trim() ? 'pointer' : 'not-allowed',
+                          background: 'var(--nx-amber)', color: '#000', border: 'none', borderRadius: 3,
+                          opacity: pasteText.trim() ? 1 : 0.4,
+                        }}
+                      >
+                        Load Steps →
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setPasteText(''); setParseError(null) }}
+                        style={{
+                          fontFamily: 'var(--nx-mono)', fontSize: 10, letterSpacing: '0.08em',
+                          padding: '6px 12px', cursor: 'pointer',
+                          background: 'none', color: 'var(--nx-text-3)',
+                          border: '1px solid var(--nx-border)', borderRadius: 3,
+                        }}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <Panel title="Script Steps">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
