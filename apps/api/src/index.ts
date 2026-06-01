@@ -29,7 +29,6 @@ import { soundEffectsRoutes } from "./routes/sound-effects.js";
 import { campaignRoutes } from "./routes/campaigns.js";
 import { intelligenceRoutes } from "./routes/intelligence.js";
 import { audienceRoutes } from "./routes/audience.js";
-import { bioloopRoutes } from "./routes/bioloop.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
 import { startCadenceEngine } from "./services/scheduler.js";
 
@@ -72,7 +71,6 @@ authedV1.route("/demoforge", demoforgeRoutes);
 authedV1.route("/campaigns", campaignRoutes);
 authedV1.route("/intelligence", intelligenceRoutes);
 authedV1.route("/audience", audienceRoutes);
-authedV1.route("/bioloop", bioloopRoutes);
 authedV1.route("/settings", settingsRoutes);
 authedV1.route("/analytics", analyticsRoutes);
 authedV1.route("/captions", captionsRoutes);

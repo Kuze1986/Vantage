@@ -1,14 +1,14 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { runBioLoop } from "../services/bioloop.js";
 import {
-  runBioLoop,
   analyzeVirality,
   recognizeViralPatterns,
   generateViralRecommendation,
   detectEarlyViralSignals,
   calculateSegmentViralityLift,
-} from "../services/bioloop.js";
+} from "../lib/bioloop.js";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 
@@ -63,7 +63,7 @@ biloopRoutes.post("/analyze", async (c) => {
     const analysis = await analyzeVirality(input);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.get("workspace_id");
+    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
 
     // Persist signal to database
     const { data: signal, error } = await sb
@@ -123,7 +123,7 @@ biloopRoutes.get("/signals", async (c) => {
     const offset = parseInt(c.req.query("offset") ?? "0", 10);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.get("workspace_id");
+    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
 
     let query = sb
       .from("viral_signals")
@@ -162,7 +162,7 @@ biloopRoutes.post("/patterns/detect", async (c) => {
       detectPatternsSchema.parse(body);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.get("workspace_id");
+    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
 
     // Fetch top viral posts for pattern analysis
     let query = sb
@@ -199,7 +199,7 @@ biloopRoutes.post("/patterns/detect", async (c) => {
     });
 
     // Persist patterns to database
-    const insertData = patterns.map((pattern) => ({
+    const insertData = patterns.map((pattern: any) => ({
       workspace_id: workspaceId,
       segment_id: segmentId || null,
       source_platform: platform,
@@ -225,7 +225,7 @@ biloopRoutes.post("/patterns/detect", async (c) => {
       source_type: "agent",
       event_type: "patterns_detected",
       summary: `Detected ${patterns.length} viral patterns on ${platform}`,
-      payload: { patterns: patterns.map((p) => p.pattern_name), sample_size: viralPosts.length },
+      payload: { patterns: patterns.map((p: any) => p.pattern_name), sample_size: viralPosts.length },
     });
 
     return c.json({ patterns: savedPatterns });
@@ -251,7 +251,7 @@ biloopRoutes.get("/patterns", async (c) => {
     const offset = parseInt(c.req.query("offset") ?? "0", 10);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.get("workspace_id");
+    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
 
     let query = sb
       .from("virality_patterns")
@@ -287,7 +287,7 @@ biloopRoutes.post("/recommendations", async (c) => {
     const input = recommendationSchema.parse(body);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.get("workspace_id");
+    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
 
     // Fetch segment preferences and patterns
     const { data: segment, error: segError } = await sb
@@ -375,7 +375,7 @@ biloopRoutes.get("/recommendations", async (c) => {
     const offset = parseInt(c.req.query("offset") ?? "0", 10);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.get("workspace_id");
+    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
 
     let query = sb
       .from("virality_recommendations")
@@ -414,7 +414,7 @@ biloopRoutes.post("/boost-signals/detect", async (c) => {
     const input = boostSignalsSchema.parse(body);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.get("workspace_id");
+    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
 
     // Get historical average for comparison
     const { data: recentSignals, error: fetchError } = await sb
