@@ -265,6 +265,23 @@ export const vantageApi = {
     }>;
   },
 
+  // ── Sound Effects Library (Phase 3D-SE) ─────────────────────────────────────
+  listSoundEffects: (category?: string, use_case?: string) => {
+    const params = new URLSearchParams();
+    if (category)  params.set("category", category);
+    if (use_case)  params.set("use_case", use_case);
+    const qs = params.toString();
+    return vantageFetch(`/v1/sound-effects${qs ? `?${qs}` : ""}`) as Promise<{
+      effects: { id: string; title: string; category: string; duration_ms: number | null; storage_path: string; use_case: string; created_at: string }[]
+    }>;
+  },
+
+  registerSoundEffect: (body: { title: string; category: string; duration_ms?: number; storage_path: string; use_case: string }) =>
+    vantageFetch('/v1/sound-effects', { method: 'POST', body: JSON.stringify(body) }) as Promise<{ effect: { id: string; title: string } }>,
+
+  deleteSoundEffect: (id: string) =>
+    vantageFetch(`/v1/sound-effects/${id}`, { method: 'DELETE' }) as Promise<{ ok: boolean }>,
+
   // ── Email Templates (3C-6) ────────────────────────────────────────────────
   listEmailTemplates: () =>
     vantageFetch('/v1/email-templates') as Promise<{ templates: { id: string; name: string; description: string; updated_at: string }[] }>,
@@ -293,8 +310,11 @@ export const vantageApi = {
     content_piece_id?: string;
     target_format: "tiktok" | "linkedin" | "instagram";
     url: string;
-    script: { action: string; selector?: string; text?: string; ms?: number; narration: string }[];
+    script: { action: string; selector?: string; text?: string; ms?: number; narration: string; soundEffect?: { effectId: string; delayMs: number; volumePercent: number } }[];
     music_track_id?: string;
+    narration_volume?: number;
+    music_volume?: number;
+    master_volume?: number;
   }) =>
     vantageFetch("/v1/demoforge/jobs", { method: "POST", body: JSON.stringify(body) }) as Promise<{ job_id: string; status: string }>,
 

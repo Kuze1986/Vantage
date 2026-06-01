@@ -25,6 +25,9 @@ export interface DemoJob {
     script:  ScriptStep[];
     music_track_id?: string;
     voice_id?: string;
+    narration_volume?: number;  // 0-100, default 100
+    music_volume?: number;      // 0-100, default 15
+    master_volume?: number;     // 0-100, default 100
   };
 }
 
@@ -34,6 +37,11 @@ export interface ScriptStep {
   text?:     string;
   ms?:       number;
   narration: string;
+  soundEffect?: {
+    effectId: string;
+    delayMs: number;
+    volumePercent: number;
+  };
 }
 
 function getSupabase() {

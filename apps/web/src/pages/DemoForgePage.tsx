@@ -2,6 +2,7 @@ import React from 'react'
 import { vantageApi } from '../api/vantage'
 import { Panel, Button, Badge } from '../ds'
 import { ThumbnailStudio } from '../creative/Thumbnail'
+import { AudioMixer } from '../components/AudioMixer'
 
 type Format = 'tiktok' | 'linkedin' | 'instagram'
 type ScriptStep = {
@@ -10,8 +11,14 @@ type ScriptStep = {
   text?: string
   ms?: number
   narration: string
+  soundEffect?: {
+    effectId: string
+    delayMs: number
+    volumePercent: number
+  }
 }
 type MusicTrack = { id: string; title: string; artist: string | null; mood: string; use_case: string }
+type SoundEffect = { id: string; title: string; category: string; duration_ms: number | null; storage_path: string; use_case: string; created_at: string }
 type JobStatus = { id: string; status: string; target_format?: string; output_url: string | null; error_message: string | null; updated_at: string }
 
 const ACTIONS = ['navigate', 'click', 'fill', 'scroll', 'narrate']
@@ -246,6 +253,9 @@ function parseScriptText(raw: string): ScriptStep[] {
     let text      = ''
     let ms: number | undefined
     let narration = ''
+    let soundEffectId: string | undefined
+    let soundDelayMs: number = 0
+    let soundVolumePercent: number = 80
 
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i]
@@ -260,6 +270,14 @@ function parseScriptText(raw: string): ScriptStep[] {
       } else if (lower.startsWith('wait:')) {
         const parsed = parseInt(line.slice('wait:'.length).trim().replace(/ms.*$/i, ''), 10)
         if (!isNaN(parsed)) ms = parsed
+      } else if (lower.startsWith('sound:')) {
+        soundEffectId = line.slice('sound:'.length).trim()
+      } else if (lower.startsWith('sounddelay:')) {
+        const parsed = parseInt(line.slice('sounddelay:'.length).trim().replace(/ms.*$/i, ''), 10)
+        if (!isNaN(parsed)) soundDelayMs = parsed
+      } else if (lower.startsWith('soundvolume:')) {
+        const parsed = parseInt(line.slice('soundvolume:'.length).trim().replace(/%.*$/i, ''), 10)
+        if (!isNaN(parsed)) soundVolumePercent = parsed
       } else if (action === 'navigate' && !selector && (line.startsWith('http') || line.startsWith('/'))) {
         // bare URL line for navigate steps
         selector = line
@@ -276,6 +294,7 @@ function parseScriptText(raw: string): ScriptStep[] {
     if (selector) step.selector = selector
     if (text)     step.text     = text
     if (ms !== undefined) step.ms = ms
+    if (soundEffectId) step.soundEffect = { effectId: soundEffectId, delayMs: soundDelayMs, volumePercent: soundVolumePercent }
     out.push(step)
   }
 
@@ -294,6 +313,11 @@ export function DemoForgePage() {
   const [steps, setSteps]       = React.useState<ScriptStep[]>([{ ...DEFAULT_STEP }])
   const [tracks, setTracks]     = React.useState<MusicTrack[]>([])
   const [trackId, setTrackId]   = React.useState<string>('')
+  const [soundEffects, setSoundEffects] = React.useState<SoundEffect[]>([])
+  const [narrationVolume, setNarrationVolume] = React.useState(100)
+  const [musicVolume, setMusicVolume] = React.useState(15)
+  const [effectVolumes, setEffectVolumes] = React.useState<number[]>([])
+  const [masterVolume, setMasterVolume] = React.useState(100)
   const [job, setJob]           = React.useState<JobStatus | null>(null)
   const [history, setHistory]   = React.useState<JobStatus[]>([])
   const [thumbJob, setThumbJob] = React.useState<JobStatus | null>(null)
@@ -306,9 +330,10 @@ export function DemoForgePage() {
   const [parseError, setParseError]     = React.useState<string | null>(null)
   const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Load music tracks + job history on mount
+  // Load music tracks + sound effects + job history on mount
   React.useEffect(() => {
     void vantageApi.listMusicTracks().then((r) => setTracks(r.tracks as MusicTrack[])).catch(() => {})
+    void vantageApi.listSoundEffects().then((r) => setSoundEffects(r.effects as SoundEffect[])).catch(() => {})
     void vantageApi.listDemoForgeJobs().then((r) => setHistory(r.jobs as unknown as JobStatus[])).catch(() => {})
   }, [])
 
@@ -357,13 +382,14 @@ export function DemoForgePage() {
     if (!url || steps.length === 0) return
     setSubmitting(true); setErr(null); setMsg(null); setJob(null)
     try {
-      // Expand inline ms into trailing wait steps for the processor
+      // Expand inline ms into trailing wait steps for the processor; preserve soundEffect
       const expandedScript = steps.flatMap((s) => {
         const base = {
           action: s.action,
           narration: s.narration,
           ...(s.selector ? { selector: s.selector } : {}),
           ...(s.text     ? { text: s.text }         : {}),
+          ...(s.soundEffect ? { soundEffect: s.soundEffect } : {}),
         }
         const trail = s.ms ? [{ action: 'wait' as const, narration: '', ms: s.ms }] : []
         return [base, ...trail]
@@ -373,6 +399,9 @@ export function DemoForgePage() {
         url,
         script: expandedScript,
         ...(trackId ? { music_track_id: trackId } : {}),
+        narration_volume: narrationVolume,
+        music_volume: musicVolume,
+        master_volume: masterVolume,
       })
       setJob({ id: r.job_id, status: r.status, output_url: null, error_message: null, updated_at: new Date().toISOString() })
       startPolling(r.job_id)
@@ -405,6 +434,22 @@ export function DemoForgePage() {
   const moveStep   = (i: number, dir: -1 | 1) => setSteps((prev) => {
     const arr = [...prev]; const tmp = arr[i + dir]; arr[i + dir] = arr[i]; arr[i] = tmp; return arr
   })
+
+  // Mixer helpers
+  const updateEffectVolume = (idx: number, vol: number) => {
+    setEffectVolumes((prev) => {
+      const next = [...prev]
+      next[idx] = vol
+      return next
+    })
+  }
+
+  const resetMixerVolumes = () => {
+    setNarrationVolume(100)
+    setMusicVolume(15)
+    setEffectVolumes((prev) => prev.map(() => 80))
+    setMasterVolume(100)
+  }
 
   return (
     <>
@@ -735,6 +780,58 @@ export function DemoForgePage() {
                           </button>
                         )}
                       </div>
+
+                      {/* Sound effect selector + delay + volume */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12, padding: '8px 0' }}>
+                        <div>
+                          <label style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-muted)', letterSpacing: '0.12em', display: 'block', marginBottom: 4 }}>SOUND EFFECT</label>
+                          <select
+                            className="vg-input"
+                            value={step.soundEffect?.effectId ?? ''}
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                updateStep(i, { soundEffect: { effectId: e.target.value, delayMs: step.soundEffect?.delayMs ?? 0, volumePercent: step.soundEffect?.volumePercent ?? 80 } })
+                              } else {
+                                updateStep(i, { soundEffect: undefined })
+                              }
+                            }}
+                            style={{ width: '100%', fontSize: 10 }}
+                          >
+                            <option value="">— none —</option>
+                            {soundEffects.map((eff) => (
+                              <option key={eff.id} value={eff.id}>{eff.title} ({eff.category})</option>
+                            ))}
+                          </select>
+                        </div>
+                        {step.soundEffect && (
+                          <>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <label style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', whiteSpace: 'nowrap' }}>DELAY</label>
+                              <input
+                                type="number"
+                                className="vg-input"
+                                placeholder="ms"
+                                value={step.soundEffect.delayMs}
+                                onChange={(e) => updateStep(i, { soundEffect: { ...step.soundEffect!, delayMs: parseInt(e.target.value) || 0 } })}
+                                style={{ width: 100, fontSize: 10 }}
+                              />
+                              <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)' }}>ms</span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <label style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', whiteSpace: 'nowrap' }}>VOLUME</label>
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                value={step.soundEffect.volumePercent}
+                                onChange={(e) => updateStep(i, { soundEffect: { ...step.soundEffect!, volumePercent: parseInt(e.target.value) } })}
+                                style={{ flex: 1, fontSize: 10 }}
+                              />
+                              <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', minWidth: 25 }}>{step.soundEffect.volumePercent}%</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
                     </div>
                   ))}
                   <button
@@ -777,6 +874,21 @@ export function DemoForgePage() {
                   </div>
                 )}
               </Panel>
+
+              {/* Audio Mixer */}
+              <AudioMixer
+                hasMusic={trackId !== ''}
+                effectCount={steps.filter((s) => s.soundEffect).length}
+                narrationVolume={narrationVolume}
+                musicVolume={musicVolume}
+                effectVolumes={effectVolumes.length === 0 ? steps.map((s) => s.soundEffect?.volumePercent ?? 80).filter((_, i) => steps[i]?.soundEffect) : effectVolumes}
+                masterVolume={masterVolume}
+                onNarrationVolumeChange={setNarrationVolume}
+                onMusicVolumeChange={setMusicVolume}
+                onEffectVolumeChange={updateEffectVolume}
+                onMasterVolumeChange={setMasterVolume}
+                onReset={resetMixerVolumes}
+              />
 
               <div>
                 <Button

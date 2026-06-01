@@ -25,6 +25,7 @@ import { settingsRoutes } from "./routes/settings.js";
 import { analyticsRoutes } from "./routes/analytics.js";
 import { captionsRoutes } from "./routes/captions.js";
 import { emailTemplatesRoutes } from "./routes/email-templates.js";
+import { soundEffectsRoutes } from "./routes/sound-effects.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
 import { startCadenceEngine } from "./services/scheduler.js";
 
@@ -62,6 +63,7 @@ authedV1.route("/queue", queueRoutes);
 authedV1.route("/subscribers", subscribersRoutes);
 authedV1.route("/bioloop", biloopRoutes);
 authedV1.route("/music", musicRoutes);
+authedV1.route("/sound-effects", soundEffectsRoutes);
 authedV1.route("/demoforge", demoforgeRoutes);
 authedV1.route("/settings", settingsRoutes);
 authedV1.route("/analytics", analyticsRoutes);

@@ -28,7 +28,8 @@
 18. [Activity Logging](#18-activity-logging)
 19. [Database Infrastructure](#19-database-infrastructure)
 20. [Social Kit](#20-social-kit)
-21. [Phase 3A — Gaps & Fixes](#phase-3a--gaps--fixes)
+21. [Sound Effects + Audio Mixer](#21-sound-effects--audio-mixer)
+22. [Phase 3A — Gaps & Fixes](#phase-3a--gaps--fixes)
 22. [Phase 3B — New Capabilities](#phase-3b--new-capabilities)
 23. [Phase 3C — Creative Studio](#phase-3c--creative-studio)
 
@@ -735,6 +736,84 @@ selector. The active `theme-*` class is scoped to the page's wrapper `<div>` (ne
 
 ---
 
+### 21. Sound Effects + Audio Mixer
+
+**What it does:**
+An extensible sound effects library and per-track audio mixer for DemoForge video generation.
+Operators assign contextual sound effects (UI clicks, transitions, success tones) to script steps
+with configurable delay and volume, then use the audio mixer panel to control narration/music/effects
+volumes independently before export. The backend processor fetches sound effects from storage,
+generates silence-padded audio files to synchronize timing, and builds a complex FFmpeg filter
+graph with N audio inputs for final mixing.
+
+**Sound Effects Library:**
+Tracks are stored as records in `vantage.sound_effects` with fields: `id`, `title`, `category`,
+`duration_ms`, `storage_path`, `use_case`, `created_at`.
+
+Categories: `ui_click`, `transition`, `success`, `error`, `notification`, `custom`.
+Use cases: `intro`, `step_transition`, `action_feedback`, `general`.
+
+Effects are manually uploaded to Supabase Storage (`vantage-media` bucket) and registered via
+`POST /v1/sound-effects`. Can be filtered by category and use_case.
+
+**API:**
+- `GET /v1/sound-effects` — list effects with optional filtering
+- `POST /v1/sound-effects` — register new effect
+- `DELETE /v1/sound-effects/:id` — remove effect record
+
+**Script Step Extension:**
+Each `ScriptStep` now includes an optional `soundEffect: { effectId, delayMs, volumePercent }` field.
+- `effectId` — reference to `sound_effects` table
+- `delayMs` — offset in milliseconds when effect fires relative to step action
+- `volumePercent` — volume scaling 0–100% (default 80)
+
+The DemoForge step editor includes a sound effect dropdown selector (populated from library),
+delay input (ms), and volume slider (0–100%). Script text parser supports:
+- `Sound: <effectId>`
+- `SoundDelay: <N>ms`
+- `SoundVolume: <N%>`
+
+**Audio Mixer UI:**
+A new mixer panel in `DemoForgePage` below the step editor with:
+- Per-track volume sliders for narration, music, and effects
+- Mute buttons with visual feedback (red "🔇" when muted)
+- Master volume slider (applies to final mix)
+- Per-effect individual volume controls (stacked when 2+ effects present)
+- Reset button to restore defaults (narration 100%, music 15%, effects 80%, master 100%)
+
+**Backend Processing:**
+1. **Sound effect fetching** — queries `vantage.sound_effects` and downloads from Supabase Storage
+2. **Silence padding** — generates silence-prepended audio files using FFmpeg's `anullsrc` filter
+   to position effects at the correct time in the video
+3. **Complex FFmpeg filter graph** — dynamically builds filters for all audio tracks:
+   ```
+   [1:a]volume=1.0[narr]
+   [2:a]volume=0.15[mus]
+   [3:a]volume=0.8[eff1]
+   [narr][mus][eff1]amix=inputs=3:duration=first[amixed]
+   [amixed]volume=1.0[aout]
+   ```
+4. **Per-track volume control** — applies volume scaling from mixer before mixing
+5. **Master volume** — final output volume scaling applied after all tracks mixed
+
+Job submission includes optional `narration_volume`, `music_volume`, and `master_volume` parameters
+(each 0–100, defaults 100/15/100 respectively). Effect volumes are stored per-step in
+`soundEffect.volumePercent`.
+
+**Files:**
+- `supabase/migrations/20260610000000_sound_effects.sql` — table, RLS, public view
+- `apps/api/src/routes/sound-effects.ts` — CRUD endpoints
+- `apps/api/src/index.ts` — route mounting
+- `apps/web/src/components/AudioMixer.tsx` — mixer UI component
+- `apps/web/src/pages/DemoForgePage.tsx` — mixer integration, step editor enhancement
+- `apps/web/src/api/vantage.ts` — API type updates
+- `apps/demoforge/src/jobs/processor.ts` — effect fetching, silence padding, filter graph
+- `apps/demoforge/src/jobs/queue.ts` — type definitions
+
+**Configuration:** None required beyond Supabase credentials. Sound effect files are user-uploaded.
+
+---
+
 ## Phase 3A — Gaps & Fixes
 
 > Items from the original spec that are missing or incomplete. All are corrections
@@ -1303,4 +1382,4 @@ app router + sidebar.
 
 ---
 
-*Last updated: Phase 3A and 3B fully shipped (15 items). Social Kit ported and documented as Feature 20. Phase 3C — Creative Studio fully shipped (7 items): 3C-0 creative foundation, 3C-1 carousel builder, 3C-2 AI caption studio, 3C-3 OG share-card generator, 3C-4 DemoForge thumbnails, 3C-5 pull-quote cards, 3C-6 email template builder. Pre-existing typecheck errors in PreviewModal/QueuePage/DashboardPage also fixed.*
+*Last updated: Phase 3A and 3B fully shipped (15 items). Social Kit ported and documented as Feature 20. Sound Effects + Audio Mixer completed as Feature 21 (4 phases: backend library, script step extension, mixer UI, FFmpeg processing). Phase 3C — Creative Studio fully shipped (7 items): 3C-0 creative foundation, 3C-1 carousel builder, 3C-2 AI caption studio, 3C-3 OG share-card generator, 3C-4 DemoForge thumbnails, 3C-5 pull-quote cards, 3C-6 email template builder. Pre-existing typecheck errors in PreviewModal/QueuePage/DashboardPage also fixed.*

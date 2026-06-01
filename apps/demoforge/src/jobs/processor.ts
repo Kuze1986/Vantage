@@ -134,38 +134,134 @@ async function synthesizeNarration(
   return audioPath;
 }
 
+// ── Sound effect processing ──────────────────────────────────────────────────
+
+/**
+ * Generate silence-padded audio for a sound effect.
+ * Prepends silence so the effect fires at the correct time in the video.
+ * Returns the path to the padded audio file.
+ */
+async function generatePaddedEffect(params: {
+  effectPath: string;
+  delayMs: number;
+  workDir: string;
+  outputIndex: number;
+}): Promise<string> {
+  const { effectPath, delayMs, workDir, outputIndex } = params;
+  const outputPath = join(workDir, `effect-${outputIndex}-padded.mp3`);
+
+  return new Promise((resolve, reject) => {
+    if (delayMs <= 0) {
+      // No padding needed — just use the effect as-is
+      resolve(effectPath);
+      return;
+    }
+
+    // Generate silence + effect: use FFmpeg's concat demuxer
+    // Create a silence file, then concat [silence, effect]
+    const silencePath = join(workDir, `effect-${outputIndex}-silence.mp3`);
+    const silenceDurationSec = (delayMs / 1000).toFixed(2);
+
+    // First, generate the silence file
+    ffmpeg()
+      .input(`anullsrc=r=44100:cl=mono`)
+      .inputFormat("lavfi")
+      .inputOptions([`-t ${silenceDurationSec}`])
+      .outputOptions(["-q:a 9"])
+      .output(silencePath)
+      .on("end", () => {
+        // Now concat silence + effect
+        const concatList = `ffconcat version 1.0
+file '${silencePath}'
+file '${effectPath}'`;
+        const concatPath = join(workDir, `effect-${outputIndex}-concat.txt`);
+        writeFile(concatPath, concatList).then(() => {
+          ffmpeg()
+            .input(`concat:${concatPath}`)
+            .inputOptions(["-safe 0"])
+            .outputOptions(["-c copy"])
+            .output(outputPath)
+            .on("end", () => resolve(outputPath))
+            .on("error", reject)
+            .run();
+        }).catch(reject);
+      })
+      .on("error", reject)
+      .run();
+  });
+}
+
 // ── Step 3: FFmpeg mix ────────────────────────────────────────────────────────
 
 async function mixVideo(params: {
   videoPath:     string;
   narrationPath: string | null;
   musicPath:     string | null;
+  effectPaths:   string[];
   outputPath:    string;
   targetFormat:  string;
+  narrationVolume?: number;
+  musicVolume?: number;
+  effectVolumes?: number[];
+  masterVolume?: number;
 }): Promise<string> {
-  const { videoPath, narrationPath, musicPath, outputPath, targetFormat } = params;
+  const {
+    videoPath, narrationPath, musicPath, effectPaths, outputPath, targetFormat,
+    narrationVolume = 100, musicVolume = 15, effectVolumes = [], masterVolume = 100
+  } = params;
   const dims = FORMAT_DIMS[targetFormat] ?? FORMAT_DIMS.linkedin;
 
   return new Promise((resolve, reject) => {
     let cmd = ffmpeg(videoPath)
       .videoFilters(`scale=${dims.width}:${dims.height}:force_original_aspect_ratio=decrease,pad=${dims.width}:${dims.height}:(ow-iw)/2:(oh-ih)/2`);
 
-    if (narrationPath && musicPath) {
-      cmd = cmd
-        .input(narrationPath)
-        .input(musicPath)
-        .complexFilter([
-          "[1:a]volume=1.0[narr]",
-          "[2:a]volume=0.15[bg]",
-          "[narr][bg]amix=inputs=2:duration=first[aout]",
-        ])
-        .outputOptions(["-map 0:v", "-map [aout]"]);
-    } else if (narrationPath) {
-      cmd = cmd.input(narrationPath).outputOptions(["-map 0:v", "-map 1:a"]);
-    } else if (musicPath) {
-      cmd = cmd.input(musicPath)
-        .complexFilter(["[1:a]volume=0.3[aout]"])
+    // Build list of audio inputs and filter chain
+    let audioInputCount = 0;
+    const filters: string[] = [];
+    const audioStreams: string[] = [];
+
+    // Input 1: Narration (if present)
+    if (narrationPath) {
+      cmd = cmd.input(narrationPath);
+      const narVolume = (narrationVolume / 100).toFixed(3);
+      const narLabel = `[narr]`;
+      filters.push(`[${audioInputCount}:a]volume=${narVolume}${narLabel}`);
+      audioStreams.push(narLabel);
+      audioInputCount++;
+    }
+
+    // Input 2+: Music (if present)
+    if (musicPath) {
+      cmd = cmd.input(musicPath);
+      const musVolume = (musicVolume / 100).toFixed(3);
+      const musLabel = `[mus]`;
+      filters.push(`[${audioInputCount}:a]volume=${musVolume}${musLabel}`);
+      audioStreams.push(musLabel);
+      audioInputCount++;
+    }
+
+    // Input N: Sound effects (already silence-padded)
+    for (let i = 0; i < effectPaths.length; i++) {
+      cmd = cmd.input(effectPaths[i]);
+      const effVolume = ((effectVolumes[i] ?? 80) / 100).toFixed(3);
+      const effLabel = `[eff${i}]`;
+      filters.push(`[${audioInputCount}:a]volume=${effVolume}${effLabel}`);
+      audioStreams.push(effLabel);
+      audioInputCount++;
+    }
+
+    // Build amix filter if we have audio tracks
+    if (audioStreams.length > 0) {
+      const masterVol = (masterVolume / 100).toFixed(3);
+      const streamConcat = audioStreams.join("");
+      filters.push(`${streamConcat}amix=inputs=${audioStreams.length}:duration=first[amixed]`);
+      filters.push(`[amixed]volume=${masterVol}[aout]`);
+
+      cmd = cmd.complexFilter(filters)
         .outputOptions(["-map 0:v", "-map [aout]", "-shortest"]);
+    } else {
+      // No audio — just use video
+      cmd = cmd.outputOptions(["-map 0:v"]);
     }
 
     cmd
@@ -249,6 +345,41 @@ export async function processJob(
       }
     }
 
+    // 3.5. Sound effects from Supabase Storage (with silence padding)
+    const effectPaths: string[] = [];
+    const effectVolumes: number[] = [];
+    const effectSteps = job.input_payload.script.filter((s) => s.soundEffect);
+
+    for (let i = 0; i < effectSteps.length; i++) {
+      const step = effectSteps[i];
+      if (!step.soundEffect) continue;
+
+      const sb = getSupabase();
+      const { data: effect } = await sb.from("sound_effects")
+        .select("storage_path").eq("id", step.soundEffect.effectId).single();
+
+      if (effect?.storage_path) {
+        const { data: effectData } = await sb.storage.from("vantage-media")
+          .download(effect.storage_path as string);
+
+        if (effectData) {
+          const effectFilePath = join(workDir, `effect-${i}.mp3`);
+          await writeFile(effectFilePath, Buffer.from(await effectData.arrayBuffer()));
+
+          // Generate silence-padded version
+          const paddedPath = await generatePaddedEffect({
+            effectPath: effectFilePath,
+            delayMs: step.soundEffect.delayMs,
+            workDir,
+            outputIndex: i,
+          });
+
+          effectPaths.push(paddedPath);
+          effectVolumes.push(step.soundEffect.volumePercent);
+        }
+      }
+    }
+
     // 4. Mix
     await onStatus("mixing");
     const outputPath = join(workDir, "output.mp4");
@@ -256,8 +387,13 @@ export async function processJob(
       videoPath,
       narrationPath,
       musicPath,
+      effectPaths,
       outputPath,
       targetFormat: job.target_format,
+      narrationVolume: job.input_payload.narration_volume ?? 100,
+      musicVolume: job.input_payload.music_volume ?? 15,
+      effectVolumes,
+      masterVolume: job.input_payload.master_volume ?? 100,
     });
 
     // 5. Upload
