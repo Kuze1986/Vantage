@@ -16,10 +16,8 @@ CREATE TABLE IF NOT EXISTS vantage.workspaces (
   updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
--- Public view for RLS compatibility
+-- Public view for RLS compatibility (auto-updatable)
 CREATE OR REPLACE VIEW public.workspaces AS SELECT * FROM vantage.workspaces;
-
-ALTER VIEW public.workspaces OWNER TO authenticated;
 
 -- Enable RLS
 ALTER TABLE vantage.workspaces ENABLE ROW LEVEL SECURITY;
