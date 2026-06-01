@@ -9,6 +9,9 @@ export async function vantageFetch(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
+  // TODO: Get workspace ID from user context or metadata
+  // For now, use a default workspace ID (single-workspace setup)
+  headers.set("x-workspace-id", "00000000-0000-0000-0000-000000000001");
   const res = await fetch(`${base}${path}`, { ...init, headers });
   const text = await res.text();
   let body: unknown = null;
