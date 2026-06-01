@@ -14,12 +14,18 @@ import { AnalyticsPage } from './pages/AnalyticsPage'
 import { DemoForgePage } from './pages/DemoForgePage'
 import { SocialKitPage } from './pages/SocialKitPage'
 import { EmailBuilderPage } from './pages/EmailBuilderPage'
+import CampaignBuilderPage from './pages/CampaignBuilderPage'
+import IntelligencePage from './pages/IntelligencePage'
+import AudiencePage from './pages/AudiencePage'
 
 const NAV = [
   { label: 'Dashboard', path: '/',          icon: '◈' },
   { label: 'Queue',     path: '/queue',      icon: '≋' },
   { label: 'Calendar',  path: '/calendar',   icon: '▦' },
   { label: 'Analytics', path: '/analytics',  icon: '▲' },
+  { label: 'Campaigns', path: '/campaigns',  icon: '📊' },
+  { label: 'Intelligence', path: '/intelligence',  icon: '🔍' },
+  { label: 'Audience', path: '/audience',  icon: '👥' },
   { label: 'DemoForge', path: '/demoforge',  icon: '⬡' },
   { label: 'Social Kit',     path: '/social-kit',     icon: '◧' },
   { label: 'Email Builder',  path: '/email-builder',  icon: '✉' },
@@ -127,6 +133,9 @@ export function App() {
           <Route path="/queue"      element={<QueuePage />} />
           <Route path="/calendar"   element={<CalendarPage />} />
           <Route path="/analytics"  element={<AnalyticsPage />} />
+          <Route path="/campaigns"  element={<CampaignBuilderPage />} />
+          <Route path="/intelligence"  element={<IntelligencePage />} />
+          <Route path="/audience"  element={<AudiencePage />} />
           <Route path="/demoforge"  element={<DemoForgePage />} />
           <Route path="/social-kit"    element={<SocialKitPage />} />
           <Route path="/email-builder" element={<EmailBuilderPage />} />

@@ -2,7 +2,7 @@ import { supabase } from "../lib/supabase";
 
 const base = ((import.meta.env.VITE_VANTAGE_API_URL as string | undefined) ?? "").replace(/\/$/, "");
 
-async function vantageFetch(path: string, init: RequestInit = {}) {
+export async function vantageFetch(path: string, init: RequestInit = {}) {
   if (!base) throw new Error("VITE_VANTAGE_API_URL is not set — add it to apps/web/.env.local");
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
@@ -327,4 +327,108 @@ export const vantageApi = {
     vantageFetch("/v1/demoforge/jobs") as Promise<{
       jobs: { id: string; content_piece_id: string | null; status: string; target_format: string; output_url: string | null; error_message: string | null; created_at: string }[]
     }>,
+
+  // ── Campaigns ─────────────────────────────────────────────────────────────
+  listCampaigns: () =>
+    vantageFetch("/v1/campaigns") as Promise<{ campaigns: any[] }>,
+
+  getCampaign: (id: string) =>
+    vantageFetch(`/v1/campaigns/${id}`) as Promise<any>,
+
+  createCampaign: (body: any) =>
+    vantageFetch("/v1/campaigns", { method: "POST", body: JSON.stringify(body) }) as Promise<any>,
+
+  updateCampaign: (id: string, body: any) =>
+    vantageFetch(`/v1/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(body) }) as Promise<any>,
+
+  deleteCampaign: (id: string) =>
+    vantageFetch(`/v1/campaigns/${id}`, { method: "DELETE" }) as Promise<{ success: boolean }>,
+
+  getCampaignTimeline: (campaignId: string) =>
+    vantageFetch(`/v1/campaigns/${campaignId}/timeline`) as Promise<{ timeline: any[] }>,
+
+  getCampaignKPI: (campaignId: string) =>
+    vantageFetch(`/v1/campaigns/${campaignId}/kpi`) as Promise<{ kpi_tracking: any[] }>,
+
+  // ── Strategic Intelligence ────────────────────────────────────────────────
+  listCompetitivePosts: (limit = 50, platform?: string) => {
+    const params = new URLSearchParams();
+    params.append('limit', String(limit));
+    if (platform) params.append('platform', platform);
+    return vantageFetch(`/v1/intelligence/posts?${params}`) as Promise<{ posts: any[] }>;
+  },
+
+  addCompetitivePost: (body: any) =>
+    vantageFetch("/v1/intelligence/posts", { method: "POST", body: JSON.stringify(body) }) as Promise<any>,
+
+  listTrends: (limit = 20, status?: string) => {
+    const params = new URLSearchParams();
+    params.append('limit', String(limit));
+    if (status) params.append('status', status);
+    return vantageFetch(`/v1/intelligence/trends?${params}`) as Promise<{ trends: any[] }>;
+  },
+
+  detectTrends: (daysWindow = 7) =>
+    vantageFetch(`/v1/intelligence/trends/detect?days=${daysWindow}`, { method: "POST" }) as Promise<{ trends: any[] }>,
+
+  listInsights: (campaignId?: string, type?: string) => {
+    const params = new URLSearchParams();
+    if (campaignId) params.append('campaign_id', campaignId);
+    if (type) params.append('type', type);
+    return vantageFetch(`/v1/intelligence/insights?${params}`) as Promise<{ insights: any[] }>;
+  },
+
+  listBenchmarks: (limit = 10) =>
+    vantageFetch(`/v1/intelligence/benchmarks?limit=${limit}`) as Promise<{ benchmarks: any[] }>,
+
+  listMonitoringSources: (limit = 50, active?: boolean) => {
+    const params = new URLSearchParams();
+    params.append('limit', String(limit));
+    if (active !== undefined) params.append('active', String(active));
+    return vantageFetch(`/v1/intelligence/sources?${params}`) as Promise<{ sources: any[] }>;
+  },
+
+  addMonitoringSource: (body: any) =>
+    vantageFetch("/v1/intelligence/sources", { method: "POST", body: JSON.stringify(body) }) as Promise<any>,
+
+  // ── Audience Model ────────────────────────────────────────────────────────
+  listSegments: (limit = 50, type?: string) => {
+    const params = new URLSearchParams();
+    params.append('limit', String(limit));
+    if (type) params.append('type', type);
+    return vantageFetch(`/v1/audience/segments?${params}`) as Promise<{ segments: any[] }>;
+  },
+
+  getSegment: (id: string) =>
+    vantageFetch(`/v1/audience/segments/${id}`) as Promise<any>,
+
+  createSegment: (body: any) =>
+    vantageFetch("/v1/audience/segments", { method: "POST", body: JSON.stringify(body) }) as Promise<any>,
+
+  updateSegment: (id: string, body: any) =>
+    vantageFetch(`/v1/audience/segments/${id}`, { method: "PATCH", body: JSON.stringify(body) }) as Promise<any>,
+
+  deleteSegment: (id: string) =>
+    vantageFetch(`/v1/audience/segments/${id}`, { method: "DELETE" }) as Promise<{ success: boolean }>,
+
+  getSegmentMembers: (segmentId: string, limit = 50) =>
+    vantageFetch(`/v1/audience/segments/${segmentId}/members?limit=${limit}`) as Promise<{ members: any[] }>,
+
+  addSegmentMember: (segmentId: string, body: any) =>
+    vantageFetch(`/v1/audience/segments/${segmentId}/members`, { method: "POST", body: JSON.stringify(body) }) as Promise<any>,
+
+  getSegmentAnalytics: (segmentId: string, limit = 30) =>
+    vantageFetch(`/v1/audience/segments/${segmentId}/analytics?limit=${limit}`) as Promise<{ analytics: any[] }>,
+
+  getSegmentPreferences: (segmentId: string) =>
+    vantageFetch(`/v1/audience/segments/${segmentId}/preferences`) as Promise<{ preferences: any }>,
+
+  getGA4Config: () =>
+    vantageFetch("/v1/audience/ga4/config") as Promise<{ config: any }>,
+
+  setupGA4: (body: any) =>
+    vantageFetch("/v1/audience/ga4/config", { method: "POST", body: JSON.stringify(body) }) as Promise<any>,
+
+  syncGA4: () =>
+    vantageFetch("/v1/audience/ga4/sync", { method: "POST" }) as Promise<{ status: string; syncedAt: string }>,
 };

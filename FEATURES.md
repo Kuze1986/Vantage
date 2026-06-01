@@ -29,9 +29,13 @@
 19. [Database Infrastructure](#19-database-infrastructure)
 20. [Social Kit](#20-social-kit)
 21. [Sound Effects + Audio Mixer](#21-sound-effects--audio-mixer)
-22. [Phase 3A — Gaps & Fixes](#phase-3a--gaps--fixes)
-22. [Phase 3B — New Capabilities](#phase-3b--new-capabilities)
-23. [Phase 3C — Creative Studio](#phase-3c--creative-studio)
+22. [Campaign Builder](#22-campaign-builder)
+23. [Strategic Intelligence](#23-strategic-intelligence)
+24. [Audience Model](#24-audience-model)
+25. [BioLoop Virality Signals](#25-bioloop-virality-signals)
+26. [Phase 3A — Gaps & Fixes](#phase-3a--gaps--fixes)
+27. [Phase 3B — New Capabilities](#phase-3b--new-capabilities)
+28. [Phase 3C — Creative Studio](#phase-3c--creative-studio)
 
 ---
 
@@ -814,6 +818,351 @@ Job submission includes optional `narration_volume`, `music_volume`, and `master
 
 ---
 
+### 22. Campaign Builder
+
+**What it does:**
+Strategic campaign planning and execution engine that enables multi-channel, multi-week content campaigns
+with precise daily scheduling, messaging consistency, and KPI tracking. Campaigns bridge high-level
+marketing goals (messaging pillars, channel mix, posting cadence) with daily content execution.
+
+**Core concepts:**
+
+**Campaigns** store the campaign metadata, messaging framework, and channel configuration:
+- `name` — campaign name (e.g. "Q2 Product Launch")
+- `status` — draft / active / paused / archived
+- `cadence_config` — JSONB with `posts_per_day`, `posting_hours`, `auto_approve`
+- `messaging_pillars` — array of (title, description, guidelines) that shape all generated content
+- `channel_mix` — JSONB specifying which channels participate and their relative volume
+- `kpi_targets` — goals for engagement, reach, conversion, sentiment
+
+**Campaign timeline** stores one row per day:
+- `campaign_id`, `date`
+- `content_ideas` — JSONB with AI-suggested content hooks for that day
+- `published_pieces` — array of `content_piece_id`s published on that day
+- Links to the daily publish count, estimated reach, and performance
+
+**Campaign KPI tracking** aggregates daily metrics:
+- Engagement events, reach, conversions per day
+- Running total toward campaign goals
+- Per-channel and per-pillar breakdowns
+
+**Service functions (`apps/api/src/lib/campaigns.ts`):**
+- `generateContentIdeas()` — LLM calls Claude with the campaign's messaging pillars, date context,
+  and recent performance to suggest 5–10 specific content hooks for a given day
+- `generateTimeline()` — builds the `campaign_timeline` entries for a date range, balancing pillar
+  distribution and channel mix
+- `generateCampaignSummary()` — produces a narrative executive summary of campaign performance
+  and recommendations
+
+**API routes (`apps/api/src/routes/campaigns.ts`):**
+- `POST /v1/campaigns` — create campaign with validation (requires name, messaging_pillars, cadence_config)
+- `GET /v1/campaigns` — list with optional filtering (status, active date range)
+- `GET /v1/campaigns/:id` — fetch campaign details
+- `PATCH /v1/campaigns/:id` — update campaign settings (pillars, channel mix, KPI targets)
+- `DELETE /v1/campaigns/:id` — archive campaign
+- `POST /v1/campaigns/:id/timeline` — create timeline entries for a date range
+- `GET /v1/campaigns/:id/timeline` — fetch timeline with suggested content and published pieces
+- `GET /v1/campaigns/:id/kpi` — daily + cumulative KPI metrics and progress toward goals
+
+**UI (`apps/web/src/pages/CampaignBuilderPage.tsx`):**
+Three-view interface:
+- **List view** — all campaigns with status badge, date range, and active engagement count
+- **Create view** — form with campaign name, messaging pillar templates (pre-filled from brand voice),
+  channel selection, cadence config, and KPI target inputs
+- **Details view** — dashboard showing:
+  - **Messaging pillars panel** — visual breakdown of each pillar and its content distribution
+  - **Timeline panel** — calendar view showing suggested content hooks, published pieces, and
+    daily performance metrics
+  - **KPI dashboard** — progress cards toward each goal, with trend sparklines
+  - **Action panel** — "Generate timeline", "Update KPIs", "Archive campaign" buttons
+
+**Database (`supabase/migrations/20260626000000_campaign_builder.sql`):**
+- `vantage.campaigns` — campaign metadata
+- `vantage.campaign_timeline` — daily timeline entries
+- `vantage.campaign_kpi_tracking` — daily KPI aggregates
+- Workspace-scoped with `workspace_id` foreign key
+
+**Configuration:** Requires `ANTHROPIC_API_KEY` for LLM calls (uses pluggable LLM provider system).
+
+---
+
+### 23. Strategic Intelligence
+
+**What it does:**
+Competitive landscape monitoring and AI-powered strategic insight generation. Tracks competitor posts,
+detects trending topics, analyzes competitive performance, and generates actionable insights for campaign
+optimization.
+
+**Core tables:**
+
+**Competitive posts** (`competitive_posts`) — individual posts from monitored accounts/keywords:
+- Source: platform (X, LinkedIn, Reddit), account ID, post ID, post content
+- Extracted metadata: themes, sentiment (positive/neutral/negative), estimated virality, engagement potential
+- Engagement snapshot: impressions, engagements, shares, replies
+
+**Trending content** (`trending_content`) — aggregated trends from multiple posts:
+- Trend name, platform, timeframe
+- Lifecycle status: emerging → peak → declining → sustained
+- Key characteristics: dominant messaging, sentiment, engagement rate
+- Sample posts that exemplify the trend
+- Momentum score (is it accelerating or decelerating?)
+
+**Intelligence insights** (`intelligence_insights`) — AI-generated strategic recommendations:
+- Type: competitive_gap, opportunity, optimization, threat, strength
+- Confidence score (0-1)
+- Description, actionable recommendations, supporting evidence
+- Campaign/segment applicability flags
+
+**Competitive benchmarks** (`competitive_benchmarks`) — periodic snapshots for gap analysis:
+- Competitor aggregate metrics (avg engagement, posting frequency, optimal posting hours)
+- Performance gap vs. our current metrics
+- Recommended tactics to close each gap
+
+**Monitoring sources** (`monitoring_sources`) — configuration for what to track:
+- Account handles, keyword phrases, subreddits, hashtags
+- Platform, update frequency, priority
+
+**Service functions (`apps/api/src/lib/intelligence.ts`):**
+- `analyzeCompetitivePost()` — takes post content and metadata, calls Claude to extract themes,
+  sentiment, engagement_potential, viral_indicators (hooks, emotional triggers, format)
+- `detectTrends()` — queries top posts from the last N days, identifies 2–5 distinct trends with
+  lifecycle status, messaging breakdown, and sample posts
+- `generateInsights()` — compares trends and competitive performance to brand/campaign context,
+  generates 3–5 strategic insights with confidence scoring and actionable next steps
+- `generateBenchmarkAnalysis()` — computes performance gaps vs. competitors and suggests tactics
+  (content style, posting timing, messaging angle) to close them
+
+**API routes (`apps/api/src/routes/intelligence.ts`):**
+- `POST /v1/intelligence/posts` — add or sync competitive post with auto-analysis
+- `GET /v1/intelligence/posts` — list posts with filtering (platform, date range, theme)
+- `GET /v1/intelligence/trends` — list trends with optional status filtering
+- `POST /v1/intelligence/trends/detect` — trigger AI trend detection from recent posts
+- `GET /v1/intelligence/insights` — retrieve insights by campaign/type/status with confidence scores
+- `GET /v1/intelligence/benchmarks` — fetch latest benchmark snapshot and gap analysis
+
+**UI (`apps/web/src/pages/IntelligencePage.tsx`):**
+Four-tab interface:
+- **Insights tab** — strategic recommendations displayed as cards with type badge, confidence meter,
+  description, supporting evidence links, and an "Apply to campaign" action
+- **Trends tab** — detected trends with status indicator (emerging/peak/declining), key messaging,
+  sentiment breakdown, and links to exemplifying posts
+- **Posts tab** — competitive post list with extracted themes, engagement metrics, and virality indicators
+- **Benchmarks tab** — performance comparison vs. competitors with gap analysis and recommended tactics
+
+**Database (`supabase/migrations/20260627000000_strategic_intelligence.sql`):**
+- `vantage.competitive_posts` — individual monitored posts
+- `vantage.trending_content` — aggregated trends
+- `vantage.intelligence_insights` — AI insights
+- `vantage.competitive_benchmarks` — performance snapshots
+- `vantage.monitoring_sources` — what to track
+- Workspace-scoped; indexes on platform, status, generated_at for fast queries
+
+**Configuration:** `ANTHROPIC_API_KEY` for LLM analysis. Monitoring sources configured via UI.
+
+---
+
+### 24. Audience Model
+
+**What it does:**
+Behavioral audience segmentation with ML-ready predictive scoring. Segments users by engagement
+patterns, calculates lifetime value, predicts churn risk, learns content preferences, and enables
+segment-aware personalization across the entire platform.
+
+**Core tables:**
+
+**Segments** (`segments`) — audience segments with metadata and performance:
+- `segment_type` — behavioral, demographic, technographic, geographic, custom
+- `definition` — JSONB with selection criteria (e.g., engagement_score > 80, purchases_last_90d > 1)
+- `engagement_pattern` — JSONB describing how segment typically engages (reply frequency, share rate, etc.)
+- `ltv_metrics` — JSONB with `total_value`, `avg_transaction`, `predicted_ltv`, `confidence`
+- `churn_risk_baseline` — overall segment churn probability (0-1)
+
+**Segment members** (`segment_members`) — individual users with predictive scores:
+- `segment_id`, `external_user_id`
+- `profile` — JSONB with metadata (follower count, account age, bio)
+- `lifetime_value` — total calculated value using three methods (simple, cohort-based, predicted with churn adjustment)
+- `predicted_churn_risk` — ML-ready score (0-1) indicating unsubscribe/disengagement probability
+- `engagement_score` — weighted engagement metric used for internal ranking
+- `last_seen_at` — timestamp of last engagement
+
+**Segment analytics** (`segment_analytics`) — time-series metrics:
+- `segment_id`, `date`
+- `active_members`, `new_members`, `churned_members`
+- `total_engagements`, `engagement_rate`, `conversions`
+- `avg_engagement_score`, `avg_predicted_churn_risk`
+
+**Segment preferences** (`segment_preferences`) — learned content preferences:
+- `segment_id`
+- `preferred_content_types` — array (e.g., ["video", "carousel", "thought_leadership"])
+- `preferred_tones` — array (e.g., ["professional", "witty"])
+- `preferred_formats` — array by channel (video, text, image per platform)
+- `optimal_posting_times` — JSONB with `best_days`, `best_hours`
+- `topic_interests` — array with weight/affinity per topic
+- `content_aversion` — topics/formats to avoid
+
+**GA4 sync config** (`ga4_sync_config`) — Google Analytics 4 integration:
+- Property ID, connection status, last sync timestamp
+- Metrics mapped to segments (e.g., GA4 audience segment → Vantage segment)
+
+**ML inference cache** (`ml_inference_cache`) — caches predictions with TTL:
+- Cached churn predictions, LTV estimates, segment membership probabilities
+- `expires_at` timestamp for automatic invalidation
+
+**Service functions (`apps/api/src/lib/audience.ts`):**
+- `analyzeSegmentCharacteristics()` — LLM analysis of segment engagement patterns, value profile,
+  and content recommendations
+- `calculateLTV()` — three methods: (1) simple (total_value / lifecycle_days), (2) cohort-based
+  (similar users' lifetime average), (3) ML-predicted (current engagement trend + churn adjustment).
+  Returns confidence scores for each method.
+- `learnSegmentPreferences()` — analyzes top posts from segment, identifies content type preferences,
+  optimal posting times, topic affinities using keyword extraction and pattern matching
+- `predictChurnRisk()` — ML-ready scoring (0-1) based on inactivity days, engagement trend slope,
+  purchase history. Designed for future model integration (currently rule-based).
+- `personalizeForSegment()` — generates content recommendations tailored to segment's preferences
+  and engagement patterns
+
+**API routes (`apps/api/src/routes/audience.ts`):**
+- `POST /v1/audience/segments` — create segment with type, definition, engagement pattern
+- `GET /v1/audience/segments` — list segments with member counts and key metrics
+- `GET /v1/audience/segments/:id` — fetch segment details with overview cards
+- `PATCH /v1/audience/segments/:id` — update definition, engagement pattern, or preferences
+- `DELETE /v1/audience/segments/:id` — delete segment
+- `POST /v1/audience/segments/:id/members` — add member with profile data
+- `GET /v1/audience/segments/:id/members` — list members sorted by engagement/churn/LTV with pagination
+- `GET /v1/audience/segments/:id/analytics` — fetch time-series metrics for a date range
+- `GET /v1/audience/segments/:id/preferences` — get learned preferences (content types, times, topics)
+- `GET /v1/audience/ga4/config` — fetch GA4 sync configuration
+- `POST /v1/audience/ga4/config` — update GA4 property ID and mapping
+- `POST /v1/audience/ga4/sync` — trigger immediate GA4 sync (imports user data and segments)
+
+**UI (`apps/web/src/pages/AudiencePage.tsx`):**
+Three-tab interface:
+- **Segments tab** — list of all segments with member count, engagement score, churn risk badge,
+  and quick-view LTV
+- **Create segment tab** — form for creating new segments: type selector (behavioral/demographic/etc),
+  definition builder (dynamic criteria), optional GA4 audience sync
+- **Segment details tab** — comprehensive view with:
+  - **Overview cards** — member count, total value, avg engagement score, churn risk, LTV (with method confidence)
+  - **Top members panel** — sortable list showing engagement score, lifetime value, predicted churn risk,
+    last activity timestamp
+  - **Analytics chart** — time-series graph of active members, engagement rate, conversions
+  - **Preferences panel** — learned content types, tones, optimal posting times, topic interests with affinity weights
+  - **GA4 integration panel** — connection status, last sync timestamp, "Sync now" button
+
+**Database (`supabase/migrations/20260628000000_audience_model.sql`):**
+- `vantage.segments` — segment definitions
+- `vantage.segment_members` — user-segment mapping with predictive scores
+- `vantage.segment_analytics` — time-series metrics
+- `vantage.segment_preferences` — learned preferences
+- `vantage.ga4_sync_config` — GA4 configuration
+- `vantage.ml_inference_cache` — ML prediction cache
+- Workspace-scoped; indexes on segment_id, engagement_score, predicted_churn_risk
+
+**Configuration:** `GA4_PROPERTY_ID` (optional for GA4 sync). GA4 connection details configured in UI.
+
+---
+
+### 25. BioLoop Virality Signals
+
+**What it does:**
+Multi-platform trend detection, viral pattern recognition, and segment-aware virality analysis.
+Distinguishes VIRAL growth (exponential, platform-beating) from normal engagement, identifies
+replicable viral patterns, and generates segment-specific viral content strategies.
+
+**Core distinction:** Virality ≠ Engagement. A post with 100 likes might be well-engaged (normal).
+A post with 500+ likes in the same timeframe on the same account is VIRAL (exceeds platform baseline
+by 2–3x+). BioLoop detects the exponential growth signal, not just the absolute engagement number.
+
+**Core tables:**
+
+**Viral signals** (`viral_signals`) — detected posts with unusual growth patterns:
+- Platform, source account, post ID, post content
+- Engagement metrics: impressions, engagements, likes, reposts, replies
+- `virality_score` (0-1) — likelihood of continued exponential growth (not just engagement rate)
+- `velocity_metrics` — engagement_rate_per_hour, growth_acceleration, momentum_score
+- `engagement_type` — organic_share / reply_driven / algorithm_amplified / community_amplified
+- `viral_characteristics` — format (thread/video/image/text), hooks, emotional triggers, controversy level
+- `replicability_score` (0-1) — how reproducible is this pattern?
+- `segment_affinity` — which segments respond strongly to this content style?
+
+**Virality patterns** (`virality_patterns`) — aggregated replicable viral patterns:
+- Platform, timeframe (e.g., "last 7 days"), segment (optional)
+- `pattern_name` — e.g., "question_driven_threads", "video_shorts", "contrarian_takes"
+- Performance: `avg_virality_score`, `median_engagement_rate`, `percentile_90_virality`
+- `reproduction_success_rate` — % of similar posts that achieve viral status
+- `confidence_score` — how confident are we in this pattern's replicability?
+- `segment_lift_percentage` — does this pattern perform better/worse for a specific segment?
+- `characteristics` JSONB — format, hooks, tone, length, timing recommendations
+- `success_indicators` — what signals indicate this pattern is working?
+
+**Virality recommendations** (`virality_recommendations`) — AI-generated viral strategies:
+- Campaign/segment/type (generated_by LLM: claude/gpt-4o/grok)
+- Title, description, and detailed strategy JSONB
+- `expected_virality_score`, `expected_engagement_lift`, `expected_reach_lift`
+- `implementation_difficulty`, `viral_sustainability` (one_time / short_term / sustained)
+- `segment_match_score` — how well does this match the target segment?
+- Status tracking: new / reviewed / actioned / tested / dismissed
+- Performance feedback JSONB (actual results after testing)
+
+**Platform velocity tracking** (`platform_velocity_tracking`) — real-time platform velocity metrics:
+- Platform, date_tracked
+- `average_time_to_virality_hours` — how long until posts hit viral threshold on this platform?
+- `velocity_acceleration` — posts per hour for viral content in first 24h
+- `peak_engagement_hour` — which UTC hour sees peak engagement?
+- `engagement_curve` — exponential / linear / plateau / saw_tooth
+- `trending_topics` JSONB — current trending topics with mention count and virality correlation
+- `segment_velocity` — per-segment virality speed (different segments trend differently)
+
+**Virality boost signals** (`virality_boost_signals`) — early-stage viral detection:
+- Post ID, platform, URL, content snippet
+- Detected early signals (velocity_spike, engagement_clustering, authority_endorsement, sentiment_shift, cross_platform_spillover)
+- `viral_probability` (0-1) — estimated probability post will go viral in next 24h
+- `time_to_virality_estimate_hours`
+- Recommended action: amplify / watch / participate / feature
+- Best segments for amplification with lift potential
+- Alert sent status; actual virality and prediction accuracy (filled post-hoc)
+
+**Service functions (`apps/api/src/lib/bioloop.ts`):**
+- `analyzeVirality()` — LLM call to distinguish viral growth from engagement. Compares post's engagement
+  rate to platform baseline (X: 2.5%, LinkedIn: 1.2%, Reddit: 5%). Returns virality_score, velocity metrics,
+  engagement type, viral characteristics (format, hooks, emotional triggers), replicability.
+- `recognizeViralPatterns()` — analyzes top viral posts to identify 2–3 replicable patterns. Returns
+  pattern name, characteristics, success indicators, reproduction likelihood, optimal timing, risk factors.
+- `generateViralRecommendation()` — segment-specific strategy. Takes campaign theme, segment preferences,
+  identified patterns. Returns title, strategy, expected virality/engagement lift, implementation difficulty,
+  sustainability, critical success factors, risk mitigation.
+- `detectEarlyViralSignals()` — five-signal detection (velocity_spike: engagements_last_hour > 3× avg,
+  engagement_clustering, authority_endorsement: top engager followers > 2× avg, sentiment_shift, cross_platform).
+  Returns signals object and viral_probability (0-1).
+- `calculateSegmentViralityLift()` — adjusts base virality score for segment characteristics. Larger
+  segments amplify virality; higher-retention segments spread more. Returns adjusted_virality_score,
+  lift_percentage, segment_match_strength.
+
+**API routes (`apps/api/src/routes/bioloop.ts`):**
+- `POST /v1/bioloop/analyze` — analyze post for virality; returns virality_score, velocity metrics, characteristics
+- `GET /v1/bioloop/signals` — list detected viral signals with optional filtering (platform, date, virality_score min)
+- `POST /v1/bioloop/patterns/detect` — trigger pattern recognition from recent viral posts
+- `GET /v1/bioloop/patterns` — list identified patterns with platform/segment filtering
+- `POST /v1/bioloop/recommendations` — generate viral strategy for campaign/segment
+- `GET /v1/bioloop/recommendations` — list recommendations with status filtering
+- `POST /v1/bioloop/boost-signals/detect` — detect early viral signals from recent posts
+
+**Integration with Audience Model:**
+Virality recommendations include `segment_match_score` and `best_segments_for_amplification`.
+Early boost signals suggest which segments to target for amplification.
+
+**Database (`supabase/migrations/20260629000000_bioloop_virality.sql`):**
+- `vantage.viral_signals` — detected viral posts
+- `vantage.virality_patterns` — replicable patterns
+- `vantage.virality_recommendations` — AI strategies
+- `vantage.platform_velocity_tracking` — platform metrics
+- `vantage.virality_boost_signals` — early detection
+- Workspace-scoped; indexes on virality_score, viral_probability, platform, status
+
+**Configuration:** Requires pluggable LLM provider (Claude, GPT-4o, Grok configurable per workspace).
+
+---
+
 ## Phase 3A — Gaps & Fixes
 
 > Items from the original spec that are missing or incomplete. All are corrections
@@ -1382,4 +1731,4 @@ app router + sidebar.
 
 ---
 
-*Last updated: Phase 3A and 3B fully shipped (15 items). Social Kit ported and documented as Feature 20. Sound Effects + Audio Mixer completed as Feature 21 (4 phases: backend library, script step extension, mixer UI, FFmpeg processing). Phase 3C — Creative Studio fully shipped (7 items): 3C-0 creative foundation, 3C-1 carousel builder, 3C-2 AI caption studio, 3C-3 OG share-card generator, 3C-4 DemoForge thumbnails, 3C-5 pull-quote cards, 3C-6 email template builder. Pre-existing typecheck errors in PreviewModal/QueuePage/DashboardPage also fixed.*
+*Last updated: 22 core Vantage features operational. Phase 2 — Campaign Builder (Feature 22): campaign planning, timeline, KPI tracking with LLM-powered content ideation. Phase 3 — Strategic Intelligence (Feature 23): competitive monitoring, trend detection, gap analysis. Phase 4 — Audience Model (Feature 24): behavioral segmentation, LTV calculation, churn prediction, GA4 sync, ML-ready scoring. Phase 5 — BioLoop Virality Signals (Feature 25): viral growth detection, pattern recognition, segment-aware strategies. Workspace-scoped architecture with pluggable LLM providers (Claude/GPT-4o/Grok). Phase 3A (15 gaps/fixes), Phase 3B (5 new capabilities), and Phase 3C — Creative Studio (7 items) all shipped. Social Kit (Feature 20), Sound Effects + Audio Mixer (Feature 21) complete.*
