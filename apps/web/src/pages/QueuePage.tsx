@@ -2,6 +2,8 @@ import React from 'react'
 import { vantageApi } from '../api/vantage'
 import { Panel, Badge, DataTable } from '../ds'
 import { PreviewModal } from '../ds/PreviewModal'
+import { QuoteCardStudio } from '../creative/QuoteCard'
+import { OgCardStudio } from '../creative/OgCard'
 import type { BadgeVariant } from '../ds'
 import type { ReactNode } from 'react'
 
@@ -61,25 +63,25 @@ function VideoScriptPanel({ piece }: { piece: Piece }) {
 
   return (
     <div style={{ marginTop: 8, padding: '8px 10px', background: 'var(--nx-surface-2)', borderRadius: 6, border: '1px solid var(--nx-border)' }}>
-      {cp.hook && (
+      {cp.hook != null && (
         <div style={{ marginBottom: 6 }}>
           <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-amber)', letterSpacing: '0.1em', marginBottom: 2 }}>HOOK</div>
           <div style={{ fontFamily: 'var(--nx-sans)', fontSize: 12, color: 'var(--nx-text-1)' }}>{String(cp.hook)}</div>
         </div>
       )}
-      {cp.script && (
+      {cp.script != null && (
         <div style={{ marginBottom: 6 }}>
           <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-cyan)', letterSpacing: '0.1em', marginBottom: 2 }}>SCRIPT</div>
           <div style={{ fontFamily: 'var(--nx-sans)', fontSize: 11, color: 'var(--nx-text-2)', whiteSpace: 'pre-wrap' }}>{String(cp.script)}</div>
         </div>
       )}
-      {cp.on_screen_text && (
+      {cp.on_screen_text != null && (
         <div style={{ marginBottom: 6 }}>
           <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', letterSpacing: '0.1em', marginBottom: 2 }}>ON-SCREEN TEXT</div>
           <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-text-2)' }}>{String(cp.on_screen_text)}</div>
         </div>
       )}
-      {cp.hashtags && Array.isArray(cp.hashtags) && (cp.hashtags as string[]).length > 0 && (
+      {Array.isArray(cp.hashtags) && cp.hashtags.length > 0 && (
         <div style={{ marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           {(cp.hashtags as string[]).map((h) => (
             <span key={h} style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-cyan)', background: 'rgba(6,182,212,0.08)', padding: '1px 6px', borderRadius: 4 }}>
@@ -88,7 +90,7 @@ function VideoScriptPanel({ piece }: { piece: Piece }) {
           ))}
         </div>
       )}
-      {cp.instructions && (
+      {cp.instructions != null && (
         <div style={{ borderTop: '1px solid var(--nx-border)', paddingTop: 6, marginTop: 6 }}>
           <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', letterSpacing: '0.1em', marginBottom: 2 }}>UPLOAD INSTRUCTIONS</div>
           <div style={{ fontFamily: 'var(--nx-sans)', fontSize: 11, color: 'var(--nx-text-3)' }}>{String(cp.instructions)}</div>
@@ -132,6 +134,8 @@ export function QueuePage() {
   const [manualUrl, setManualUrl] = React.useState<Record<string, string>>({})
   const [expandedScript, setExpandedScript] = React.useState<Set<string>>(new Set())
   const [previewPiece, setPreviewPiece] = React.useState<Piece | null>(null)
+  const [quotifyPiece, setQuotifyPiece] = React.useState<Piece | null>(null)
+  const [ogPiece, setOgPiece]           = React.useState<Piece | null>(null)
 
   const load = React.useCallback(async () => {
     setErr(null)
@@ -241,6 +245,24 @@ export function QueuePage() {
         >
           👁 Preview
         </button>
+        {/* 3C-5: Quotify — open pull-quote card studio pre-seeded with piece body */}
+        <button
+          type="button"
+          className="nx-btn nx-btn--ghost nx-btn--sm"
+          onClick={() => setQuotifyPiece(p)}
+          title="Create a branded pull-quote graphic from this piece"
+        >
+          ❝ Quote
+        </button>
+        {/* 3C-3: OG share card */}
+        <button
+          type="button"
+          className="nx-btn nx-btn--ghost nx-btn--sm"
+          onClick={() => setOgPiece(p)}
+          title="Create a branded Open Graph share card for this piece"
+        >
+          ◫ Share card
+        </button>
         {p.status === 'auditing' && (
           <button
             type="button"
@@ -337,6 +359,40 @@ export function QueuePage() {
       {/* 3B-5: Preview modal */}
       {previewPiece && (
         <PreviewModal piece={previewPiece} onClose={() => setPreviewPiece(null)} />
+      )}
+      {/* 3C-5: Quotify modal */}
+      {/* 3C-3: OG share card modal */}
+      {ogPiece && (
+        <div onClick={() => setOgPiece(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--nx-bg)', border: '1px solid var(--nx-border)', borderRadius: 10, padding: 24, width: '100%', maxWidth: 600 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <span className="nx-mono" style={{ fontSize: 11, color: 'var(--nx-accent)', letterSpacing: '0.18em' }}>◫ OG SHARE CARD</span>
+              <button type="button" onClick={() => setOgPiece(null)} style={{ background: 'none', border: '1px solid var(--nx-border)', borderRadius: 4, padding: '4px 10px', cursor: 'pointer', fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-text-3)' }}>✕ Close</button>
+            </div>
+            <OgCardStudio
+              pieceId={ogPiece.id}
+              initialHeadline={String(ogPiece.content_payload?.headline ?? ogPiece.content_payload?.title ?? ogPiece.content_payload?.body ?? '').slice(0, 100)}
+              initialSub={String(ogPiece.content_payload?.body ?? ogPiece.content_payload?.text ?? '').slice(0, 160)}
+              channel={ogPiece.channel_slug}
+              brandId="vantage"
+            />
+          </div>
+        </div>
+      )}
+
+      {quotifyPiece && (
+        <div onClick={() => setQuotifyPiece(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--nx-bg)', border: '1px solid var(--nx-border)', borderRadius: 10, padding: 24, width: '100%', maxWidth: 900 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <span className="nx-mono" style={{ fontSize: 11, color: 'var(--nx-accent)', letterSpacing: '0.18em' }}>❝ PULL-QUOTE CARD</span>
+              <button type="button" onClick={() => setQuotifyPiece(null)} style={{ background: 'none', border: '1px solid var(--nx-border)', borderRadius: 4, padding: '4px 10px', cursor: 'pointer', fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-text-3)' }}>✕ Close</button>
+            </div>
+            <QuoteCardStudio
+              initialQuote={String(quotifyPiece.content_payload?.body ?? quotifyPiece.content_payload?.text ?? quotifyPiece.content_payload?.hook ?? '').split(/[.!?]\s+/)[0] ?? ''}
+              initialBrandId="vantage"
+            />
+          </div>
+        </div>
       )}
       <div className="vg-page-header">
         <h1 className="vg-page-title">Content Queue</h1>

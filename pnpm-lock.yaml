@@ -106,6 +106,9 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.49.1
         version: 2.105.3
+      html-to-image:
+        specifier: ^1.11.11
+        version: 1.11.13
       react:
         specifier: ^19.0.0
         version: 19.2.6
@@ -1127,6 +1130,9 @@ packages:
   hono@4.12.18:
     resolution: {integrity: sha512-RWzP96k/yv0PQfyXnWjs6zot20TqfpfsNXhOnev8d1InAxubW93L11/oNUc3tQqn2G0bSdAOBpX+2uDFHV7kdQ==}
     engines: {node: '>=16.9.0'}
+
+  html-to-image@1.11.13:
+    resolution: {integrity: sha512-cuOPoI7WApyhBElTTb9oqsawRvZ0rHhaHwghRLlTuffoD1B2aDemlCruLeZrUIIdvG7gs9xeELEPm6PhuASqrg==}
 
   human-signals@2.1.0:
     resolution: {integrity: sha512-B4FFZ6q/T2jhhksgkbEW3HBvWIfDW85snkQgawt07S7J5QXTk6BkNV+0yAeZrM5QpMAdYlocGoljn0sJ/WQkFw==}
@@ -2506,6 +2512,8 @@ snapshots:
       function-bind: 1.1.2
 
   hono@4.12.18: {}
+
+  html-to-image@1.11.13: {}
 
   human-signals@2.1.0: {}
 

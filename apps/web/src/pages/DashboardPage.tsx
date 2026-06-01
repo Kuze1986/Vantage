@@ -97,7 +97,7 @@ export function DashboardPage() {
     setGenerating(key); setErr(null); setMsg(null)
     try {
       if (genVariants > 1) {
-        const r = await vantageApi.generateVariants(genChannel, topicId, genVariants)
+        const r = await vantageApi.generateVariants(genChannel, topicId, genVariants as 2 | 3)
         setMsg(`${genVariants} variants created for ${genChannel} — check Queue to audit`)
         console.log('[generate] variant group:', r.variant_group_id)
       } else if (genImage) {

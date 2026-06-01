@@ -27,8 +27,10 @@
 17. [Settings Page](#17-settings-page)
 18. [Activity Logging](#18-activity-logging)
 19. [Database Infrastructure](#19-database-infrastructure)
-20. [Phase 3A — Gaps & Fixes](#phase-3a--gaps--fixes)
-21. [Phase 3B — New Capabilities](#phase-3b--new-capabilities)
+20. [Social Kit](#20-social-kit)
+21. [Phase 3A — Gaps & Fixes](#phase-3a--gaps--fixes)
+22. [Phase 3B — New Capabilities](#phase-3b--new-capabilities)
+23. [Phase 3C — Creative Studio](#phase-3c--creative-studio)
 
 ---
 
@@ -685,6 +687,52 @@ table including defaults and FK constraints.
 
 ---
 
+### 20. Social Kit
+
+**What it does:**
+An in-app social-asset studio at `/social-kit` that produces on-brand graphics for any of the
+six BioLoop Nexus modules (Shift, Keystone, Scripta, DemoForge, Crucible, Vantage). It was
+ported from the BioLoop Nexus "Social Kit" design prototype into the live app, reusing the
+existing `nexus` design system (`--nx-*` tokens, `theme-*` classes, `nx-*` utility classes).
+
+For the selected module it renders three things:
+
+1. **Brand essentials** — logo lockups (on dark / light / stacked), a click-to-copy color
+   palette, the type system, and the voice do/don't register.
+2. **Caption library** — four on-voice caption cards plus a hashtag bank, each with a
+   copy-to-clipboard button. Caption copy is currently static, sourced from `brands.ts`
+   (Phase 3C-2 wires this to live AI generation).
+3. **Post templates** — six editable, exportable canvases sized to platform specs
+   (Instagram 1080², Story/Reel/TikTok 1080×1920, X 1600×900, LinkedIn 1200×627, plus an
+   insight-carousel intro square + story). Any text is click-to-edit (`contentEditable`),
+   image slots accept click-or-drag photos, and each card exports a clean PNG at 1×/2×/3×.
+
+**Export engine:** `exportCanvasNode()` renders a DOM node to PNG via `html-to-image` at the
+chosen pixel ratio. The canvas is authored at native pixel size and visually down-scaled into
+a card with a CSS transform; on export the un-scaled node is captured, and an `.kit-exporting`
+class strips editing chrome (hover outlines, empty image-slot dashes) from the captured clone.
+This export engine + the template-canvas pattern are the **shared foundation** that Phase 3C
+(Creative Studio) builds on.
+
+**Controls:** A control bar replaces the prototype's tweak panel — a module switcher, an
+"editing guides" toggle (adds/removes the `kit-guides-off` class), and a 1×/2×/3× export-scale
+selector. The active `theme-*` class is scoped to the page's wrapper `<div>` (never
+`document.body`), so re-theming the kit never disturbs the app shell or sidebar.
+
+**Files:**
+- `apps/web/src/pages/SocialKitPage.tsx` — page shell, control bar, theme/guide scoping
+- `apps/web/src/pages/socialkit/brands.ts` — typed `BRANDS` + `BRAND_ORDER` data (6 modules)
+- `apps/web/src/pages/socialkit/CanvasMark.tsx` — per-module SVG logos (literal hex, export-safe) + `Corners`
+- `apps/web/src/pages/socialkit/primitives.tsx` — `EditableText`, `KitImageSlot`, `CopyButton`, `exportCanvasNode`
+- `apps/web/src/pages/socialkit/sections.tsx` — hero, brand essentials, caption library, footer
+- `apps/web/src/pages/socialkit/templates.tsx` — canvas furniture + 6 templates + gallery
+- `apps/web/src/pages/socialkit/socialkit.css` — kit-only styles, scoped to `.vg-socialkit`
+- `apps/web/src/App.tsx` — `/social-kit` route + sidebar nav entry
+
+**Configuration:** None. Fully client-side; the only new dependency is `html-to-image`.
+
+---
+
 ---
 
 ## Phase 3A — Gaps & Fixes
@@ -1032,4 +1080,227 @@ requires direct API calls.
 
 ---
 
-*Last updated: Phase 3A and 3B fully shipped. All 15 planned items complete. Dashboard BioLoop button, + Image checkbox, and A/B variant selectors wired. BioLoop moved to Supabase Edge Function. Stale ⚠️ warnings removed.*
+---
+
+## Phase 3C — Creative Studio
+
+> A suite of creative-asset tools that extend the [Social Kit](#20-social-kit). Each is
+> independent and can ship individually. They share one foundation and split into two value
+> tiers: tools that **reuse the Social Kit canvas → PNG export engine** (cheap, mostly
+> front-end) and tools that **connect creative output to the live content pipeline** (Kuze,
+> the Queue, BioLoop, DemoForge — higher value, some back-end work).
+>
+> **Recommended build order:** 3C-0 (foundation) → 3C-5, 3C-3, 3C-4, 3C-1 (canvas reuse) →
+> 3C-2 (pipeline-connected, high value) → 3C-6 (largest, email-safe HTML).
+>
+> **Information architecture:** to avoid sidebar bloat, surface these as **tabs inside the
+> Social Kit page** (Carousel, Quote) and as **contextual actions** elsewhere (a "Share card"
+> action on Queue rows, a "Thumbnail" action on DemoForge jobs). Only the Email/Newsletter
+> Builder (3C-6) warrants its own nav entry. The Caption Studio (3C-2) lives in the existing
+> Social Kit caption section.
+
+---
+
+### 3C-0 — Creative Foundation (shared refactor)
+
+**Status:** ✅ Shipped
+
+**Problem:** The Social Kit's canvas primitives (`exportCanvasNode`, `EditableText`,
+`KitImageSlot`, `CanvasMark`, the `TemplateCard` scaled-canvas wrapper, and the canvas
+furniture in `templates.tsx`) are currently private to `pages/socialkit/`. Every Phase 3C
+tool needs them. Duplicating would fragment the design and the export behavior.
+
+**Implementation:**
+- Promote the reusable pieces into a shared module: `apps/web/src/creative/` (or keep them in
+  `socialkit/` and export a barrel `socialkit/index.ts`). Move `primitives.tsx`, `CanvasMark.tsx`,
+  and the furniture (`CanvasBG`, `ScopeMark`, `CanvasCorners`, `CanvasWordmark`, `StatusBadge`,
+  `CanvasMetric`, `CTAPill`) into it; re-export from `socialkit` so the existing page is unchanged.
+- Extract a generic `<ExportCard>` from `TemplateCard` (the scale-into-a-frame + EXPORT button
+  shell) that any tool can wrap arbitrary canvas children with, parameterized by `w`, `h`,
+  `displayW`, `exportScale`, and `filename`.
+- Add a small Storage helper `uploadDataUrl(bucket, path, dataUrl)` wrapping
+  `supabase.storage.from('vantage-media').upload(...)` for the tools that persist a PNG
+  (3C-3, 3C-4) and return the public URL.
+
+**Files to create/change:** `apps/web/src/creative/` (new module) or `socialkit/index.ts`
+barrel, `apps/web/src/pages/socialkit/*` (imports updated), `apps/web/src/lib/storage.ts` (new helper).
+
+**Configuration:** None (Storage bucket `vantage-media` already exists).
+
+---
+
+### 3C-1 — Carousel Builder
+
+**Status:** ✅ Shipped
+
+**Problem:** The Social Kit ships single insight slides, but the highest-performing
+Instagram/LinkedIn format is the multi-slide **carousel**. There is no way to compose an
+ordered 2–10 slide set and export it as a numbered image sequence.
+
+**Implementation:**
+- New `socialkit/carousel.tsx`, surfaced as a "Carousel" tab on the Social Kit page.
+- Slide model: `{ id, type, fields }[]` where `type ∈ { cover, point, stat, quote, cta }`.
+  Each type is a brand-themed 1080×1080 (or 1080×1350) template built from the shared canvas
+  furniture and `EditableText` — reuse the look of `InsightSquare`.
+- Slide rail: add / duplicate / reorder (drag) / delete slides; the existing page-indicator
+  dots from `InsightStory` become the live progress dots.
+- **Seed options:** (a) paste an outline — split on blank lines / numbered list into one slide
+  each; (b) generate from a topic via the Caption Studio endpoint (3C-2) extended to return
+  `N` slide bodies. Cover + CTA slides are auto-added.
+- **Export:** loop `exportCanvasNode()` over each slide node → numbered PNGs
+  (`<brand>-carousel-01.png` … `-NN.png`), zipped client-side, **or** assembled into one
+  multi-page PDF via `jspdf` (each page = one 1080² image). Offer both.
+
+**Files to create/change:** `apps/web/src/pages/socialkit/carousel.tsx` (new), slide-type
+components, `SocialKitPage.tsx` (tab), optionally add `jspdf` + `jszip` deps.
+
+**Configuration:** None (client-side). New optional deps: `jspdf`, `jszip`.
+
+---
+
+### 3C-2 — AI Caption Studio
+
+**Status:** ✅ Shipped
+
+**Problem:** Social Kit captions are static strings in `brands.ts`. The app already has a
+first-class AI copywriter (**Kuze**), a **brand voice** config, and **BioLoop** performance
+weights — none of which the caption library uses. Captions should be generated fresh,
+on-voice, per platform, and biased toward patterns that actually perform.
+
+**Implementation:**
+- New back-end surface that generates ephemeral captions **without** creating a `content_piece`
+  or consuming a topic (unlike `/v1/generate/:channel`):
+  - `apps/api/src/services/kuze.ts` → add `generateCaptions({ prompt, channel, count, tone })`
+    that loads `brand_voice` (the existing loader) and the top `generation_weights` for the
+    channel (the existing weight-loading path), then asks Claude for `count` distinct caption
+    variants, returning plain strings.
+  - `packages/prompts/src/index.ts` → a `captionPrompt()` builder (platform length limits,
+    voice, weights — mirrors the existing format-schema prompts).
+  - `apps/api/src/routes/captions.ts` → `POST /v1/captions` (new), behind `authMiddleware`.
+- Front-end: in the Social Kit caption section, add a **"✨ Generate"** panel — a topic/angle
+  input, platform select, count, and tone chips. Results render as caption cards with **Copy**
+  and **"Use in template →"** (pipes the text into the active editable template). Add
+  `vantageApi.generateCaptions(...)` to `apps/web/src/api/vantage.ts`.
+- Optional: a "Save as preset" that writes the caption back into a per-brand override table so
+  good captions persist.
+
+**Files to create/change:** `apps/api/src/services/kuze.ts`, `apps/api/src/routes/captions.ts`
+(new), `packages/prompts/src/index.ts`, `apps/api/src/index.ts` (route mount),
+`apps/web/src/api/vantage.ts`, `apps/web/src/pages/socialkit/sections.tsx`.
+
+**Configuration:** `ANTHROPIC_API_KEY` (already required for Kuze).
+
+---
+
+### 3C-3 — OG / Share-Card Generator
+
+**Status:** ✅ Shipped
+
+**Problem:** Every published link (X, LinkedIn, Facebook) renders whatever Open Graph image
+the platform scrapes — usually nothing branded. There is no tool to produce a consistent
+1200×630 share card per content piece.
+
+**Implementation:**
+- A 1200×630 OG template built from the shared canvas furniture, bound to a content piece:
+  pre-fills headline/preview/channel from `content_payload` (fetched via `vantageApi.getQueue`),
+  with an editable headline and an image slot.
+- Entry point: a **"Share card"** action on each Queue row that opens the OG editor in a modal
+  (same modal pattern as `PreviewModal`).
+- **Two outputs:** (a) **Export PNG** locally via `exportCanvasNode()`; (b) **Attach to piece**
+  — `uploadDataUrl('vantage-media', 'og/<piece_id>.png', dataUrl)` then `PATCH` the piece to set
+  `content_payload.og_image_url`. The publishing adapters already attach images
+  (X/LinkedIn image passthrough — see 3A-3), so an attached card ships with the post.
+- New `apps/api/src/routes/queue.ts` patch endpoint (or reuse an existing update path) to set
+  `og_image_url` on the piece.
+
+**Files to create/change:** `apps/web/src/pages/creative/OgCard.tsx` (new),
+`apps/web/src/pages/QueuePage.tsx` (action + modal), `apps/api/src/routes/queue.ts`
+(set `og_image_url`), `apps/web/src/lib/storage.ts` (from 3C-0).
+
+**Configuration:** Supabase Storage (`vantage-media` bucket, already provisioned).
+
+---
+
+### 3C-4 — DemoForge Thumbnail / Cover Frames
+
+**Status:** ✅ Shipped
+
+**Problem:** The DemoForge pipeline renders platform-formatted videos but produces **no cover
+art**. A muted autoplay feed needs a strong branded thumbnail; right now there is none.
+
+**Implementation:**
+- A thumbnail template sized to the job's `target_format` (1080×1920 portrait for
+  TikTok/Instagram, 1920×1080 landscape for LinkedIn), reusing the shared canvas furniture:
+  a brand wordmark, an editable title, and a `KitImageSlot` for the background frame.
+- Seed the title from the job (or its linked `content_piece`), and let the operator drop a
+  captured frame as the background. (Auto-extracting a frame from the rendered MP4 is deferred —
+  cross-origin canvas capture from the Storage URL needs CORS config; v1 uses a dropped image.)
+- Entry point: a **"Thumbnail"** action on each row of the DemoForge job history in
+  `DemoForgePage.tsx`. Export PNG locally; optionally `uploadDataUrl(...)` and store on the job
+  (new `demoforge_jobs.thumbnail_url` column + a proxy patch endpoint).
+
+**Files to create/change:** `apps/web/src/pages/creative/Thumbnail.tsx` (new),
+`apps/web/src/pages/DemoForgePage.tsx` (action), optional migration for
+`demoforge_jobs.thumbnail_url` + `apps/api/src/routes/demoforge.ts`.
+
+**Configuration:** Supabase Storage (existing).
+
+---
+
+### 3C-5 — Pull-Quote Cards
+
+**Status:** ✅ Shipped
+
+**Problem:** Generated content frequently contains a quotable line, but there is no one-click
+way to turn it into a shareable graphic. (Cheapest tool — pure canvas reuse — good first build
+after the foundation.)
+
+**Implementation:**
+- A quote-card template (reuse the `InsightSquare` look): large editable quote text, a brand
+  attribution line (`brand.handle`), and the brand mark. 1080² and 1080×1920 variants.
+- **Two entry points:** (a) a "Quote" tab in the Social Kit with a paste box; (b) a **"Quotify"**
+  action on Queue rows that prefills the card with the selected line — capture the user's text
+  selection within a piece's body, or default to the first sentence of `content_payload.body`.
+- Export PNG via `exportCanvasNode()`.
+
+**Files to create/change:** `apps/web/src/pages/creative/QuoteCard.tsx` (new),
+`SocialKitPage.tsx` (tab), `apps/web/src/pages/QueuePage.tsx` (Quotify action).
+
+**Configuration:** None (client-side).
+
+---
+
+### 3C-6 — Email / Newsletter Template Builder
+
+**Status:** ✅ Shipped
+
+**Problem:** The Email channel sends Kuze's raw HTML `body` straight to Resend with no branded
+chrome — no header, hero, styled CTA button, or footer. There is no visual way to build a
+reusable, on-brand newsletter layout. This is the **largest** Phase 3C item because the output
+is email-client-safe HTML, not a PNG, so the canvas engine does not apply.
+
+**Implementation:**
+- A **block-based builder** (`apps/web/src/pages/EmailBuilderPage.tsx`, its own nav entry):
+  stackable blocks — header/logo, hero, text, button/CTA, image, divider, footer — each
+  brand-themed from the palette in `brands.ts`.
+- **Serializer** → table-based, fully inline-styled HTML (no flexbox/grid; web-safe font stack
+  with the brand display/mono fonts as progressive enhancement) that survives Gmail/Outlook.
+- **Preview** in a sandboxed `<iframe>` (reuse the `email_newsletter` rendering already in
+  `PreviewModal`).
+- **Persistence:** new `vantage.email_templates` table (`id`, `name`, `blocks` JSONB,
+  `created_at`) + `public.email_templates` view + CRUD routes; save/load named templates.
+- **Pipeline integration:** a saved template can act as a **wrapper** — a generated
+  `email_newsletter` piece's Kuze `body` is injected into the template's text block, so
+  automated newsletters inherit branded chrome. The email adapter
+  (`apps/api/src/adapters/email.ts`) applies the selected wrapper before `tagUrls()` + send.
+
+**Files to create/change:** `apps/web/src/pages/EmailBuilderPage.tsx` + block components (new),
+HTML serializer util, `apps/api/src/routes/email-templates.ts` (new),
+`apps/api/src/adapters/email.ts` (apply wrapper), new migration (`email_templates` table + view),
+app router + sidebar.
+
+**Configuration:** None beyond the existing Resend setup (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`).
+
+---
+
+*Last updated: Phase 3A and 3B fully shipped (15 items). Social Kit ported and documented as Feature 20. Phase 3C — Creative Studio fully shipped (7 items): 3C-0 creative foundation, 3C-1 carousel builder, 3C-2 AI caption studio, 3C-3 OG share-card generator, 3C-4 DemoForge thumbnails, 3C-5 pull-quote cards, 3C-6 email template builder. Pre-existing typecheck errors in PreviewModal/QueuePage/DashboardPage also fixed.*

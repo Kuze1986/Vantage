@@ -1,6 +1,7 @@
 import React from 'react'
 import { vantageApi } from '../api/vantage'
 import { Panel, Button, Badge } from '../ds'
+import { ThumbnailStudio } from '../creative/Thumbnail'
 
 type Format = 'tiktok' | 'linkedin' | 'instagram'
 type ScriptStep = {
@@ -11,9 +12,9 @@ type ScriptStep = {
   narration: string
 }
 type MusicTrack = { id: string; title: string; artist: string | null; mood: string; use_case: string }
-type JobStatus = { id: string; status: string; output_url: string | null; error_message: string | null; updated_at: string }
+type JobStatus = { id: string; status: string; target_format?: string; output_url: string | null; error_message: string | null; updated_at: string }
 
-const ACTIONS = ['navigate', 'click', 'fill', 'wait', 'scroll', 'narrate']
+const ACTIONS = ['navigate', 'click', 'fill', 'scroll', 'narrate']
 const FORMATS: Format[] = ['tiktok', 'linkedin', 'instagram']
 
 const STATUS_COLOR: Record<string, string> = {
@@ -52,22 +53,14 @@ const VANTAGE_TEMPLATES: VantageTemplate[] = [
     format: 'linkedin',
     estimatedSec: 90,
     steps: [
-      { action: 'navigate', selector: '{BASE}/',           narration: 'This is Vantage — an automated content pipeline that runs across seven channels simultaneously.' },
-      { action: 'wait',     ms: 2500,                      narration: '' },
-      { action: 'scroll',   selector: '',                  narration: 'The dashboard shows live pipeline health: topics ingested, pieces auditing, and today\'s publish count vs. target.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
-      { action: 'navigate', selector: '{BASE}/queue',      narration: 'Every generated piece flows through a strict status machine — draft, auditing, approved, queued, published.' },
-      { action: 'wait',     ms: 2500,                      narration: '' },
-      { action: 'scroll',   selector: '',                  narration: 'Ilita, our AI brand-safety auditor, reviews every piece. Failed content is regenerated with the feedback inline.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
-      { action: 'navigate', selector: '{BASE}/calendar',   narration: 'The calendar shows exactly how posts are distributed across the week — no clustering, no gaps.' },
-      { action: 'wait',     ms: 2500,                      narration: '' },
-      { action: 'navigate', selector: '{BASE}/analytics',  narration: 'BioLoop closes the loop. Engagement data feeds back into generation weights so Kuze learns which patterns perform.' },
-      { action: 'wait',     ms: 2500,                      narration: '' },
-      { action: 'scroll',   selector: '',                  narration: 'Engagement by posting hour tells us exactly when our audience is active — so the cadence engine schedules accordingly.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
-      { action: 'navigate', selector: '{BASE}/',           narration: 'Vantage runs 24/7. Cadence tick every 60 seconds. Auto-generate every 5 minutes. Pulse scans every 30. Automated content. Real signal.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/',          ms: 2500, narration: 'This is Vantage — an automated content pipeline that runs across seven channels simultaneously.' },
+      { action: 'scroll',   selector: '',                 ms: 2000, narration: 'The dashboard shows live pipeline health: topics ingested, pieces auditing, and today\'s publish count vs. target.' },
+      { action: 'navigate', selector: '{BASE}/queue',     ms: 2500, narration: 'Every generated piece flows through a strict status machine — draft, auditing, approved, queued, published.' },
+      { action: 'scroll',   selector: '',                 ms: 2000, narration: 'Ilita, our AI brand-safety auditor, reviews every piece. Failed content is regenerated with the feedback inline.' },
+      { action: 'navigate', selector: '{BASE}/calendar',  ms: 2500, narration: 'The calendar shows exactly how posts are distributed across the week — no clustering, no gaps.' },
+      { action: 'navigate', selector: '{BASE}/analytics', ms: 2500, narration: 'BioLoop closes the loop. Engagement data feeds back into generation weights so Kuze learns which patterns perform.' },
+      { action: 'scroll',   selector: '',                 ms: 2000, narration: 'Engagement by posting hour tells us exactly when our audience is active — so the cadence engine schedules accordingly.' },
+      { action: 'navigate', selector: '{BASE}/',          ms: 2000, narration: 'Vantage runs 24/7. Cadence tick every 60 seconds. Auto-generate every 5 minutes. Pulse scans every 30. Automated content. Real signal.' },
     ],
   },
 
@@ -80,20 +73,13 @@ const VANTAGE_TEMPLATES: VantageTemplate[] = [
     format: 'tiktok',
     estimatedSec: 60,
     steps: [
-      { action: 'navigate', selector: '{BASE}/',           narration: 'Seven channels. One pipeline. Zero manual posts.' },
-      { action: 'wait',     ms: 1800,                      narration: '' },
-      { action: 'navigate', selector: '{BASE}/queue',      narration: 'Every piece of content flows through a strict status machine.' },
-      { action: 'wait',     ms: 1800,                      narration: '' },
-      { action: 'navigate', selector: '{BASE}/calendar',   narration: 'See exactly when every post goes out, weeks in advance.' },
-      { action: 'wait',     ms: 1800,                      narration: '' },
-      { action: 'navigate', selector: '{BASE}/analytics',  narration: 'And engagement data feeds straight back into the AI.' },
-      { action: 'wait',     ms: 1800,                      narration: '' },
-      { action: 'navigate', selector: '{BASE}/channels',   narration: 'X. LinkedIn. Reddit. Email. TikTok. Instagram. Facebook.' },
-      { action: 'wait',     ms: 1800,                      narration: '' },
-      { action: 'navigate', selector: '{BASE}/voice',      narration: 'Your brand voice shapes every word Kuze writes.' },
-      { action: 'wait',     ms: 1800,                      narration: '' },
-      { action: 'navigate', selector: '{BASE}/',           narration: 'Vantage. Automated content. Real signal. No noise.' },
-      { action: 'wait',     ms: 1800,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/',          ms: 1800, narration: 'Seven channels. One pipeline. Zero manual posts.' },
+      { action: 'navigate', selector: '{BASE}/queue',     ms: 1800, narration: 'Every piece of content flows through a strict status machine.' },
+      { action: 'navigate', selector: '{BASE}/calendar',  ms: 1800, narration: 'See exactly when every post goes out, weeks in advance.' },
+      { action: 'navigate', selector: '{BASE}/analytics', ms: 1800, narration: 'And engagement data feeds straight back into the AI.' },
+      { action: 'navigate', selector: '{BASE}/channels',  ms: 1800, narration: 'X. LinkedIn. Reddit. Email. TikTok. Instagram. Facebook.' },
+      { action: 'navigate', selector: '{BASE}/voice',     ms: 1800, narration: 'Your brand voice shapes every word Kuze writes.' },
+      { action: 'navigate', selector: '{BASE}/',          ms: 1800, narration: 'Vantage. Automated content. Real signal. No noise.' },
     ],
   },
 
@@ -106,16 +92,12 @@ const VANTAGE_TEMPLATES: VantageTemplate[] = [
     format: 'linkedin',
     estimatedSec: 75,
     steps: [
-      { action: 'navigate', selector: '{BASE}/',           narration: 'Most content tools generate and forget. Vantage learns.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
-      { action: 'narrate',  selector: '',                  narration: 'BioLoop is a closed-loop feedback system. Every published piece is tracked. Every engagement event — click, share, reply — is recorded and attributed to the content patterns that drove it.' },
-      { action: 'navigate', selector: '{BASE}/analytics',  narration: 'Here\'s what that data looks like. Engagement over time, broken down by channel and vertical.' },
-      { action: 'wait',     ms: 2500,                      narration: '' },
-      { action: 'scroll',   selector: '',                  narration: 'Posting hour analysis reveals exactly when your audience is active.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
-      { action: 'narrate',  selector: '',                  narration: 'BioLoop computes 13 content patterns per piece — whether it opens with a question, has a call to action, is data-driven. Patterns that correlate with engagement get higher weights. Kuze reads those weights before every generation.' },
-      { action: 'navigate', selector: '{BASE}/',           narration: 'The result: content that gets measurably better over time. Automatically. Vantage — content intelligence that compounds.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/',          ms: 2000, narration: 'Most content tools generate and forget. Vantage learns.' },
+      { action: 'narrate',  selector: '',                           narration: 'BioLoop is a closed-loop feedback system. Every published piece is tracked. Every engagement event — click, share, reply — is recorded and attributed to the content patterns that drove it.' },
+      { action: 'navigate', selector: '{BASE}/analytics', ms: 2500, narration: 'Here\'s what that data looks like. Engagement over time, broken down by channel and vertical.' },
+      { action: 'scroll',   selector: '',                 ms: 2000, narration: 'Posting hour analysis reveals exactly when your audience is active.' },
+      { action: 'narrate',  selector: '',                           narration: 'BioLoop computes 13 content patterns per piece — whether it opens with a question, has a call to action, is data-driven. Patterns that correlate with engagement get higher weights. Kuze reads those weights before every generation.' },
+      { action: 'navigate', selector: '{BASE}/',          ms: 2000, narration: 'The result: content that gets measurably better over time. Automatically. Vantage — content intelligence that compounds.' },
     ],
   },
 
@@ -128,15 +110,11 @@ const VANTAGE_TEMPLATES: VantageTemplate[] = [
     format: 'instagram',
     estimatedSec: 60,
     steps: [
-      { action: 'navigate', selector: '{BASE}/queue',      narration: 'Every piece of content Vantage generates lands here.' },
-      { action: 'wait',     ms: 2500,                      narration: '' },
-      { action: 'scroll',   selector: '',                  narration: 'Filter by status. See exactly what\'s auditing, what\'s approved, and what\'s queued for publish.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
-      { action: 'narrate',  selector: '',                  narration: 'Ilita — our AI brand-safety auditor — reviews every piece before it moves forward. Fail once, Kuze regenerates with the feedback inline. Fail twice, it\'s marked rejected.' },
-      { action: 'scroll',   selector: '',                  narration: 'A/B variants share a variant group, so you can see which version performed before scaling it.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
-      { action: 'narrate',  selector: '',                  narration: 'For API channels — X, LinkedIn, Reddit, Email — one click publishes directly. For manual channels, the upload script is right here.' },
-      { action: 'wait',     ms: 1500,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/queue', ms: 2500, narration: 'Every piece of content Vantage generates lands here.' },
+      { action: 'scroll',   selector: '',             ms: 2000, narration: 'Filter by status. See exactly what\'s auditing, what\'s approved, and what\'s queued for publish.' },
+      { action: 'narrate',  selector: '',                       narration: 'Ilita — our AI brand-safety auditor — reviews every piece before it moves forward. Fail once, Kuze regenerates with the feedback inline. Fail twice, it\'s marked rejected.' },
+      { action: 'scroll',   selector: '',             ms: 2000, narration: 'A/B variants share a variant group, so you can see which version performed before scaling it.' },
+      { action: 'narrate',  selector: '',             ms: 1500, narration: 'For API channels — X, LinkedIn, Reddit, Email — one click publishes directly. For manual channels, the upload script is right here.' },
     ],
   },
 
@@ -149,14 +127,10 @@ const VANTAGE_TEMPLATES: VantageTemplate[] = [
     format: 'tiktok',
     estimatedSec: 50,
     steps: [
-      { action: 'navigate', selector: '{BASE}/channels',   narration: 'Connect your channels. Vantage supports seven platforms out of the box.' },
-      { action: 'wait',     ms: 2500,                      narration: '' },
-      { action: 'scroll',   selector: '',                  narration: 'X, LinkedIn, and Reddit use full OAuth. Email sends through Resend to your subscriber list.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
-      { action: 'scroll',   selector: '',                  narration: 'For each channel, configure how many posts per day, which UTC hours to schedule, and whether to auto-approve Ilita-passing content.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
-      { action: 'narrate',  selector: '',                  narration: 'With auto-approve on, Vantage runs end-to-end without any manual steps. Content flows from topic to published post, automatically.' },
-      { action: 'wait',     ms: 1500,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/channels', ms: 2500, narration: 'Connect your channels. Vantage supports seven platforms out of the box.' },
+      { action: 'scroll',   selector: '',                ms: 2000, narration: 'X, LinkedIn, and Reddit use full OAuth. Email sends through Resend to your subscriber list.' },
+      { action: 'scroll',   selector: '',                ms: 2000, narration: 'For each channel, configure how many posts per day, which UTC hours to schedule, and whether to auto-approve Ilita-passing content.' },
+      { action: 'narrate',  selector: '',                ms: 1500, narration: 'With auto-approve on, Vantage runs end-to-end without any manual steps. Content flows from topic to published post, automatically.' },
     ],
   },
 
@@ -169,13 +143,10 @@ const VANTAGE_TEMPLATES: VantageTemplate[] = [
     format: 'linkedin',
     estimatedSec: 45,
     steps: [
-      { action: 'navigate', selector: '{BASE}/voice',      narration: 'Kuze — our AI copywriter — writes in your brand\'s voice, not a generic one.' },
-      { action: 'wait',     ms: 2500,                      narration: '' },
-      { action: 'scroll',   selector: '',                  narration: 'You define the brand identity: who you are, what you stand for, and what you never say.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
-      { action: 'narrate',  selector: '',                  narration: 'Per-channel tone lets you sound professional on LinkedIn and punchy on X — from a single config. Off-topics are hard stops. Kuze will never write about them, regardless of the source topic.' },
-      { action: 'navigate', selector: '{BASE}/voice',      narration: 'Every generation call loads the brand voice first. Your identity shapes every word.' },
-      { action: 'wait',     ms: 2000,                      narration: '' },
+      { action: 'navigate', selector: '{BASE}/voice', ms: 2500, narration: 'Kuze — our AI copywriter — writes in your brand\'s voice, not a generic one.' },
+      { action: 'scroll',   selector: '',             ms: 2000, narration: 'You define the brand identity: who you are, what you stand for, and what you never say.' },
+      { action: 'narrate',  selector: '',                       narration: 'Per-channel tone lets you sound professional on LinkedIn and punchy on X — from a single config. Off-topics are hard stops. Kuze will never write about them, regardless of the source topic.' },
+      { action: 'navigate', selector: '{BASE}/voice', ms: 2000, narration: 'Every generation call loads the brand voice first. Your identity shapes every word.' },
     ],
   },
 ]
@@ -275,7 +246,6 @@ function parseScriptText(raw: string): ScriptStep[] {
     let text      = ''
     let ms: number | undefined
     let narration = ''
-    let trailingWaitMs: number | undefined
 
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i]
@@ -289,14 +259,17 @@ function parseScriptText(raw: string): ScriptStep[] {
         text = line.slice('text:'.length).trim()
       } else if (lower.startsWith('wait:')) {
         const parsed = parseInt(line.slice('wait:'.length).trim().replace(/ms.*$/i, ''), 10)
-        if (!isNaN(parsed)) {
-          if (action === 'wait') ms = parsed
-          else trailingWaitMs = parsed
-        }
+        if (!isNaN(parsed)) ms = parsed
       } else if (action === 'navigate' && !selector && (line.startsWith('http') || line.startsWith('/'))) {
         // bare URL line for navigate steps
         selector = line
       }
+    }
+
+    // Skip standalone wait-only blocks from old-format scripts — merge into prior step
+    if (action === 'wait' && ms !== undefined && out.length > 0 && !narration) {
+      out[out.length - 1] = { ...out[out.length - 1], ms }
+      continue
     }
 
     const step: ScriptStep = { action, narration }
@@ -304,11 +277,6 @@ function parseScriptText(raw: string): ScriptStep[] {
     if (text)     step.text     = text
     if (ms !== undefined) step.ms = ms
     out.push(step)
-
-    // Append implicit wait step for non-wait actions that specified Wait:
-    if (action !== 'wait' && trailingWaitMs !== undefined) {
-      out.push({ action: 'wait', narration: '', ms: trailingWaitMs })
-    }
   }
 
   return out
@@ -328,6 +296,7 @@ export function DemoForgePage() {
   const [trackId, setTrackId]   = React.useState<string>('')
   const [job, setJob]           = React.useState<JobStatus | null>(null)
   const [history, setHistory]   = React.useState<JobStatus[]>([])
+  const [thumbJob, setThumbJob] = React.useState<JobStatus | null>(null)
   const [submitting, setSubmitting]     = React.useState(false)
   const [polling, setPolling]           = React.useState(false)
   const [err, setErr]                   = React.useState<string | null>(null)
@@ -365,13 +334,18 @@ export function DemoForgePage() {
     }, 5000)
   }
 
-  // Load a template — interpolate {BASE} with the current baseUrl
+  // Load a template — interpolate {BASE} and collapse any orphaned wait-only steps
   const loadTemplate = (tpl: VantageTemplate) => {
     const base = baseUrl.replace(/\/$/, '')
-    const interpolated = tpl.steps.map((s) => ({
-      ...s,
-      selector: s.selector?.replace('{BASE}', base) ?? s.selector,
-    }))
+    const interpolated = tpl.steps.reduce<ScriptStep[]>((acc, s) => {
+      const step = { ...s, selector: s.selector?.replace('{BASE}', base) ?? s.selector }
+      // Absorb a bare wait step (no narration) into the preceding step's ms
+      if (step.action === 'wait' && !step.narration && step.ms !== undefined && acc.length > 0) {
+        acc[acc.length - 1] = { ...acc[acc.length - 1], ms: step.ms }
+        return acc
+      }
+      return [...acc, step]
+    }, [])
     setSteps(interpolated)
     setFormat(tpl.format)
     setUrl(base)
@@ -383,16 +357,21 @@ export function DemoForgePage() {
     if (!url || steps.length === 0) return
     setSubmitting(true); setErr(null); setMsg(null); setJob(null)
     try {
-      const r = await vantageApi.createDemoForgeJob({
-        target_format: format,
-        url,
-        script: steps.map((s) => ({
+      // Expand inline ms into trailing wait steps for the processor
+      const expandedScript = steps.flatMap((s) => {
+        const base = {
           action: s.action,
           narration: s.narration,
           ...(s.selector ? { selector: s.selector } : {}),
           ...(s.text     ? { text: s.text }         : {}),
-          ...(s.ms       ? { ms: s.ms }              : {}),
-        })),
+        }
+        const trail = s.ms ? [{ action: 'wait' as const, narration: '', ms: s.ms }] : []
+        return [base, ...trail]
+      })
+      const r = await vantageApi.createDemoForgeJob({
+        target_format: format,
+        url,
+        script: expandedScript,
         ...(trackId ? { music_track_id: trackId } : {}),
       })
       setJob({ id: r.job_id, status: r.status, output_url: null, error_message: null, updated_at: new Date().toISOString() })
@@ -429,6 +408,23 @@ export function DemoForgePage() {
 
   return (
     <>
+      {/* 3C-4: Thumbnail modal */}
+      {thumbJob && (
+        <div onClick={() => setThumbJob(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--nx-bg)', border: '1px solid var(--nx-border)', borderRadius: 10, padding: 24, width: '100%', maxWidth: 560 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <span className="nx-mono" style={{ fontSize: 11, color: 'var(--nx-amber)', letterSpacing: '0.18em' }}>▦ THUMBNAIL · {thumbJob.target_format?.toUpperCase()}</span>
+              <button type="button" onClick={() => setThumbJob(null)} style={{ background: 'none', border: '1px solid var(--nx-border)', borderRadius: 4, padding: '4px 10px', cursor: 'pointer', fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-text-3)' }}>✕ Close</button>
+            </div>
+            <ThumbnailStudio
+              jobId={thumbJob.id}
+              format={(thumbJob.target_format as 'tiktok' | 'instagram' | 'linkedin') ?? 'tiktok'}
+              brandId="vantage"
+            />
+          </div>
+        </div>
+      )}
+
       <div className="vg-page-header">
         <h1 className="vg-page-title">DemoForge</h1>
         <p className="vg-page-sub">Record a Vantage demo, add AI narration, and render a platform-ready video</p>
@@ -713,24 +709,32 @@ export function DemoForgePage() {
                           style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
                         />
                       )}
-                      {step.action === 'wait' && (
-                        <input
-                          type="number"
-                          className="vg-input"
-                          placeholder="Milliseconds (e.g. 2000)"
-                          value={step.ms ?? ''}
-                          onChange={(e) => updateStep(i, { ms: parseInt(e.target.value) || undefined })}
-                          style={{ width: '100%', marginBottom: 6, fontSize: 10 }}
-                        />
-                      )}
                       <textarea
                         className="vg-input"
                         placeholder="Narration for this step (spoken by ElevenLabs voice). Leave blank for silent steps."
                         value={step.narration}
                         onChange={(e) => updateStep(i, { narration: e.target.value })}
                         rows={2}
-                        style={{ width: '100%', resize: 'vertical', fontSize: 10 }}
+                        style={{ width: '100%', resize: 'vertical', fontSize: 10, marginBottom: 6 }}
                       />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <label style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', letterSpacing: '0.12em', whiteSpace: 'nowrap' }}>WAIT AFTER</label>
+                        <input
+                          type="number"
+                          className="vg-input"
+                          placeholder="ms (e.g. 2000)"
+                          value={step.ms ?? ''}
+                          onChange={(e) => updateStep(i, { ms: parseInt(e.target.value) || undefined })}
+                          style={{ width: 120, fontSize: 10 }}
+                        />
+                        <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)' }}>ms</span>
+                        {step.ms && step.ms > 0 && (
+                          <button type="button" onClick={() => updateStep(i, { ms: undefined })}
+                            style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, background: 'none', border: 'none', color: 'var(--nx-text-4)', cursor: 'pointer', padding: '0 2px' }}>
+                            ✕
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                   <button
@@ -859,7 +863,7 @@ export function DemoForgePage() {
                       </div>
                       <Badge label={j.status} variant={j.status === 'done' ? 'active' : j.status === 'failed' ? 'critical' : 'pending'} />
                     </div>
-                    <div style={{ textAlign: 'right' }}>
+                    <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
                       {j.output_url ? (
                         <a href={j.output_url} target="_blank" rel="noopener noreferrer"
                           style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-cyan)', textDecoration: 'underline' }}>
@@ -870,6 +874,11 @@ export function DemoForgePage() {
                           {new Date(j.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       )}
+                      {/* 3C-4: Thumbnail button */}
+                      <button type="button" onClick={() => setThumbJob(j)}
+                        style={{ fontFamily: 'var(--nx-mono)', fontSize: 8, letterSpacing: '0.1em', padding: '2px 7px', cursor: 'pointer', background: 'none', border: '1px solid var(--nx-border)', borderRadius: 3, color: 'var(--nx-text-4)' }}>
+                        ▦ Thumbnail
+                      </button>
                     </div>
                   </div>
                 ))}

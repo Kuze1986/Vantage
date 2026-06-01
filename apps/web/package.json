@@ -9,10 +9,12 @@
     "preview": "vite preview",
     "start": "node ./scripts/listen.mjs",
     "typecheck": "tsc --noEmit",
-    "lint": "echo skip"
+    "lint": "echo skip",
+    "demo": "npx tsx scripts/demo-walkthrough.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
+    "html-to-image": "^1.11.11",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.1.1",

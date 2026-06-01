@@ -68,7 +68,7 @@ function LinkedInPreview({ cp }: { cp: ContentPayload }) {
         {body}
       </div>
       <CharCount text={body} limit={CHAR_LIMITS.linkedin_post} />
-      {cp.image_url && (
+      {cp.image_url != null && (
         <img src={String(cp.image_url)} alt="LinkedIn post image" style={{ width: '100%', borderRadius: 6, marginTop: 10 }} />
       )}
     </div>
@@ -127,13 +127,13 @@ function VideoPreview({ cp, format }: { cp: ContentPayload; format: string }) {
       <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-amber)', letterSpacing: '0.1em', marginBottom: 6 }}>
         {platformLabel.toUpperCase()}
       </div>
-      {cp.hook && (
+      {cp.hook != null && (
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginBottom: 2 }}>HOOK</div>
           <div style={{ fontFamily: 'var(--nx-sans)', fontSize: 14, fontWeight: 700, color: 'var(--nx-text-1)' }}>{String(cp.hook)}</div>
         </div>
       )}
-      {cp.script && (
+      {cp.script != null && (
         <div style={{ marginBottom: 8 }}>
           <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginBottom: 2 }}>SCRIPT</div>
           <div style={{ fontFamily: 'var(--nx-sans)', fontSize: 12, color: 'var(--nx-text-2)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{String(cp.script)}</div>

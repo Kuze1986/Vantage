@@ -1,0 +1,30 @@
+/* socialkit.css — kit-only styles lifted from the Social Kit.html <style> block.
+   Scoped to the .vg-socialkit wrapper so they never leak into the app shell. */
+
+@keyframes kit-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1.1); }
+}
+
+.vg-socialkit ::selection { background: var(--nx-accent); color: #000; }
+
+.vg-socialkit .kit-gallery { display: flex; flex-wrap: wrap; gap: 36px; align-items: flex-start; }
+.vg-socialkit .kit-frame { box-shadow: 0 18px 50px -20px rgba(0, 0, 0, 0.8); }
+
+/* editable-text affordance — only while editing, never in export */
+.vg-socialkit .kit-edit {
+  outline: none;
+  cursor: text;
+  border-radius: 2px;
+  transition: box-shadow 120ms ease, background 120ms ease;
+}
+.vg-socialkit .kit-canvas .kit-edit:hover { box-shadow: 0 0 0 3px rgba(0, 196, 232, 0.35); background: rgba(0, 196, 232, 0.06); }
+.vg-socialkit .kit-canvas .kit-edit:focus { box-shadow: 0 0 0 3px var(--nx-accent); background: rgba(0, 196, 232, 0.10); }
+
+.vg-socialkit.kit-guides-off .kit-canvas .kit-edit:hover,
+.vg-socialkit.kit-guides-off .kit-canvas .kit-edit:focus { box-shadow: none; background: transparent; }
+
+/* export: strip editing chrome from the captured clone */
+.kit-exporting .kit-edit { box-shadow: none !important; background: transparent !important; }
+.kit-exporting .kit-imgslot-empty { border: none !important; background: #081220 !important; }
+.kit-exporting .kit-imgslot-empty > * { display: none !important; }

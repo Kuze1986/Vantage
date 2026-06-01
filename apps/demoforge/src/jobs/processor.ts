@@ -118,9 +118,10 @@ async function synthesizeNarration(
   const voiceId = job.input_payload.voice_id ?? DEFAULT_VOICE_ID;
 
   const audioStream = await el.generate({
-    voice:  voiceId,
-    text:   narrations,
+    voice:    voiceId,
+    text:     narrations,
     model_id: "eleven_multilingual_v2",
+    stream:   true,
   });
 
   const chunks: Buffer[] = [];
@@ -223,11 +224,12 @@ export async function processJob(
     // 2. Synthesize narration (may be null if no narration steps)
     await onStatus("synthesizing");
     let narrationPath: string | null = null;
-    if (process.env.ELEVENLABS_API_KEY) {
-      narrationPath = await synthesizeNarration(job, workDir).catch((e) => {
-        console.warn("[demoforge] ElevenLabs synthesis failed, continuing without audio:", e.message);
-        return null;
-      });
+    const hasNarration = job.input_payload.script.some((s) => s.narration.trim().length > 0);
+    if (hasNarration && !process.env.ELEVENLABS_API_KEY) {
+      throw new Error("ELEVENLABS_API_KEY is not configured — cannot synthesize narration audio");
+    }
+    if (hasNarration && process.env.ELEVENLABS_API_KEY) {
+      narrationPath = await synthesizeNarration(job, workDir);
     }
 
     // 3. Optional background music from Supabase Storage

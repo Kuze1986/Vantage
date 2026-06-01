@@ -23,6 +23,8 @@ import { musicRoutes } from "./routes/music.js";
 import { demoforgeRoutes } from "./routes/demoforge.js";
 import { settingsRoutes } from "./routes/settings.js";
 import { analyticsRoutes } from "./routes/analytics.js";
+import { captionsRoutes } from "./routes/captions.js";
+import { emailTemplatesRoutes } from "./routes/email-templates.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
 import { startCadenceEngine } from "./services/scheduler.js";
 
@@ -63,6 +65,8 @@ authedV1.route("/music", musicRoutes);
 authedV1.route("/demoforge", demoforgeRoutes);
 authedV1.route("/settings", settingsRoutes);
 authedV1.route("/analytics", analyticsRoutes);
+authedV1.route("/captions", captionsRoutes);
+authedV1.route("/email-templates", emailTemplatesRoutes);
 
 app.route("/v1", authedV1);
 

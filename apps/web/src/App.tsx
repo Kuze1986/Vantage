@@ -12,6 +12,8 @@ import { SettingsPage } from './pages/SettingsPage'
 import { CalendarPage } from './pages/CalendarPage'
 import { AnalyticsPage } from './pages/AnalyticsPage'
 import { DemoForgePage } from './pages/DemoForgePage'
+import { SocialKitPage } from './pages/SocialKitPage'
+import { EmailBuilderPage } from './pages/EmailBuilderPage'
 
 const NAV = [
   { label: 'Dashboard', path: '/',          icon: '◈' },
@@ -19,6 +21,8 @@ const NAV = [
   { label: 'Calendar',  path: '/calendar',   icon: '▦' },
   { label: 'Analytics', path: '/analytics',  icon: '▲' },
   { label: 'DemoForge', path: '/demoforge',  icon: '⬡' },
+  { label: 'Social Kit',     path: '/social-kit',     icon: '◧' },
+  { label: 'Email Builder',  path: '/email-builder',  icon: '✉' },
   { label: 'Channels',  path: '/channels',   icon: '⊕' },
   { label: 'Voice',     path: '/voice',      icon: '◆' },
   { label: 'Settings',  path: '/settings',   icon: '⚙' },
@@ -124,6 +128,8 @@ export function App() {
           <Route path="/calendar"   element={<CalendarPage />} />
           <Route path="/analytics"  element={<AnalyticsPage />} />
           <Route path="/demoforge"  element={<DemoForgePage />} />
+          <Route path="/social-kit"    element={<SocialKitPage />} />
+          <Route path="/email-builder" element={<EmailBuilderPage />} />
           <Route path="/channels"   element={<ChannelsPage />} />
           <Route path="/voice"      element={<VoicePage />} />
           <Route path="/settings"   element={<SettingsPage />} />

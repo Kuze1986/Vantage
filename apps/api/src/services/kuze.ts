@@ -103,6 +103,57 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
   return { format, content_payload: parsed, text_preview: preview };
 }
 
+// ── Caption generation (AI Caption Studio — 3C-2) ─────────────────────────────
+export interface GenerateCaptionsInput {
+  prompt: string;
+  channel: ChannelSlug;
+  count?: number;
+  tone?: string;
+  brand_voice: string;
+}
+
+export async function generateCaptions(input: GenerateCaptionsInput): Promise<string[]> {
+  const weights = await loadWeights(input.channel);
+  const client  = getClient();
+
+  const channelLabel = input.channel.toUpperCase();
+  const toneHint     = input.tone ? `Tone: ${input.tone}. ` : '';
+  const weightsHint  = weights
+    ? `\n\nPerformance weights (favour these patterns): ${weights}`
+    : '';
+  const countHint    = input.count ?? 3;
+
+  const systemPrompt = `You are Kuze, a social-media copywriter. Return ONLY a JSON array of ${countHint} caption strings — no markdown, no wrapper object, just a raw JSON array. Each caption is a distinct variation of the same angle for ${channelLabel}. Platform character limits: X ≤ 280. LinkedIn ≤ 3000. Instagram ≤ 2200. Others: no limit.`;
+
+  const userContent = `Brand voice:
+${input.brand_voice}
+${weightsHint}
+
+Topic/angle: ${input.prompt}
+${toneHint}
+Generate ${countHint} caption variants for ${channelLabel}. Return a JSON array of strings only.`;
+
+  const msg = await client.messages.create({
+    model:      MODEL,
+    max_tokens: 1200,
+    system:     systemPrompt,
+    messages:   [{ role: 'user', content: userContent }],
+  });
+
+  const raw = msg.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('')
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim();
+
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) throw new Error('Kuze returned non-array for captions');
+  return (parsed as unknown[]).map((s) => String(s));
+}
+
 // ── Legacy shim ────────────────────────────────────────────────────────────────
 export async function generateTweet(params: {
   topic_text: string;

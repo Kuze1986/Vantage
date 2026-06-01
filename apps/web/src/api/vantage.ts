@@ -265,6 +265,29 @@ export const vantageApi = {
     }>;
   },
 
+  // ── Email Templates (3C-6) ────────────────────────────────────────────────
+  listEmailTemplates: () =>
+    vantageFetch('/v1/email-templates') as Promise<{ templates: { id: string; name: string; description: string; updated_at: string }[] }>,
+
+  getEmailTemplate: (id: string) =>
+    vantageFetch(`/v1/email-templates/${id}`) as Promise<{ template: { id: string; name: string; description: string; blocks: unknown[] } }>,
+
+  saveEmailTemplate: (body: { name: string; description?: string; blocks?: unknown[] }) =>
+    vantageFetch('/v1/email-templates', { method: 'POST', body: JSON.stringify(body) }) as Promise<{ template: { id: string } }>,
+
+  patchEmailTemplate: (id: string, body: { name?: string; description?: string; blocks?: unknown[] }) =>
+    vantageFetch(`/v1/email-templates/${id}`, { method: 'PATCH', body: JSON.stringify(body) }) as Promise<{ template: { id: string } }>,
+
+  deleteEmailTemplate: (id: string) =>
+    vantageFetch(`/v1/email-templates/${id}`, { method: 'DELETE' }) as Promise<{ ok: boolean }>,
+
+  // ── Caption Studio (3C-2) ─────────────────────────────────────────────────
+  generateCaptions: (params: { prompt: string; channel: string; count?: number; tone?: string }) =>
+    vantageFetch('/v1/captions', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }) as Promise<{ captions: string[] }>,
+
   // ── DemoForge ─────────────────────────────────────────────────────────────
   createDemoForgeJob: (body: {
     content_piece_id?: string;

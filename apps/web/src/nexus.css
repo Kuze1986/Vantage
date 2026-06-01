@@ -1,0 +1,368 @@
+/* NEXUS — unified design tokens + base HUD styles */
+
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@300;400;500;600;700&family=Share+Tech+Mono&display=swap');
+
+:root {
+  /* Backgrounds */
+  --nx-bg: #050C14;
+  --nx-surface: #091625;
+  --nx-surface-2: #0D1E30;
+  --nx-surface-3: #112940;
+
+  /* Borders */
+  --nx-border: #13263A;
+  --nx-border-strong: #1B3450;
+
+  /* Accents */
+  --nx-cyan: #00C4E8;
+  --nx-amber: #EFA020;
+  --nx-red: #E04040;
+  --nx-green: #00E47A;
+  --nx-silver: #A4B8CC;
+
+  /* Per-product primary (defaults to cyan; theme classes below override) */
+  --nx-accent: #00C4E8;
+  --nx-accent-2: #EFA020;
+
+  /* Text */
+  --nx-text: #C8DCF0;
+  --nx-text-2: #8BA4BC;
+  --nx-text-muted: #4A6880;
+  --nx-text-disabled: #1E3348;
+
+  /* Type */
+  --nx-display: 'Bebas Neue', 'Impact', sans-serif;
+  --nx-mono: 'Share Tech Mono', 'Courier New', monospace;
+  --nx-body: 'Barlow Condensed', 'Roboto Condensed', sans-serif;
+
+  /* Spacing */
+  --nx-1: 4px;
+  --nx-2: 8px;
+  --nx-3: 12px;
+  --nx-4: 16px;
+  --nx-5: 24px;
+  --nx-6: 32px;
+  --nx-7: 48px;
+  --nx-8: 64px;
+
+  /* Radii — kept tight, this is HUD not consumer */
+  --nx-r-1: 2px;
+  --nx-r-2: 4px;
+  --nx-r-3: 6px;
+
+  /* Motion intensity (overridable via tweaks) */
+  --nx-motion: 1;
+}
+
+/* Theme variants by product */
+.theme-shift     { --nx-accent: #00C4E8; --nx-accent-2: #EFA020; --nx-accent-3: #E04040; }
+.theme-keystone  { --nx-accent: #A4B8CC; --nx-accent-2: #00C4E8; --nx-accent-3: #8BA4BC; }
+.theme-scripta   { --nx-accent: #00C4E8; --nx-accent-2: #00E47A; --nx-accent-3: #C8DCF0; }
+.theme-demoforge { --nx-accent: #EFA020; --nx-accent-2: #E04040; --nx-accent-3: #00C4E8; }
+.theme-crucible  { --nx-accent: #E04040; --nx-accent-2: #EFA020; --nx-accent-3: #C8DCF0; }
+.theme-vantage   { --nx-accent: #00C4E8; --nx-accent-2: #EFA020; --nx-accent-3: #00E47A; }
+
+/* Base */
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  background: var(--nx-bg);
+  color: var(--nx-text);
+  font-family: var(--nx-body);
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Grid backdrop — the atmosphere */
+.nx-grid-bg {
+  background-color: var(--nx-bg);
+  background-image:
+    linear-gradient(rgba(0, 196, 232, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 196, 232, 0.035) 1px, transparent 1px),
+    radial-gradient(ellipse 80% 60% at 50% 0%, rgba(0, 196, 232, 0.07), transparent 70%);
+  background-size: 48px 48px, 48px 48px, 100% 100%;
+}
+
+.nx-scanlines {
+  position: relative;
+}
+.nx-scanlines::after {
+  content: '';
+  position: absolute; inset: 0;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 2px,
+    rgba(0, 196, 232, 0.025) 2px,
+    rgba(0, 196, 232, 0.025) 3px
+  );
+  pointer-events: none;
+  opacity: calc(0.7 * var(--nx-motion));
+  mix-blend-mode: screen;
+}
+
+/* HUD Panel — the universal container */
+.nx-panel {
+  position: relative;
+  background: linear-gradient(180deg, var(--nx-surface) 0%, #061321 100%);
+  border: 1px solid var(--nx-border);
+  border-radius: var(--nx-r-2);
+}
+.nx-panel--strong {
+  border-color: var(--nx-border-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 1px 0 rgba(0, 0, 0, 0.4);
+}
+.nx-panel--active {
+  border-color: var(--nx-accent);
+  box-shadow:
+    0 0 0 1px var(--nx-accent),
+    0 0 24px -8px var(--nx-accent),
+    inset 0 0 32px -16px var(--nx-accent);
+}
+
+/* Corner brackets — apply via .nx-corners */
+.nx-corners { position: relative; }
+.nx-corners::before,
+.nx-corners::after {
+  content: '';
+  position: absolute;
+  width: 12px; height: 12px;
+  border: 1px solid var(--nx-accent);
+  pointer-events: none;
+}
+.nx-corners::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+.nx-corners::after  { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+.nx-corners-4 > .c-tl,
+.nx-corners-4 > .c-tr,
+.nx-corners-4 > .c-bl,
+.nx-corners-4 > .c-br {
+  position: absolute; width: 10px; height: 10px;
+  border: 1px solid var(--nx-accent);
+}
+.nx-corners-4 > .c-tl { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+.nx-corners-4 > .c-tr { top: -1px; right: -1px; border-left: 0; border-bottom: 0; }
+.nx-corners-4 > .c-bl { bottom: -1px; left: -1px; border-right: 0; border-top: 0; }
+.nx-corners-4 > .c-br { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+
+/* Section label — the tiny header above every panel */
+.nx-label {
+  font-family: var(--nx-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--nx-text-2);
+}
+.nx-label--accent { color: var(--nx-accent); }
+.nx-label--amber  { color: var(--nx-amber); }
+.nx-label--red    { color: var(--nx-red); }
+.nx-label--green  { color: var(--nx-green); }
+
+/* Headline */
+.nx-display {
+  font-family: var(--nx-display);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 0.95;
+  color: var(--nx-text);
+}
+
+/* Mono numbers/telemetry */
+.nx-mono { font-family: var(--nx-mono); letter-spacing: 0.02em; }
+
+/* Buttons */
+.nx-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--nx-body);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 12px;
+  padding: 10px 16px;
+  background: transparent;
+  color: var(--nx-text);
+  border: 1px solid var(--nx-border-strong);
+  border-radius: var(--nx-r-2);
+  cursor: pointer;
+  transition: all 120ms ease;
+  position: relative;
+}
+.nx-btn:hover {
+  border-color: var(--nx-accent);
+  color: var(--nx-accent);
+  background: rgba(0, 196, 232, 0.05);
+}
+.nx-btn--primary {
+  background: linear-gradient(180deg, rgba(0, 196, 232, 0.18), rgba(0, 196, 232, 0.06));
+  border-color: var(--nx-accent);
+  color: var(--nx-accent);
+  box-shadow: 0 0 24px -8px var(--nx-accent), inset 0 0 16px -8px var(--nx-accent);
+}
+.nx-btn--primary:hover {
+  background: linear-gradient(180deg, rgba(0, 196, 232, 0.3), rgba(0, 196, 232, 0.1));
+  color: #E0F8FF;
+  box-shadow: 0 0 32px -4px var(--nx-accent), inset 0 0 24px -8px var(--nx-accent);
+}
+.nx-btn--danger {
+  border-color: var(--nx-red);
+  color: var(--nx-red);
+  background: linear-gradient(180deg, rgba(224, 64, 64, 0.18), rgba(224, 64, 64, 0.05));
+}
+.nx-btn--ghost { border-color: transparent; color: var(--nx-text-2); }
+.nx-btn--ghost:hover { color: var(--nx-text); background: rgba(255,255,255,0.04); }
+
+/* Chip */
+.nx-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--nx-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border: 1px solid var(--nx-border-strong);
+  color: var(--nx-text-2);
+  border-radius: var(--nx-r-1);
+  background: rgba(0,0,0,0.2);
+}
+.nx-chip--cyan  { color: var(--nx-cyan);  border-color: rgba(0, 196, 232, 0.5); background: rgba(0, 196, 232, 0.08); }
+.nx-chip--amber { color: var(--nx-amber); border-color: rgba(239, 160, 32, 0.5); background: rgba(239, 160, 32, 0.08); }
+.nx-chip--red   { color: var(--nx-red);   border-color: rgba(224, 64, 64, 0.55); background: rgba(224, 64, 64, 0.08); }
+.nx-chip--green { color: var(--nx-green); border-color: rgba(0, 228, 122, 0.5); background: rgba(0, 228, 122, 0.08); }
+
+/* Telemetry strip — animated dots */
+.nx-pulse {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--nx-accent);
+  box-shadow: 0 0 8px var(--nx-accent);
+  animation: nx-pulse 1.8s ease-in-out infinite;
+  animation-play-state: running;
+}
+@keyframes nx-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+.nx-pulse--red   { background: var(--nx-red);   box-shadow: 0 0 8px var(--nx-red); }
+.nx-pulse--amber { background: var(--nx-amber); box-shadow: 0 0 8px var(--nx-amber); }
+.nx-pulse--green { background: var(--nx-green); box-shadow: 0 0 8px var(--nx-green); }
+
+/* Scan sweep */
+.nx-scan {
+  position: relative; overflow: hidden;
+}
+.nx-scan::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(0, 196, 232, 0.08) 50%,
+    transparent 100%);
+  animation: nx-scan 3.6s linear infinite;
+  animation-play-state: running;
+  pointer-events: none;
+  opacity: calc(1 * var(--nx-motion));
+}
+@keyframes nx-scan {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Progress bar */
+.nx-progress {
+  position: relative;
+  height: 6px;
+  background: var(--nx-surface-2);
+  border: 1px solid var(--nx-border);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.nx-progress > i {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, var(--nx-accent), color-mix(in oklab, var(--nx-accent), white 15%));
+  box-shadow: 0 0 12px -2px var(--nx-accent);
+  transition: width 600ms cubic-bezier(.2,.7,.2,1);
+}
+
+/* Input */
+.nx-input {
+  width: 100%;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--nx-border-strong);
+  color: var(--nx-text);
+  font-family: var(--nx-mono);
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: var(--nx-r-2);
+  outline: none;
+}
+.nx-input:focus { border-color: var(--nx-accent); box-shadow: 0 0 0 1px var(--nx-accent), 0 0 16px -8px var(--nx-accent); }
+
+/* Image slot placeholder — diagonal stripes */
+.nx-imgslot {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      rgba(0, 196, 232, 0.04) 0,
+      rgba(0, 196, 232, 0.04) 8px,
+      rgba(0, 196, 232, 0.08) 8px,
+      rgba(0, 196, 232, 0.08) 16px
+    ),
+    var(--nx-surface);
+  border: 1px dashed var(--nx-border-strong);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--nx-text-muted);
+  font-family: var(--nx-mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 12px;
+}
+
+/* Divider */
+.nx-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--nx-border-strong) 30%, var(--nx-border-strong) 70%, transparent);
+}
+
+/* Tooltip-style numeric tile */
+.nx-tile {
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
+  padding: 12px 14px;
+  position: relative;
+}
+.nx-tile .nx-num {
+  font-family: var(--nx-display);
+  font-size: 36px;
+  line-height: 1;
+  color: var(--nx-text);
+  letter-spacing: 0.02em;
+}
+.nx-tile .nx-num--accent { color: var(--nx-accent); }
+.nx-tile .nx-num--amber  { color: var(--nx-amber); }
+.nx-tile .nx-num--red    { color: var(--nx-red); }
+.nx-tile .nx-num--green  { color: var(--nx-green); }
+
+/* Tactical hatched edge — adds militaristic chevrons */
+.nx-hatch {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(0, 196, 232, 0.18) 0,
+    rgba(0, 196, 232, 0.18) 2px,
+    transparent 2px,
+    transparent 6px
+  );
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .nx-pulse, .nx-scan::before { animation: none; }
+}
+
+/* Hide scrollbars on hud surfaces */
+.nx-noscroll::-webkit-scrollbar { display: none; }
+.nx-noscroll { scrollbar-width: none; }

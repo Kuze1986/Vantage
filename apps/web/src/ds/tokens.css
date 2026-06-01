@@ -1,47 +1,90 @@
+/* Vantage tokens — canonical nexus.css values + backward-compat aliases for ds/ components */
+
+/* Canonical nexus values (duplicated here for the ds/ component files that can't @import nexus.css) */
 :root {
-  --nx-bg-deep: #050c18;
-  --nx-bg-card: #0b1525;
-  --nx-bg-raised: #111e33;
-  --nx-bg-active: #162540;
+  /* Backgrounds */
+  --nx-bg: #050C14;
+  --nx-surface: #091625;
+  --nx-surface-2: #0D1E30;
+  --nx-surface-3: #112940;
+
+  /* Borders */
+  --nx-border: #13263A;
+  --nx-border-strong: #1B3450;
+
+  /* Accents */
+  --nx-cyan: #00C4E8;
+  --nx-amber: #EFA020;
+  --nx-red: #E04040;
+  --nx-green: #00E47A;
+  --nx-silver: #A4B8CC;
+  --nx-accent: #00C4E8;
+  --nx-accent-2: #EFA020;
+
+  /* Text */
+  --nx-text: #C8DCF0;
+  --nx-text-2: #8BA4BC;
+  --nx-text-muted: #4A6880;
+  --nx-text-disabled: #1E3348;
+
+  /* Type */
+  --nx-display: 'Bebas Neue', 'Impact', sans-serif;
+  --nx-mono: 'Share Tech Mono', 'Courier New', monospace;
+  --nx-body: 'Barlow Condensed', 'Roboto Condensed', sans-serif;
+
+  /* Spacing */
+  --nx-1: 4px; --nx-2: 8px; --nx-3: 12px; --nx-4: 16px;
+  --nx-5: 24px; --nx-6: 32px; --nx-7: 48px; --nx-8: 64px;
+
+  /* Radii */
+  --nx-r-1: 2px; --nx-r-2: 4px; --nx-r-3: 6px;
+
+  /* Motion */
+  --nx-motion: 1;
+
+  /* Theme defaults (vantage theme) */
+  --nx-accent: #00C4E8;
+  --nx-accent-2: #EFA020;
+  --nx-accent-3: #00E47A;
+
+  /* ── Backward-compat aliases (used in ds/ component files) ── */
+  --nx-bg-deep: var(--nx-bg);
+  --nx-bg-card: var(--nx-surface);
+  --nx-bg-raised: var(--nx-surface-2);
+  --nx-bg-active: var(--nx-surface-3);
   --nx-bg-deeper: #020713;
 
-  --nx-amber: #f59e0b;
-  --nx-amber-dim: #92600a;
-  --nx-amber-glow: #f59e0b18;
-
-  --nx-cyan: #22d3ee;
-  --nx-cyan-dim: #164e63;
-  --nx-cyan-glow: #22d3ee18;
-
-  --nx-green: #10b981;
-  --nx-green-dim: #064e3b;
-  --nx-green-glow: #10b98118;
-
-  --nx-red: #ef4444;
-  --nx-red-dim: #7f1d1d;
-  --nx-red-glow: #ef444418;
-
+  --nx-amber-dim: rgba(239, 160, 32, 0.3);
+  --nx-amber-glow: rgba(239, 160, 32, 0.08);
+  --nx-cyan-dim: rgba(0, 196, 232, 0.3);
+  --nx-cyan-glow: rgba(0, 196, 232, 0.08);
+  --nx-green-dim: rgba(0, 228, 122, 0.3);
+  --nx-green-glow: rgba(0, 228, 122, 0.08);
+  --nx-red-dim: rgba(224, 64, 64, 0.3);
+  --nx-red-glow: rgba(224, 64, 64, 0.08);
   --nx-gold: #eab308;
-  --nx-gold-dim: #713f12;
-  --nx-gold-glow: #eab30818;
-
+  --nx-gold-dim: rgba(234, 179, 8, 0.3);
+  --nx-gold-glow: rgba(234, 179, 8, 0.08);
   --nx-magenta: #e879f9;
-  --nx-magenta-dim: #701a75;
-  --nx-magenta-glow: #e879f918;
+  --nx-magenta-dim: rgba(232, 121, 249, 0.3);
+  --nx-magenta-glow: rgba(232, 121, 249, 0.08);
 
-  --nx-text-1: #f1f5f9;
-  --nx-text-2: #94a3b8;
-  --nx-text-3: #64748b;
-  --nx-text-4: #334155;
+  --nx-border-dim: var(--nx-border);
+  --nx-border-bright: var(--nx-border-strong);
 
-  --nx-border: #1e3050;
-  --nx-border-bright: #2a4a70;
-  --nx-border-dim: #0f1e35;
+  --nx-text-1: var(--nx-text);
+  --nx-text-3: var(--nx-text-muted);
+  --nx-text-4: var(--nx-text-disabled);
 
-  --nx-mono: 'Space Mono', monospace;
-  --nx-sans: 'DM Sans', sans-serif;
+  --nx-sans: var(--nx-body);
 
-  --nx-radius-sm: 3px;
-  --nx-radius-md: 4px;
-  --nx-radius-lg: 6px;
+  --nx-radius-sm: var(--nx-r-1);
+  --nx-radius-md: var(--nx-r-2);
+  --nx-radius-lg: var(--nx-r-3);
+}
+
+.theme-vantage {
+  --nx-accent: #00C4E8;
+  --nx-accent-2: #EFA020;
+  --nx-accent-3: #00E47A;
 }
