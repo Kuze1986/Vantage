@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "engines": {
-    "node": ">=20"
+    "node": "20"
   },
   "scripts": {
     "dev": "concurrently -n web,api -c cyan,magenta \"pnpm --filter @vantage/web dev\" \"pnpm --filter @vantage/api dev\"",
@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }
 }
