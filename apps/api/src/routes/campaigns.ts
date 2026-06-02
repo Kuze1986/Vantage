@@ -129,7 +129,7 @@ campaignRoutes.post('/', async (c) => {
     messaging_pillars: parsed.data.messaging_pillars,
     channel_mix: parsed.data.channel_mix,
     kpi_targets: parsed.data.kpi_targets,
-  });
+  }).select().single();
 
   if (error) {
     throw new HTTPException(500, { message: error.message });
@@ -140,10 +140,10 @@ campaignRoutes.post('/', async (c) => {
     source_type: 'adapter',
     event_type: 'campaign_created',
     summary: `Campaign created: ${parsed.data.name}`,
-    payload: { campaign_id: (data as any)?.[0]?.id, name: parsed.data.name },
+    payload: { campaign_id: (data as any)?.id, name: parsed.data.name },
   });
 
-  return c.json((data as any)?.[0], 201);
+  return c.json(data, 201);
 });
 
 // GET /v1/campaigns — list campaigns for workspace
