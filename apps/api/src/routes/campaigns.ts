@@ -118,10 +118,7 @@ campaignRoutes.post('/', async (c) => {
     throw new HTTPException(400, { message: 'x-workspace-id header is required' });
   }
 
-  const userId = c.req.header('x-user-id');
-  if (!userId) {
-    throw new HTTPException(401, { message: 'x-user-id header is required' });
-  }
+  const userId = c.get('user').id;
 
   const sb = getSupabaseAdmin();
   const { data, error } = await sb.from('campaigns').insert({
