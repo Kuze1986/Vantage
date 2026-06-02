@@ -2,6 +2,11 @@ import { supabase } from "../lib/supabase";
 
 const base = ((import.meta.env.VITE_VANTAGE_API_URL as string | undefined) ?? "").replace(/\/$/, "");
 
+// Workspace ID cache — populated by WorkspaceProvider on login
+let _cachedWorkspaceId: string | null = null;
+export function setWorkspaceId(id: string | null) { _cachedWorkspaceId = id; }
+export function getWorkspaceId() { return _cachedWorkspaceId; }
+
 export async function vantageFetch(path: string, init: RequestInit = {}) {
   if (!base) throw new Error("VITE_VANTAGE_API_URL is not set — add it to apps/web/.env.local");
   const { data } = await supabase.auth.getSession();
@@ -9,9 +14,7 @@ export async function vantageFetch(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  // TODO: Get workspace ID from user context or metadata
-  // For now, use a default workspace ID (single-workspace setup)
-  headers.set("x-workspace-id", "00000000-0000-0000-0000-000000000001");
+  if (_cachedWorkspaceId) headers.set("x-workspace-id", _cachedWorkspaceId);
   const res = await fetch(`${base}${path}`, { ...init, headers });
   const text = await res.text();
   let body: unknown = null;
