@@ -18,6 +18,7 @@ async function fetchOrCreateWorkspace(token: string): Promise<string | null> {
   if (!base) return null
   try {
     const res = await fetch(`${base}/v1/workspaces/me`, {
+      cache: 'no-store',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
