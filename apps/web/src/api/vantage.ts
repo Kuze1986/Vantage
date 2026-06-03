@@ -353,6 +353,22 @@ export const vantageApi = {
   getCampaignTimeline: (campaignId: string) =>
     vantageFetch(`/v1/campaigns/${campaignId}/timeline`) as Promise<{ timeline: any[] }>,
 
+  generateCampaignTimeline: (campaignId: string) =>
+    vantageFetch(`/v1/campaigns/${campaignId}/timeline/generate`, { method: "POST" }) as Promise<{ timeline: any[] }>,
+
+  addCampaignTimelineDays: (campaignId: string, days: any | any[]) =>
+    vantageFetch(`/v1/campaigns/${campaignId}/timeline`, { method: "POST", body: JSON.stringify(days) }) as Promise<{ timeline_entries: any[] }>,
+
+  updateCampaignTimelineDay: (campaignId: string, dayNumber: number, body: any) =>
+    vantageFetch(`/v1/campaigns/${campaignId}/timeline/${dayNumber}`, { method: "PATCH", body: JSON.stringify(body) }) as Promise<any>,
+
+  launchCampaign: (campaignId: string) =>
+    vantageFetch(`/v1/campaigns/${campaignId}/launch`, { method: "POST" }) as Promise<{
+      launched: number; failed: number;
+      pieces: { content_piece_id: string; channel: string; day_number: number }[];
+      failures: { day_number: number; error: string }[];
+    }>,
+
   getCampaignKPI: (campaignId: string) =>
     vantageFetch(`/v1/campaigns/${campaignId}/kpi`) as Promise<{ kpi_tracking: any[] }>,
 

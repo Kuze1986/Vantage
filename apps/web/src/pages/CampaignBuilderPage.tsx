@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type CSSProperties } from 'react'
 import { vantageApi } from '../api/vantage'
 import { Panel, Button, Badge } from '../ds'
 
@@ -76,6 +76,15 @@ export default function CampaignBuilderPage() {
     channel_mix: { x: { daily: 2 }, linkedin: { daily: 1 }, reddit: { daily: 1 } },
     kpi_targets: { impressions: 10000, engagements: 500 },
   })
+
+  const [busy, setBusy] = useState<string | null>(null)
+  const [editingCampaign, setEditingCampaign] = useState(false)
+  const [editData, setEditData] = useState<{ name: string; description: string; messaging_pillars: any[] }>({
+    name: '',
+    description: '',
+    messaging_pillars: [],
+  })
+  const [launchInfo, setLaunchInfo] = useState<string | null>(null)
 
   useEffect(() => {
     fetchCampaigns()
@@ -155,6 +164,118 @@ export default function CampaignBuilderPage() {
       }
     }
   }
+
+  const handleGenerateTimeline = async () => {
+    if (!selectedCampaign) return
+    if (timeline.length && !confirm('Regenerate the timeline? This replaces the current plan.')) return
+    setBusy('generate')
+    try {
+      const res = await vantageApi.generateCampaignTimeline(selectedCampaign.id)
+      setTimeline(res.timeline || [])
+    } catch (err) {
+      alert('Failed to generate timeline: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleLaunch = async () => {
+    if (!selectedCampaign) return
+    if (!timeline.length) {
+      alert('Generate a timeline before launching.')
+      return
+    }
+    if (!confirm(`Generate content for all ${timeline.length} timeline day(s)? Pieces are created as approved drafts for you to review on the Queue page before they post.`)) return
+    setBusy('launch')
+    setLaunchInfo(null)
+    try {
+      const res = await vantageApi.launchCampaign(selectedCampaign.id)
+      setLaunchInfo(
+        `Created ${res.launched} content piece(s) as approved drafts${res.failed ? `, ${res.failed} failed` : ''}. Review and schedule them on the Queue page.`,
+      )
+      await fetchCampaignDetails(selectedCampaign.id)
+    } catch (err) {
+      alert('Failed to launch campaign: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const updateDayLocal = (dayNumber: number, patch: Partial<TimelineDay>) =>
+    setTimeline((prev) => prev.map((d) => (d.day_number === dayNumber ? { ...d, ...patch } : d)))
+
+  const handleSaveDay = async (day: TimelineDay) => {
+    if (!selectedCampaign) return
+    setBusy(`day:${day.day_number}`)
+    try {
+      await vantageApi.updateCampaignTimelineDay(selectedCampaign.id, day.day_number, {
+        primary_channel: day.primary_channel,
+        content_type: day.content_type,
+        messaging_pillar_id: day.messaging_pillar_id ?? null,
+        content_ideas: day.content_ideas,
+      })
+    } catch (err) {
+      alert('Failed to save day: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const startEditCampaign = () => {
+    if (!selectedCampaign) return
+    setEditData({
+      name: selectedCampaign.name,
+      description: selectedCampaign.description || '',
+      messaging_pillars: JSON.parse(JSON.stringify(selectedCampaign.messaging_pillars || [])),
+    })
+    setEditingCampaign(true)
+  }
+
+  const handleSaveCampaign = async () => {
+    if (!selectedCampaign) return
+    setBusy('campaign')
+    try {
+      const updated = await vantageApi.updateCampaign(selectedCampaign.id, {
+        name: editData.name,
+        description: editData.description,
+        messaging_pillars: editData.messaging_pillars,
+      })
+      setSelectedCampaign(updated)
+      setEditingCampaign(false)
+    } catch (err) {
+      alert('Failed to save campaign: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const addPillar = () =>
+    setEditData((prev) => ({
+      ...prev,
+      messaging_pillars: [
+        ...prev.messaging_pillars,
+        {
+          id: crypto.randomUUID(),
+          name: 'New Pillar',
+          description: '',
+          tone: 'Professional',
+          keyMessages: [],
+          targetAudience: '',
+        },
+      ],
+    }))
+
+  const updatePillar = (idx: number, patch: Record<string, any>) =>
+    setEditData((prev) => ({
+      ...prev,
+      messaging_pillars: prev.messaging_pillars.map((p, i) => (i === idx ? { ...p, ...patch } : p)),
+    }))
+
+  const removePillar = (idx: number) =>
+    setEditData((prev) => ({
+      ...prev,
+      messaging_pillars: prev.messaging_pillars.filter((_, i) => i !== idx),
+    }))
 
   if (view === 'list') {
     return (
@@ -353,14 +474,40 @@ export default function CampaignBuilderPage() {
       ? ((kpiSummary.engagements / kpiSummary.impressions) * 100).toFixed(2)
       : '0'
 
+    const inputStyle: CSSProperties = {
+      width: '100%',
+      padding: '0.5rem',
+      border: '1px solid var(--nx-border)',
+      borderRadius: '0.25rem',
+      fontFamily: 'inherit',
+      boxSizing: 'border-box',
+      background: 'transparent',
+      color: 'inherit',
+    }
+    const labelStyle: CSSProperties = {
+      fontSize: '0.75rem',
+      fontWeight: 600,
+      display: 'block',
+      marginBottom: '0.25rem',
+      color: 'var(--nx-text-3)',
+    }
+    const pillars = (selectedCampaign.messaging_pillars || []) as any[]
+
     return (
       <div style={{ padding: '2rem', maxWidth: '1200px' }}>
-        <div style={{ marginBottom: '2rem' }}>
-          <Button
-            label="← Back to Campaigns"
-            variant="secondary"
-            onClick={() => setView('list')}
-          />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+          <Button label="← Back to Campaigns" variant="secondary" onClick={() => setView('list')} />
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            {!editingCampaign && (
+              <Button label="Edit" variant="secondary" onClick={startEditCampaign} />
+            )}
+            <Button
+              label={busy === 'launch' ? 'Launching…' : 'Launch Campaign'}
+              variant="primary"
+              onClick={handleLaunch}
+              disabled={busy !== null || timeline.length === 0}
+            />
+          </div>
         </div>
 
         <h1 style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '0.5rem' }}>
@@ -373,10 +520,72 @@ export default function CampaignBuilderPage() {
           />
         </div>
 
-        {selectedCampaign.description && (
-          <Panel title="Overview">
-            {selectedCampaign.description}
+        {launchInfo && (
+          <div style={{ marginBottom: '1.5rem' }}>
+            <Panel title="Campaign Launched">{launchInfo}</Panel>
+          </div>
+        )}
+
+        {editingCampaign ? (
+          <Panel title="Edit Campaign">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <label style={labelStyle}>Campaign Name</label>
+                <input
+                  style={inputStyle}
+                  value={editData.name}
+                  onChange={(e) => setEditData({ ...editData, name: e.target.value })}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Description</label>
+                <textarea
+                  style={{ ...inputStyle, minHeight: '80px' }}
+                  value={editData.description}
+                  onChange={(e) => setEditData({ ...editData, description: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <label style={{ ...labelStyle, marginBottom: 0 }}>Messaging Pillars</label>
+                  <Button label="+ Add Pillar" variant="secondary" onClick={addPillar} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {editData.messaging_pillars.map((p, idx) => (
+                    <div key={p.id ?? idx} style={{ border: '1px solid var(--nx-border)', borderRadius: '0.25rem', padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                        <input style={inputStyle} placeholder="Name" value={p.name ?? ''} onChange={(e) => updatePillar(idx, { name: e.target.value })} />
+                        <input style={inputStyle} placeholder="Tone" value={p.tone ?? ''} onChange={(e) => updatePillar(idx, { tone: e.target.value })} />
+                      </div>
+                      <input style={inputStyle} placeholder="Description" value={p.description ?? ''} onChange={(e) => updatePillar(idx, { description: e.target.value })} />
+                      <input style={inputStyle} placeholder="Target audience" value={p.targetAudience ?? ''} onChange={(e) => updatePillar(idx, { targetAudience: e.target.value })} />
+                      <input
+                        style={inputStyle}
+                        placeholder="Key messages (comma-separated)"
+                        value={Array.isArray(p.keyMessages) ? p.keyMessages.join(', ') : ''}
+                        onChange={(e) => updatePillar(idx, { keyMessages: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <Button label="Remove" variant="secondary" onClick={() => removePillar(idx)} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <Button label="Cancel" variant="secondary" onClick={() => setEditingCampaign(false)} />
+                <Button label={busy === 'campaign' ? 'Saving…' : 'Save'} variant="primary" onClick={handleSaveCampaign} disabled={busy !== null} />
+              </div>
+            </div>
           </Panel>
+        ) : (
+          selectedCampaign.description && (
+            <Panel title="Overview">
+              {selectedCampaign.description}
+            </Panel>
+          )
         )}
 
         <div style={{ marginTop: '2rem', marginBottom: '2rem' }}>
@@ -398,47 +607,113 @@ export default function CampaignBuilderPage() {
         </div>
 
         <div style={{ marginTop: '2rem' }}>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '1rem' }}>
-            Timeline ({timeline.length} days)
-          </h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 600, margin: 0 }}>
+              Timeline ({timeline.length} days)
+            </h2>
+            <Button
+              label={busy === 'generate' ? 'Generating…' : timeline.length ? 'Regenerate (AI)' : 'Generate Timeline (AI)'}
+              variant={timeline.length ? 'secondary' : 'primary'}
+              onClick={handleGenerateTimeline}
+              disabled={busy !== null}
+            />
+          </div>
           {timeline.length === 0 ? (
             <Panel title="No Timeline Yet">
-              Generate a timeline using AI to get started with your campaign scheduling.
+              Click <strong>Generate Timeline (AI)</strong> to lay out your full content plan automatically, then review, tweak, and launch.
             </Panel>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {timeline.map((day) => (
-                <Panel
-                  key={day.id}
-                  title={`Day ${day.day_number + 1} - ${day.date_scheduled}`}
-                  titleAccent={
-                    day.primary_channel === 'x'
-                      ? 'cyan'
-                      : day.primary_channel === 'linkedin'
-                        ? 'green'
-                        : 'amber'
-                  }
-                >
-                  <div>
-                    <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem' }}>
-                      <strong>Type:</strong> {day.content_type}
-                    </p>
-                    <p style={{ margin: '0', fontSize: '0.9rem' }}>
-                      <strong>Primary Channel:</strong> {day.primary_channel}
-                      {day.secondary_channels.length > 0 && ` (+ ${day.secondary_channels.join(', ')})`}
-                    </p>
-                  </div>
-                </Panel>
-              ))}
+              {timeline.map((day) => {
+                const idea = (day.content_ideas?.[0] as any) || { title: '', outline: '' }
+                const publishedCount = Array.isArray(day.published_pieces) ? day.published_pieces.length : 0
+                return (
+                  <Panel
+                    key={day.id || day.day_number}
+                    title={`Day ${day.day_number + 1} — ${day.date_scheduled}`}
+                    titleAccent={
+                      day.primary_channel === 'x' ? 'cyan' : day.primary_channel === 'linkedin' ? 'green' : 'amber'
+                    }
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                        <div>
+                          <label style={labelStyle}>Channel</label>
+                          <select
+                            style={inputStyle}
+                            value={day.primary_channel}
+                            onChange={(e) => updateDayLocal(day.day_number, { primary_channel: e.target.value })}
+                          >
+                            <option value="x">X</option>
+                            <option value="linkedin">LinkedIn</option>
+                            <option value="reddit">Reddit</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label style={labelStyle}>Content Type</label>
+                          <select
+                            style={inputStyle}
+                            value={day.content_type}
+                            onChange={(e) => updateDayLocal(day.day_number, { content_type: e.target.value })}
+                          >
+                            {['promotional', 'educational', 'engagement', 'behind_the_scenes', 'mixed'].map((t) => (
+                              <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={labelStyle}>Pillar</label>
+                          <select
+                            style={inputStyle}
+                            value={day.messaging_pillar_id ?? ''}
+                            onChange={(e) => updateDayLocal(day.day_number, { messaging_pillar_id: e.target.value || undefined })}
+                          >
+                            <option value="">— none —</option>
+                            {pillars.map((p) => (
+                              <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Content Idea</label>
+                        <input
+                          style={inputStyle}
+                          placeholder="Title"
+                          value={idea.title ?? ''}
+                          onChange={(e) => updateDayLocal(day.day_number, { content_ideas: [{ ...idea, title: e.target.value }] })}
+                        />
+                      </div>
+                      <textarea
+                        style={{ ...inputStyle, minHeight: '60px' }}
+                        placeholder="Outline / brief"
+                        value={idea.outline ?? ''}
+                        onChange={(e) => updateDayLocal(day.day_number, { content_ideas: [{ ...idea, outline: e.target.value }] })}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--nx-text-4)' }}>
+                          {publishedCount > 0 ? `${publishedCount} piece(s) generated` : 'No content generated yet'}
+                        </span>
+                        <Button
+                          label={busy === `day:${day.day_number}` ? 'Saving…' : 'Save Day'}
+                          variant="secondary"
+                          onClick={() => handleSaveDay(day)}
+                          disabled={busy !== null}
+                        />
+                      </div>
+                    </div>
+                  </Panel>
+                )
+              })}
             </div>
           )}
         </div>
 
-        {selectedCampaign.messaging_pillars && selectedCampaign.messaging_pillars.length > 0 && (
+        {!editingCampaign && pillars.length > 0 && (
           <div style={{ marginTop: '2rem' }}>
             <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '1rem' }}>Messaging Pillars</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {selectedCampaign.messaging_pillars.map((pillar) => (
+              {pillars.map((pillar) => (
                 <Panel key={pillar.id} title={pillar.name}>
                   <div>
                     <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', color: 'var(--nx-text-3)' }}>
