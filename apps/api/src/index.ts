@@ -43,7 +43,7 @@ app.use(
   "*",
   cors({
     origin: (origin) => (corsOrigins.includes(origin) ? origin : corsOrigins[0]),
-    allowHeaders: ["Content-Type", "Authorization"],
+    allowHeaders: ["Content-Type", "Authorization", "x-workspace-id"],
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
   }),
