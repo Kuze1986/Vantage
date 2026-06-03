@@ -39,7 +39,7 @@ function Sidebar() {
   const location = useLocation()
 
   const handleSignOut = () => {
-    void signOut().then(() => { window.location.href = '/login' })
+    void signOut()
   }
 
   return (

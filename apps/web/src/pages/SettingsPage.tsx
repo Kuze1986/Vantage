@@ -11,7 +11,7 @@ const ENV_VARS = [
   { key: 'VITE_VANTAGE_API_URL',  label: 'API Base URL',       hint: 'Set at build time' },
   { key: 'VITE_SUPABASE_URL',     label: 'Supabase URL',       hint: 'Set at build time' },
   { key: 'VITE_SUPABASE_ANON_KEY',label: 'Supabase Anon Key',  hint: 'Set at build time' },
-  { key: 'VITE_STUB_EMAIL',       label: 'Stub Email',         hint: 'Optional — pre-fills login' },
+  { key: 'VITE_NEXUS_AUTH_URL',   label: 'Nexus SSO URL',      hint: 'Set at build time — SSO redirect target' },
 ]
 
 function envPresent(key: string): boolean {
