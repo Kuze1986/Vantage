@@ -6,7 +6,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { HTTPException } from "hono/http-exception";
-import { authMiddleware } from "./lib/auth.js";
+import { authMiddleware, workspaceGuard } from "./lib/auth.js";
 import { logActivity } from "./lib/activity.js";
 import { sourceRoutes } from "./routes/source.js";
 import { generateRoutes } from "./routes/generate.js";
@@ -56,6 +56,7 @@ app.get("/v1/channels/:slug/auth/callback", (c) => oauthCallbackGet(c));
 
 const authedV1 = new Hono();
 authedV1.use("*", authMiddleware);
+authedV1.use("*", workspaceGuard);
 authedV1.route("/source", sourceRoutes);
 authedV1.route("/generate", generateRoutes);
 authedV1.route("/audit", auditRoutes);
