@@ -362,8 +362,14 @@ export const vantageApi = {
   updateCampaignTimelineDay: (campaignId: string, dayNumber: number, body: any) =>
     vantageFetch(`/v1/campaigns/${campaignId}/timeline/${dayNumber}`, { method: "PATCH", body: JSON.stringify(body) }) as Promise<any>,
 
-  launchCampaign: (campaignId: string) =>
-    vantageFetch(`/v1/campaigns/${campaignId}/launch`, { method: "POST" }) as Promise<{
+  deleteCampaignTimelineDay: (campaignId: string, dayNumber: number) =>
+    vantageFetch(`/v1/campaigns/${campaignId}/timeline/${dayNumber}`, { method: "DELETE" }) as Promise<{ success: boolean }>,
+
+  launchCampaign: (campaignId: string, dayNumbers?: number[]) =>
+    vantageFetch(`/v1/campaigns/${campaignId}/launch`, {
+      method: "POST",
+      body: JSON.stringify(dayNumbers ? { day_numbers: dayNumbers } : {}),
+    }) as Promise<{
       launched: number; failed: number;
       pieces: { content_piece_id: string; channel: string; day_number: number }[];
       failures: { day_number: number; error: string }[];

@@ -221,6 +221,65 @@ export default function CampaignBuilderPage() {
     }
   }
 
+  const handleAddDay = async () => {
+    if (!selectedCampaign) return
+    setBusy('add-day')
+    try {
+      const nextNum = timeline.length ? Math.max(...timeline.map((d) => d.day_number)) + 1 : 0
+      const anchor = timeline.length ? timeline[timeline.length - 1].date_scheduled : selectedCampaign.start_date
+      const next = new Date(`${anchor}T00:00:00Z`)
+      next.setUTCDate(next.getUTCDate() + (timeline.length ? 1 : 0))
+      const date = next.toISOString().slice(0, 10)
+      await vantageApi.addCampaignTimelineDays(selectedCampaign.id, {
+        day_number: nextNum,
+        date_scheduled: date,
+        primary_channel: 'x',
+        content_type: 'mixed',
+        secondary_channels: [],
+        content_ideas: [{ id: crypto.randomUUID(), title: '', outline: '' }],
+      })
+      const res = await vantageApi.getCampaignTimeline(selectedCampaign.id)
+      setTimeline(res.timeline || [])
+    } catch (err) {
+      alert('Failed to add day: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleRemoveDay = async (day: TimelineDay) => {
+    if (!selectedCampaign) return
+    if (!confirm(`Remove day ${day.day_number + 1}?`)) return
+    setBusy(`day:${day.day_number}`)
+    try {
+      await vantageApi.deleteCampaignTimelineDay(selectedCampaign.id, day.day_number)
+      setTimeline((prev) => prev.filter((d) => d.day_number !== day.day_number))
+    } catch (err) {
+      alert('Failed to remove day: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleGenerateDay = async (day: TimelineDay) => {
+    if (!selectedCampaign) return
+    setBusy(`gen-day:${day.day_number}`)
+    setLaunchInfo(null)
+    try {
+      const res = await vantageApi.launchCampaign(selectedCampaign.id, [day.day_number])
+      if (res.failed) {
+        alert(`Generation failed: ${res.failures[0]?.error ?? 'Unknown error'}`)
+      } else {
+        setLaunchInfo(`Generated ${res.launched} piece for day ${day.day_number + 1}. Review it on the Queue page.`)
+      }
+      await fetchCampaignDetails(selectedCampaign.id)
+    } catch (err) {
+      alert('Failed to generate content: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const startEditCampaign = () => {
     if (!selectedCampaign) return
     setEditData({
@@ -611,12 +670,22 @@ export default function CampaignBuilderPage() {
             <h2 style={{ fontSize: '1.5rem', fontWeight: 600, margin: 0 }}>
               Timeline ({timeline.length} days)
             </h2>
-            <Button
-              label={busy === 'generate' ? 'Generating…' : timeline.length ? 'Regenerate (AI)' : 'Generate Timeline (AI)'}
-              variant={timeline.length ? 'secondary' : 'primary'}
-              onClick={handleGenerateTimeline}
-              disabled={busy !== null}
-            />
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              {timeline.length > 0 && (
+                <Button
+                  label={busy === 'add-day' ? 'Adding…' : '+ Add Day'}
+                  variant="secondary"
+                  onClick={handleAddDay}
+                  disabled={busy !== null}
+                />
+              )}
+              <Button
+                label={busy === 'generate' ? 'Generating…' : timeline.length ? 'Regenerate (AI)' : 'Generate Timeline (AI)'}
+                variant={timeline.length ? 'secondary' : 'primary'}
+                onClick={handleGenerateTimeline}
+                disabled={busy !== null}
+              />
+            </div>
           </div>
           {timeline.length === 0 ? (
             <Panel title="No Timeline Yet">
@@ -690,16 +759,30 @@ export default function CampaignBuilderPage() {
                         value={idea.outline ?? ''}
                         onChange={(e) => updateDayLocal(day.day_number, { content_ideas: [{ ...idea, outline: e.target.value }] })}
                       />
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                         <span style={{ fontSize: '0.8rem', color: 'var(--nx-text-4)' }}>
                           {publishedCount > 0 ? `${publishedCount} piece(s) generated` : 'No content generated yet'}
                         </span>
-                        <Button
-                          label={busy === `day:${day.day_number}` ? 'Saving…' : 'Save Day'}
-                          variant="secondary"
-                          onClick={() => handleSaveDay(day)}
-                          disabled={busy !== null}
-                        />
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <Button
+                            label="Remove"
+                            variant="secondary"
+                            onClick={() => handleRemoveDay(day)}
+                            disabled={busy !== null}
+                          />
+                          <Button
+                            label={busy === `day:${day.day_number}` ? 'Saving…' : 'Save Day'}
+                            variant="secondary"
+                            onClick={() => handleSaveDay(day)}
+                            disabled={busy !== null}
+                          />
+                          <Button
+                            label={busy === `gen-day:${day.day_number}` ? 'Generating…' : 'Generate Content'}
+                            variant="primary"
+                            onClick={() => handleGenerateDay(day)}
+                            disabled={busy !== null || !idea.title}
+                          />
+                        </div>
                       </div>
                     </div>
                   </Panel>

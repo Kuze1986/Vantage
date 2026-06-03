@@ -413,6 +413,41 @@ campaignRoutes.patch('/:id/timeline/:day', async (c) => {
   return c.json(data[0]);
 });
 
+// DELETE /v1/campaigns/:id/timeline/:day — remove a single timeline day
+campaignRoutes.delete('/:id/timeline/:day', async (c) => {
+  const campaignId = c.req.param('id');
+  const dayNumber = Number(c.req.param('day'));
+  const workspaceId = c.req.header('x-workspace-id');
+  if (!workspaceId) {
+    throw new HTTPException(400, { message: 'x-workspace-id header is required' });
+  }
+
+  const sb = getSupabaseAdmin();
+
+  const { data: campaign, error: campaignError } = await sb
+    .from('campaigns')
+    .select('id')
+    .eq('id', campaignId)
+    .eq('workspace_id', workspaceId)
+    .single();
+
+  if (campaignError || !campaign) {
+    throw new HTTPException(404, { message: 'Campaign not found' });
+  }
+
+  const { error } = await sb
+    .from('campaign_timeline')
+    .delete()
+    .eq('campaign_id', campaignId)
+    .eq('day_number', dayNumber);
+
+  if (error) {
+    throw new HTTPException(500, { message: error.message });
+  }
+
+  return c.json({ success: true });
+});
+
 // ============================================================================
 // AI Timeline Generation
 // ============================================================================
@@ -563,14 +598,25 @@ campaignRoutes.post('/:id/launch', async (c) => {
     throw new HTTPException(404, { message: 'Campaign not found' });
   }
 
-  const { data: timeline } = await sb
+  // Optional { day_numbers: [...] } restricts generation to specific days.
+  const body = await c.req.json().catch(() => ({}));
+  const dayFilter: number[] | null = Array.isArray(body?.day_numbers)
+    ? body.day_numbers.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n))
+    : null;
+
+  const { data: allDays } = await sb
     .from('campaign_timeline')
     .select('*')
     .eq('campaign_id', campaignId)
     .order('day_number', { ascending: true });
 
-  if (!timeline?.length) {
+  if (!allDays?.length) {
     throw new HTTPException(400, { message: 'Generate a timeline before launching' });
+  }
+
+  const timeline = dayFilter ? allDays.filter((d) => dayFilter.includes(d.day_number)) : allDays;
+  if (!timeline.length) {
+    throw new HTTPException(400, { message: 'No matching timeline days to generate' });
   }
 
   // Brand voice for generation (first row, like the cadence engine).
