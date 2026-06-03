@@ -18,8 +18,18 @@ function makeClient(schema: string): SupabaseClient {
 let vantageAdmin: SupabaseClient | null = null;
 let anonClient: SupabaseClient | null = null;
 
+/**
+ * Service-role admin client. Bound to the `vantage` schema, where all app tables
+ * actually live. The service_role key reaches `vantage` directly even though
+ * PostgREST does not expose it to the anon/authenticated roles.
+ *
+ * The `public.*` views that proxy some vantage tables exist ONLY for the browser
+ * (anon/authenticated PostgREST), which can't see `vantage` — e.g. VoicePage
+ * reads `public.brand_voice`. Server code never needs them: a new vantage table
+ * works here with no view and no extra step.
+ */
 export function getSupabaseAdmin(): SupabaseClient {
-  if (!vantageAdmin) vantageAdmin = makeClient("public");
+  if (!vantageAdmin) vantageAdmin = makeClient("vantage");
   return vantageAdmin;
 }
 

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
-import { getSupabaseForSchema } from '../lib/supabase.js';
+import { getSupabaseAdmin } from '../lib/supabase.js';
 
 export const workspaceRoutes = new Hono();
 
@@ -12,7 +12,7 @@ workspaceRoutes.get('/me', async (c) => {
   c.header('Cache-Control', 'no-store');
 
   const user = c.get('user');
-  const sb = getSupabaseForSchema('vantage');
+  const sb = getSupabaseAdmin();
 
   // Look up existing workspace for this user
   const { data: existing, error: selectError } = await sb
