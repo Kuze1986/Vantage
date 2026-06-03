@@ -15,22 +15,25 @@ function makeClient(schema: string): SupabaseClient {
 // Singletons — one client per schema, created once on first use.
 // Never call .schema() per-query: supabase-js v2 creates a full new client
 // (including a new RealtimeClient + WebSocket) on every .schema() call.
-let vantageAdmin: SupabaseClient | null = null;
+let publicAdmin: SupabaseClient | null = null;
 let anonClient: SupabaseClient | null = null;
 
 /**
- * Service-role admin client. Bound to the `vantage` schema, where all app tables
- * actually live. The service_role key reaches `vantage` directly even though
- * PostgREST does not expose it to the anon/authenticated roles.
+ * Service-role admin client, bound to the `public` schema.
  *
- * The `public.*` views that proxy some vantage tables exist ONLY for the browser
- * (anon/authenticated PostgREST), which can't see `vantage` — e.g. VoicePage
- * reads `public.brand_voice`. Server code never needs them: a new vantage table
- * works here with no view and no extra step.
+ * All app tables physically live in the `vantage` schema, but PostgREST only
+ * serves schemas on its exposed list (here: just `public`) — the service_role
+ * key bypasses RLS, NOT the exposed-schema restriction. So the server reaches
+ * vantage tables through auto-updatable `public.<table>` views that proxy them.
+ *
+ * Every vantage table the server touches MUST have such a view WITH grants to
+ * service_role. The `20260630000000_expose_vantage_views.sql` migration creates
+ * them for all current tables and installs an event trigger so future tables get
+ * a view automatically — see that file before adding tables.
  */
 export function getSupabaseAdmin(): SupabaseClient {
-  if (!vantageAdmin) vantageAdmin = makeClient("vantage");
-  return vantageAdmin;
+  if (!publicAdmin) publicAdmin = makeClient("public");
+  return publicAdmin;
 }
 
 /** Use for cross-schema reads (shift, scripta, etc.) — creates a fresh client. */
