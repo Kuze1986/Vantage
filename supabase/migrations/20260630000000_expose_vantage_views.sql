@@ -9,18 +9,25 @@
 -- Earlier migrations created views for only a handful of tables, so features
 -- whose tables had no view (campaigns, segments, intelligence_*, virality_*,
 -- ga4_sync_config, …) silently failed every read/write. This migration:
---   1. Backfills a public view + service_role grants for ALL existing vantage
---      tables (idempotent — safe to re-run; uses CREATE OR REPLACE so existing
---      grants, e.g. brand_voice's authenticated access for the SPA, are kept).
---   2. Installs an event trigger so any table created in `vantage` later gets
---      its view + grant automatically — no per-feature step.
+--   1. Rebuilds a public view + service_role grant for ALL existing vantage
+--      tables. It DROPs+CREATEs (not CREATE OR REPLACE) so it also repairs views
+--      whose column list drifted from the base table (CREATE OR REPLACE cannot
+--      rename/reorder columns -> error 42P16). Existing authenticated/anon grants
+--      are captured and re-applied so the browser's access (e.g. brand_voice in
+--      VoicePage) is preserved.
+--   2. Installs an event trigger so any table created in `vantage` later gets its
+--      view + grant automatically — no per-feature step.
+--
+-- Idempotent: safe to re-run, including after ALTERing a vantage table.
 
--- 1. Backfill existing tables ------------------------------------------------
+-- 1. Rebuild views for all existing tables -----------------------------------
 DO $$
 DECLARE
   t text;
+  roles_to_keep text[];
+  r text;
 BEGIN
-  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'vantage'
+  FOR t IN SELECT tablename FROM pg_tables WHERE schemaname = 'vantage' ORDER BY tablename
   LOOP
     -- Don't clobber a real (non-view) relation that already occupies public.<t>
     IF EXISTS (
@@ -31,8 +38,21 @@ BEGIN
       CONTINUE;
     END IF;
 
-    EXECUTE format('CREATE OR REPLACE VIEW public.%I AS SELECT * FROM vantage.%I', t, t);
+    -- Remember which browser roles currently have access, to re-grant after rebuild
+    SELECT array_agg(DISTINCT grantee) INTO roles_to_keep
+    FROM information_schema.role_table_grants
+    WHERE table_schema = 'public' AND table_name = t
+      AND grantee IN ('authenticated', 'anon');
+
+    EXECUTE format('DROP VIEW IF EXISTS public.%I', t);
+    EXECUTE format('CREATE VIEW public.%I AS SELECT * FROM vantage.%I', t, t);
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO service_role', t);
+
+    IF roles_to_keep IS NOT NULL THEN
+      FOREACH r IN ARRAY roles_to_keep LOOP
+        EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO %I', t, r);
+      END LOOP;
+    END IF;
   END LOOP;
 END $$;
 
@@ -63,7 +83,3 @@ CREATE EVENT TRIGGER expose_vantage_tables
   ON ddl_command_end
   WHEN TAG IN ('CREATE TABLE')
   EXECUTE FUNCTION public.expose_vantage_table();
-
--- Note: a public view's column list is fixed at creation. If you ALTER an
--- existing vantage table (add/rename/drop a column), re-run the backfill block
--- above (or DROP the specific view first) so the view reflects the new shape.
