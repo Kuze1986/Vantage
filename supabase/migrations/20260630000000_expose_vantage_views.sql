@@ -12,9 +12,10 @@
 --   1. Rebuilds a public view + service_role grant for ALL existing vantage
 --      tables. It DROPs+CREATEs (not CREATE OR REPLACE) so it also repairs views
 --      whose column list drifted from the base table (CREATE OR REPLACE cannot
---      rename/reorder columns -> error 42P16). Existing authenticated/anon grants
+--      rename/reorder columns -> error 42P16). Existing *authenticated* grants
 --      are captured and re-applied so the browser's access (e.g. brand_voice in
---      VoicePage) is preserved.
+--      VoicePage) is preserved. anon grants are intentionally NOT re-applied —
+--      see 20260701000000_revoke_anon_grants.sql.
 --   2. Installs an event trigger so any table created in `vantage` later gets its
 --      view + grant automatically — no per-feature step.
 --
@@ -38,11 +39,14 @@ BEGIN
       CONTINUE;
     END IF;
 
-    -- Remember which browser roles currently have access, to re-grant after rebuild
+    -- Remember which browser roles currently have access, to re-grant after rebuild.
+    -- NOTE: deliberately authenticated-only — anon must never regain table access
+    -- (see 20260701000000_revoke_anon_grants.sql). Re-granting anon here was how
+    -- the unauthenticated read/write hole kept coming back after every rebuild.
     SELECT array_agg(DISTINCT grantee) INTO roles_to_keep
     FROM information_schema.role_table_grants
     WHERE table_schema = 'public' AND table_name = t
-      AND grantee IN ('authenticated', 'anon');
+      AND grantee = 'authenticated';
 
     EXECUTE format('DROP VIEW IF EXISTS public.%I', t);
     EXECUTE format('CREATE VIEW public.%I AS SELECT * FROM vantage.%I', t, t);
