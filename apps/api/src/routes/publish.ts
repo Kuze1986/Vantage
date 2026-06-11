@@ -3,6 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
+import { recordGrowthEvent } from "../lib/growth.js";
 
 // Adapters
 import { postTweet } from "../adapters/x.js";
@@ -58,6 +59,11 @@ publishRoutes.post("/:channel", async (c) => {
       event_type: "published_manual",
       summary: `Manual publish recorded for ${slug} piece ${content_piece_id}`,
       payload: { content_piece_id, external_post_url, channel: slug },
+    });
+    // Growth OS — Loop A: a published piece is an acquisition impression.
+    await recordGrowthEvent({
+      loop: "acquisition", kind: "impression", channel: slug,
+      meta: { content_piece_id, external_post_id: external_post_url, manual: true },
     });
     return c.json({ ok: true, external_post_id: external_post_url, manual: true });
   }
@@ -128,6 +134,11 @@ publishRoutes.post("/:channel", async (c) => {
       event_type: "published",
       summary: `Published ${slug} piece → ${externalId}`,
       payload: { content_piece_id, external_post_id: externalId, channel: slug },
+    });
+    // Growth OS — Loop A: a published piece is an acquisition impression.
+    await recordGrowthEvent({
+      loop: "acquisition", kind: "impression", channel: slug,
+      meta: { content_piece_id, external_post_id: externalId },
     });
 
     return c.json({ ok: true, external_post_id: externalId });

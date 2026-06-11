@@ -3,6 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { createHmac } from "node:crypto";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
+import { recordGrowthEvent, engagementKind } from "../lib/growth.js";
 import { crcResponseToken } from "../adapters/x.js";
 
 export const webhooksRoutes = new Hono();
@@ -110,6 +111,11 @@ webhooksRoutes.post("/x", async (c) => {
     summary: `X webhook ${eventType}`,
     payload: { eventType, tweetId },
   });
+  // Growth OS — Loop A: engagement on a published piece.
+  await recordGrowthEvent({
+    loop: "acquisition", kind: engagementKind(eventType), channel: "x",
+    meta: { event_type: eventType, tweet_id: tweetId, content_piece_id: contentPieceId },
+  });
 
   return c.json({ ok: true });
 });
@@ -176,6 +182,11 @@ webhooksRoutes.post("/linkedin", async (c) => {
     summary: `LinkedIn webhook: ${eventType}`,
     payload: { eventType, shareId },
   });
+  // Growth OS — Loop A: engagement on a published piece.
+  await recordGrowthEvent({
+    loop: "acquisition", kind: engagementKind(eventType), channel: "linkedin",
+    meta: { event_type: eventType, share_id: shareId, content_piece_id: contentPieceId },
+  });
 
   return c.json({ ok: true });
 });
@@ -222,6 +233,11 @@ webhooksRoutes.post("/reddit", async (c) => {
     event_type: "webhook_received",
     summary: `Reddit event: ${eventType}`,
     payload: { eventType, postId },
+  });
+  // Growth OS — Loop A: engagement on a published piece.
+  await recordGrowthEvent({
+    loop: "acquisition", kind: engagementKind(eventType), channel: "reddit",
+    meta: { event_type: eventType, post_id: postId, content_piece_id: contentPieceId },
   });
 
   return c.json({ ok: true });
