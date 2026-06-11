@@ -273,6 +273,85 @@ async function mixVideo(params: {
   });
 }
 
+// ── Step 3.5: Extract keyframes ───────────────────────────────────────────────
+
+/**
+ * Extract 5 keyframes from video at regular intervals
+ * Returns array of { timestamp_sec, url, extracted_at }
+ */
+async function extractFrames(
+  videoPath: string,
+  workDir: string,
+  jobId: string,
+): Promise<Array<{ timestamp_sec: number; url: string; extracted_at: string }>> {
+  // Get video duration first
+  const getDuration = () =>
+    new Promise<number>((resolve, reject) => {
+      ffmpeg.ffprobe(videoPath, (err, metadata) => {
+        if (err) reject(err);
+        else resolve(metadata.format.duration || 0);
+      });
+    });
+
+  const duration = await getDuration();
+  if (duration <= 0) return [];
+
+  // Extract frames at regular intervals: 1s, duration/4, duration/2, 3*duration/4, duration-1s
+  const timestamps = [
+    1,
+    Math.max(2, Math.floor(duration / 4)),
+    Math.max(3, Math.floor(duration / 2)),
+    Math.max(4, Math.floor((3 * duration) / 4)),
+    Math.max(5, Math.floor(duration - 1)),
+  ].filter((t) => t > 0 && t < duration); // Only valid timestamps
+
+  const frames: Array<{ timestamp_sec: number; url: string; extracted_at: string }> = [];
+  const sb = getSupabase();
+
+  for (let i = 0; i < timestamps.length; i++) {
+    const timestamp = timestamps[i];
+    const framePath = join(workDir, `frame-${i}.png`);
+
+    // Extract frame using FFmpeg
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg(videoPath)
+        .seekInput(timestamp)
+        .frames(1)
+        .output(framePath)
+        .on("end", () => resolve())
+        .on("error", reject)
+        .run();
+    });
+
+    // Upload frame to Supabase Storage
+    try {
+      const frameData = await readFile(framePath);
+      const key = `demoforge/frames/${jobId}/frame-${i}.png`;
+
+      const { error: uploadErr } = await sb.storage.from("vantage-media").upload(key, frameData, {
+        contentType: "image/png",
+        upsert: true,
+      });
+
+      if (!uploadErr) {
+        const { data: urlData } = sb.storage.from("vantage-media").getPublicUrl(key);
+        if (urlData?.publicUrl) {
+          frames.push({
+            timestamp_sec: timestamp,
+            url: urlData.publicUrl,
+            extracted_at: new Date().toISOString(),
+          });
+        }
+      }
+    } catch (err) {
+      // Log error but continue extracting other frames
+      console.warn(`Failed to upload frame ${i}:`, err);
+    }
+  }
+
+  return frames;
+}
+
 // ── Step 4: Upload to Supabase Storage ────────────────────────────────────────
 
 async function uploadToStorage(
@@ -396,8 +475,25 @@ export async function processJob(
       masterVolume: job.input_payload.master_volume ?? 100,
     });
 
-    // 5. Upload
+    // 5. Extract keyframes
+    let extractedFrames: Array<{ timestamp_sec: number; url: string; extracted_at: string }> = [];
+    try {
+      extractedFrames = await extractFrames(outputPath, workDir, job.id);
+    } catch (err) {
+      console.warn("Frame extraction failed, continuing without frames:", err);
+    }
+
+    // 6. Upload video
     const publicUrl = await uploadToStorage(outputPath, job.id, job.target_format);
+
+    // 7. Update job with extracted frames
+    if (extractedFrames.length > 0) {
+      const sb = getSupabase();
+      await sb.from("demoforge_jobs")
+        .update({ extracted_frames: extractedFrames })
+        .eq("id", job.id);
+    }
+
     return publicUrl;
   } finally {
     // Clean up temp files

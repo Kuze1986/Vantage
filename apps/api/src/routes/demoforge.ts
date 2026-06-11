@@ -46,12 +46,19 @@ async function demoFetch(path: string, init: RequestInit = {}): Promise<unknown>
   return body;
 }
 
+const soundEffectSchema = z.object({
+  effectId: z.string().uuid(),
+  delayMs: z.number().int().nonnegative(),
+  volumePercent: z.number().int().min(0).max(100),
+});
+
 const scriptStepSchema = z.object({
   action:    z.enum(["navigate", "click", "fill", "wait", "scroll", "narrate"]),
   selector:  z.string().optional(),
   text:      z.string().optional(),
   ms:        z.number().int().positive().optional(),
   narration: z.string().default(""),
+  soundEffect: soundEffectSchema.optional(),
 });
 
 const jobBodySchema = z.object({
@@ -61,6 +68,9 @@ const jobBodySchema = z.object({
   script:           z.array(scriptStepSchema).min(1).max(30),
   music_track_id:   z.string().uuid().optional(),
   voice_id:         z.string().optional(),
+  narration_volume: z.number().int().min(0).max(100).optional(),
+  music_volume:     z.number().int().min(0).max(100).optional(),
+  master_volume:    z.number().int().min(0).max(100).optional(),
 });
 
 // POST /v1/demoforge/jobs — create a video job
