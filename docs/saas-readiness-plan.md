@@ -10,7 +10,12 @@ multi-tenant SaaS. Ordered by leverage. Each phase is independently shippable.
 
 ---
 
-## Phase 1 — Tenancy migration (the blocker)
+> **Status:** Phase 1 (1a–1d) implemented and committed on `main`
+> (`29eeffa` migration, `8c85d84` app layer). Typecheck + build pass. The
+> migration `20260702000000_core_tenancy.sql` still needs manual review + apply
+> to the database (it could not be DB-tested in-session). Phase 2 is next.
+
+## Phase 1 — Tenancy migration (the blocker)  ✅ done
 
 **Goal:** every row the app touches belongs to exactly one workspace, and every
 query is scoped to the caller's workspace. No data path can read or write across
