@@ -17,7 +17,7 @@ export const biloopRoutes = new Hono();
 // POST /v1/bioloop/run — manually trigger a BioLoop weight update cycle
 biloopRoutes.post("/run", async (c) => {
   try {
-    const result = await runBioLoop();
+    const result = await runBioLoop(c.get("workspaceId"));
     return c.json({ ok: true, ...result });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -27,11 +27,13 @@ biloopRoutes.post("/run", async (c) => {
 
 // GET /v1/bioloop/weights — list current generation weights
 biloopRoutes.get("/weights", async (c) => {
+  const ws = c.get("workspaceId");
   const channel = c.req.query("channel");
   const sb = getSupabaseAdmin();
   let query = sb
     .from("generation_weights")
     .select("channel_slug, pattern_key, weight, sample_size, last_updated")
+    .eq("workspace_id", ws)
     .order("channel_slug")
     .order("weight", { ascending: false });
 
@@ -63,7 +65,7 @@ biloopRoutes.post("/analyze", async (c) => {
     const analysis = await analyzeVirality(input);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
+    const workspaceId = c.get("workspaceId");
 
     // Persist signal to database
     const { data: signal, error } = await sb
@@ -123,7 +125,7 @@ biloopRoutes.get("/signals", async (c) => {
     const offset = parseInt(c.req.query("offset") ?? "0", 10);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
+    const workspaceId = c.get("workspaceId");
 
     let query = sb
       .from("viral_signals")
@@ -162,7 +164,7 @@ biloopRoutes.post("/patterns/detect", async (c) => {
       detectPatternsSchema.parse(body);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
+    const workspaceId = c.get("workspaceId");
 
     // Fetch top viral posts for pattern analysis
     let query = sb
@@ -251,7 +253,7 @@ biloopRoutes.get("/patterns", async (c) => {
     const offset = parseInt(c.req.query("offset") ?? "0", 10);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
+    const workspaceId = c.get("workspaceId");
 
     let query = sb
       .from("virality_patterns")
@@ -287,7 +289,7 @@ biloopRoutes.post("/recommendations", async (c) => {
     const input = recommendationSchema.parse(body);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
+    const workspaceId = c.get("workspaceId");
 
     // Fetch segment preferences and patterns
     const { data: segment, error: segError } = await sb
@@ -375,7 +377,7 @@ biloopRoutes.get("/recommendations", async (c) => {
     const offset = parseInt(c.req.query("offset") ?? "0", 10);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
+    const workspaceId = c.get("workspaceId");
 
     let query = sb
       .from("virality_recommendations")
@@ -414,7 +416,7 @@ biloopRoutes.post("/boost-signals/detect", async (c) => {
     const input = boostSignalsSchema.parse(body);
 
     const sb = getSupabaseAdmin();
-    const workspaceId = c.req.header("x-workspace-id") || "00000000-0000-0000-0000-000000000001";
+    const workspaceId = c.get("workspaceId");
 
     // Get historical average for comparison
     const { data: recentSignals, error: fetchError } = await sb

@@ -25,10 +25,12 @@ const templateBody = z.object({
 export const emailTemplatesRoutes = new Hono();
 
 emailTemplatesRoutes.get("/", async (c) => {
+  const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
     .from("email_templates")
     .select("id, name, description, created_at, updated_at")
+    .eq("workspace_id", ws)
     .order("updated_at", { ascending: false });
   if (error) throw new HTTPException(500, { message: error.message });
   return c.json({ templates: data ?? [] });
@@ -39,10 +41,11 @@ emailTemplatesRoutes.post("/", async (c) => {
   const parsed = templateBody.safeParse(json);
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
+  const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
     .from("email_templates")
-    .insert({ name: parsed.data.name, description: parsed.data.description ?? '', blocks: parsed.data.blocks ?? [] })
+    .insert({ workspace_id: ws, name: parsed.data.name, description: parsed.data.description ?? '', blocks: parsed.data.blocks ?? [] })
     .select("*")
     .single();
   if (error) throw new HTTPException(500, { message: error.message });
@@ -50,10 +53,12 @@ emailTemplatesRoutes.post("/", async (c) => {
 });
 
 emailTemplatesRoutes.get("/:id", async (c) => {
+  const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
     .from("email_templates")
     .select("*")
+    .eq("workspace_id", ws)
     .eq("id", c.req.param("id"))
     .single();
   if (error || !data) throw new HTTPException(404, { message: "Template not found" });
@@ -65,10 +70,12 @@ emailTemplatesRoutes.patch("/:id", async (c) => {
   const parsed = templateBody.partial().safeParse(json);
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
+  const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
     .from("email_templates")
     .update(parsed.data)
+    .eq("workspace_id", ws)
     .eq("id", c.req.param("id"))
     .select("*")
     .single();
@@ -77,10 +84,12 @@ emailTemplatesRoutes.patch("/:id", async (c) => {
 });
 
 emailTemplatesRoutes.delete("/:id", async (c) => {
+  const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
   const { error } = await sb
     .from("email_templates")
     .delete()
+    .eq("workspace_id", ws)
     .eq("id", c.req.param("id"));
   if (error) throw new HTTPException(500, { message: error.message });
   return c.json({ ok: true });

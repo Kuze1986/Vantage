@@ -6,6 +6,7 @@ import { pickNextTopic } from "./source.js";
 import { refreshTopicsFromPulse } from "./pulse.js";
 import { pollRedditEngagement } from "./reddit-engagement.js";
 import { loadSettings } from "../lib/settings.js";
+import { listAllWorkspaceIds } from "../lib/workspace.js";
 import { sendAlert } from "../lib/alert.js";
 import { RateLimitError } from "../lib/rate-limit-error.js";
 import { channelFormatMap } from "@vantage/prompts";
@@ -46,13 +47,13 @@ type ContentPieceRow = {
 const RETRY_DELAYS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000];
 
 // ── Manual schedule: mark a piece queued with optional time ──────────────────
-export async function scheduleContentPiece(contentPieceId: string, scheduledForIso?: string): Promise<void> {
+export async function scheduleContentPiece(workspaceId: string, contentPieceId: string, scheduledForIso?: string): Promise<void> {
   const sb = getSupabaseAdmin();
   const scheduledFor = scheduledForIso ?? new Date().toISOString();
 
   const { data: piece, error: loadErr } = await sb
     .from("content_pieces")
-    .select("id, status").eq("id", contentPieceId).single();
+    .select("id, status").eq("workspace_id", workspaceId).eq("id", contentPieceId).single();
   if (loadErr || !piece) throw new Error("Content piece not found");
   if (piece.status !== "approved") throw new Error(`Can only schedule approved pieces, got ${piece.status}`);
 
@@ -60,7 +61,7 @@ export async function scheduleContentPiece(contentPieceId: string, scheduledForI
     status: "queued",
     scheduled_for: scheduledFor,
     updated_at: new Date().toISOString(),
-  }).eq("id", contentPieceId);
+  }).eq("workspace_id", workspaceId).eq("id", contentPieceId);
   if (error) throw new Error(error.message);
 
   await logActivity({
@@ -68,11 +69,12 @@ export async function scheduleContentPiece(contentPieceId: string, scheduledForI
     event_type: "scheduled",
     summary: `Content piece ${contentPieceId} queued for ${scheduledFor}`,
     payload: { content_piece_id: contentPieceId, scheduled_for: scheduledFor },
+    workspace_id: workspaceId,
   });
 }
 
 // ── Publish one piece via its channel adapter ─────────────────────────────────
-async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Promise<void> {
+async function publishPiece(workspaceId: string, piece: ContentPieceRow, channelRow: ChannelRow): Promise<void> {
   const sb = getSupabaseAdmin();
   const slug = piece.channel_slug as ChannelSlug;
   const payload = piece.content_payload;
@@ -106,7 +108,7 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
         const sbAdmin   = getSupabaseAdmin();
         await sbAdmin.from("channels").update({
           cadence_config: { ...cadence, subreddit_index: nextIndex },
-        }).eq("slug", "reddit");
+        }).eq("workspace_id", workspaceId).eq("slug", "reddit");
         const { id } = await postToSubreddit({
           subreddit,
           title: String(payload.title ?? payload.body ?? "").slice(0, 300),
@@ -133,13 +135,14 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
     const now = new Date().toISOString();
     await sb.from("content_pieces").update({
       status: "published", published_at: now, external_post_id: externalId, updated_at: now,
-    }).eq("id", piece.id);
+    }).eq("workspace_id", workspaceId).eq("id", piece.id);
 
     await logActivity({
       source: `adapter:${slug}`, source_type: "adapter",
       event_type: "cadence_published",
       summary: `Cadence published ${slug} piece ${piece.id} → ${externalId}`,
       payload: { content_piece_id: piece.id, external_post_id: externalId, channel: slug },
+      workspace_id: workspaceId,
     });
   } catch (e) {
     const msg        = e instanceof Error ? e.message : String(e);
@@ -152,12 +155,13 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
         retry_after: retryAfter,
         audit_notes: `Rate limited: ${msg.slice(0, 400)}`,
         updated_at:  now.toISOString(),
-      }).eq("id", piece.id);
+      }).eq("workspace_id", workspaceId).eq("id", piece.id);
       await logActivity({
         source: `adapter:${slug}`, source_type: "adapter",
         event_type: "rate_limit_rescheduled",
         summary: `Rate limited — rescheduled ${slug} piece ${piece.id} for ${retryAfter}`,
         payload: { content_piece_id: piece.id, channel: slug, retry_after: retryAfter },
+        workspace_id: workspaceId,
       });
       throw e;
     }
@@ -174,12 +178,13 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
         retry_after: retryAfter,
         audit_notes: `Retry ${retryCount + 1}: ${msg.slice(0, 400)}`,
         updated_at:  now.toISOString(),
-      }).eq("id", piece.id);
+      }).eq("workspace_id", workspaceId).eq("id", piece.id);
       await logActivity({
         source: `adapter:${slug}`, source_type: "adapter",
         event_type: "cadence_publish_retry",
         summary: `Retry ${retryCount + 1}/3 for ${slug} piece ${piece.id} — next at ${retryAfter}`,
         payload: { content_piece_id: piece.id, channel: slug, retry_count: retryCount + 1, retry_after: retryAfter },
+        workspace_id: workspaceId,
       });
     } else {
       // Max retries exhausted — mark as failed permanently
@@ -187,12 +192,13 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
         status:      "failed",
         audit_notes: `Failed after ${retryCount} retries: ${msg.slice(0, 400)}`,
         updated_at:  now.toISOString(),
-      }).eq("id", piece.id);
+      }).eq("workspace_id", workspaceId).eq("id", piece.id);
       await logActivity({
         source: `adapter:${slug}`, source_type: "adapter",
         event_type: "cadence_publish_failed",
         summary: `Permanently failed after ${retryCount} retries: ${msg.slice(0, 400)}`,
         payload: { content_piece_id: piece.id, channel: slug, retry_count: retryCount },
+        workspace_id: workspaceId,
       });
       // 3B-1: Alert on permanent failure
       void sendAlert(
@@ -205,8 +211,18 @@ async function publishPiece(piece: ContentPieceRow, channelRow: ChannelRow): Pro
   }
 }
 
-// ── Cadence tick: publish all pieces due now ──────────────────────────────────
+// ── Cadence tick: publish all pieces due now, per workspace ───────────────────
 async function cadenceTick(): Promise<void> {
+  for (const ws of await listAllWorkspaceIds()) {
+    try {
+      await cadenceTickForWorkspace(ws);
+    } catch (e) {
+      console.error(`[cadence] workspace ${ws} tick error:`, e instanceof Error ? e.message : e);
+    }
+  }
+}
+
+async function cadenceTickForWorkspace(workspaceId: string): Promise<void> {
   const sb  = getSupabaseAdmin();
   const now = new Date().toISOString();
 
@@ -214,6 +230,7 @@ async function cadenceTick(): Promise<void> {
   const { data: pieces, error } = await sb
     .from("content_pieces")
     .select("id, channel_slug, format, content_payload, retry_count")
+    .eq("workspace_id", workspaceId)
     .eq("status", "queued")
     .lte("scheduled_for", now)
     .or(`retry_after.is.null,retry_after.lte.${now}`)
@@ -226,14 +243,15 @@ async function cadenceTick(): Promise<void> {
   if (!pieces?.length) return;
 
   // Load enabled channel rows for routing
-  const { data: channels } = await sb.from("channels").select("slug, enabled, cadence_config").eq("enabled", true);
+  const { data: channels } = await sb.from("channels").select("slug, enabled, cadence_config")
+    .eq("workspace_id", workspaceId).eq("enabled", true);
   const channelMap = Object.fromEntries((channels ?? []).map((c: ChannelRow) => [c.slug, c]));
 
   for (const piece of pieces as ContentPieceRow[]) {
     const channelRow = channelMap[piece.channel_slug] as ChannelRow | undefined;
     if (!channelRow) continue;
     try {
-      await publishPiece(piece, channelRow);
+      await publishPiece(workspaceId, piece, channelRow);
     } catch {
       // Error already logged inside publishPiece
     }
@@ -242,6 +260,16 @@ async function cadenceTick(): Promise<void> {
 
 // ── Auto-generate tick: fill quota for enabled auto-approve channels ──────────
 async function autoGenerateTick(): Promise<void> {
+  for (const ws of await listAllWorkspaceIds()) {
+    try {
+      await autoGenerateTickForWorkspace(ws);
+    } catch (e) {
+      console.error(`[auto-gen] workspace ${ws} tick error:`, e instanceof Error ? e.message : e);
+    }
+  }
+}
+
+async function autoGenerateTickForWorkspace(workspaceId: string): Promise<void> {
   const sb  = getSupabaseAdmin();
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
@@ -249,6 +277,7 @@ async function autoGenerateTick(): Promise<void> {
   const { data: channels } = await sb
     .from("channels")
     .select("slug, enabled, cadence_config")
+    .eq("workspace_id", workspaceId)
     .eq("enabled", true);
 
   if (!channels?.length) return;
@@ -263,6 +292,7 @@ async function autoGenerateTick(): Promise<void> {
     const { count } = await sb
       .from("content_pieces")
       .select("*", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId)
       .eq("channel_slug", ch.slug)
       .eq("status", "published")
       .gte("published_at", todayStart);
@@ -272,7 +302,7 @@ async function autoGenerateTick(): Promise<void> {
     if (deficit <= 0) continue;
 
     // Load brand voice
-    const { data: voices } = await sb.from("brand_voice").select("*").limit(1);
+    const { data: voices } = await sb.from("brand_voice").select("*").eq("workspace_id", workspaceId).limit(1);
     const voice = voices?.[0];
     if (!voice) continue;
     const brandVoiceStr = JSON.stringify({
@@ -285,12 +315,13 @@ async function autoGenerateTick(): Promise<void> {
     // Generate one piece per deficit slot (up to a cap of 3 at a time)
     const slots = Math.min(deficit, 3);
     for (let i = 0; i < slots; i++) {
-      const topic = await pickNextTopic();
+      const topic = await pickNextTopic(workspaceId);
       if (!topic) break;
 
       try {
         // Generate
         const gen = await generateContent({
+          workspace_id: workspaceId,
           channel:     ch.slug as ChannelSlug,
           topic_text:  topic.topic_text,
           vertical:    topic.vertical,
@@ -302,6 +333,7 @@ async function autoGenerateTick(): Promise<void> {
         const { data: inserted, error: insErr } = await sb
           .from("content_pieces")
           .insert({
+            workspace_id:    workspaceId,
             topic_id:        topic.id,
             channel_slug:    ch.slug,
             format:          gen.format,
@@ -319,16 +351,19 @@ async function autoGenerateTick(): Promise<void> {
         for (const [k, v] of Object.entries(taggedPayload)) {
           if (typeof v === "string") taggedPayload[k] = tagUrls(v, ch.slug, inserted.id);
         }
-        await sb.from("content_pieces").update({ content_payload: taggedPayload }).eq("id", inserted.id);
+        await sb.from("content_pieces").update({ content_payload: taggedPayload })
+          .eq("workspace_id", workspaceId).eq("id", inserted.id);
 
         // Mark topic used
-        await sb.from("topics").update({ used_at: new Date().toISOString() }).eq("id", topic.id);
+        await sb.from("topics").update({ used_at: new Date().toISOString() })
+          .eq("workspace_id", workspaceId).eq("id", topic.id);
 
         await logActivity({
           source: "kuze", source_type: "agent",
           event_type: "auto_generated",
           summary: `Auto-generated ${format} for ${ch.slug}`,
           payload: { content_piece_id: inserted.id, topic_id: topic.id, channel: ch.slug },
+          workspace_id: workspaceId,
         });
 
         // Audit it
@@ -349,18 +384,20 @@ async function autoGenerateTick(): Promise<void> {
             audit_notes: auditResult.feedback || null,
             scheduled_for: scheduledFor,
             updated_at: new Date().toISOString(),
-          }).eq("id", inserted.id);
+          }).eq("workspace_id", workspaceId).eq("id", inserted.id);
 
           await logActivity({
             source: "ilita", source_type: "agent",
             event_type: "auto_approved_queued",
             summary: `Auto-approved + queued ${ch.slug} piece for ${scheduledFor}`,
             payload: { content_piece_id: inserted.id, scheduled_for: scheduledFor },
+            workspace_id: workspaceId,
           });
         } else {
           // Regen once with feedback
           const regenTopic = `${topic.topic_text}\n\nIlita feedback (must address): ${auditResult.feedback}`;
           const gen2 = await generateContent({
+            workspace_id: workspaceId,
             channel: ch.slug as ChannelSlug,
             topic_text: regenTopic,
             vertical: topic.vertical,
@@ -374,7 +411,7 @@ async function autoGenerateTick(): Promise<void> {
             audit_notes: audit2.feedback,
             audit_iterations: 1,
             updated_at: new Date().toISOString(),
-          }).eq("id", inserted.id);
+          }).eq("workspace_id", workspaceId).eq("id", inserted.id);
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -383,30 +420,45 @@ async function autoGenerateTick(): Promise<void> {
           event_type: "auto_generate_error",
           summary: msg.slice(0, 300),
           payload: { channel: ch.slug, topic_id: topic.id },
+          workspace_id: workspaceId,
         });
       }
     }
   }
 }
 
-// ── Pulse tick: ingest external signals every 30 min ─────────────────────────
+// ── Pulse tick: ingest external signals every 30 min, per workspace ──────────
 async function pulseTick(): Promise<void> {
   const sb = getSupabaseAdmin();
-  const { data: ch } = await sb
-    .from("channels")
-    .select("cadence_config")
-    .eq("slug", "reddit")
-    .maybeSingle();
-  const subreddits: string[] =
-    (ch?.cadence_config as { subreddits?: string[] } | null)?.subreddits ?? [];
+  for (const ws of await listAllWorkspaceIds()) {
+    const { data: ch } = await sb
+      .from("channels")
+      .select("cadence_config")
+      .eq("workspace_id", ws)
+      .eq("slug", "reddit")
+      .maybeSingle();
+    const subreddits: string[] =
+      (ch?.cadence_config as { subreddits?: string[] } | null)?.subreddits ?? [];
 
-  try {
-    const { inserted, scanned } = await refreshTopicsFromPulse(subreddits);
-    if (inserted > 0) {
-      console.log(`[pulse] ${inserted} new signals inserted from ${scanned} scanned`);
+    try {
+      const { inserted, scanned } = await refreshTopicsFromPulse(ws, subreddits);
+      if (inserted > 0) {
+        console.log(`[pulse] ws ${ws}: ${inserted} new signals inserted from ${scanned} scanned`);
+      }
+    } catch (e) {
+      console.error(`[pulse] ws ${ws} tick error:`, e instanceof Error ? e.message : e);
     }
-  } catch (e) {
-    console.error("[pulse] tick error:", e instanceof Error ? e.message : e);
+  }
+}
+
+// ── Reddit engagement poll: per workspace ────────────────────────────────────
+async function redditEngageTick(): Promise<void> {
+  for (const ws of await listAllWorkspaceIds()) {
+    try {
+      await pollRedditEngagement(ws);
+    } catch (e) {
+      console.error(`[reddit-engage] ws ${ws} poll error:`, e instanceof Error ? e.message : e);
+    }
   }
 }
 
@@ -441,9 +493,9 @@ export function startCadenceEngine(): void {
   // See supabase/functions/bioloop/index.ts and the 20260607000000 migration.
 
   // 3A-7: Reddit engagement poll every 2 hours (first run after startup)
-  void pollRedditEngagement().catch((e) => console.error("[reddit-engage] initial poll error:", e));
+  void redditEngageTick().catch((e) => console.error("[reddit-engage] initial poll error:", e));
   redditEngageTimer = setInterval(() => {
-    void pollRedditEngagement().catch((e) => console.error("[reddit-engage] poll error:", e));
+    void redditEngageTick().catch((e) => console.error("[reddit-engage] poll error:", e));
   }, REDDIT_ENGAGE_TICK_MS);
 
   console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | reddit-engage 2h | bioloop via edge function");

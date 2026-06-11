@@ -20,11 +20,13 @@ auditRoutes.post("/", async (c) => {
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
   const { content_piece_id } = parsed.data;
+  const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
 
   const { data: piece, error: pErr } = await sb
     .from("content_pieces")
     .select("id, topic_id, channel_slug, format, content_payload, status, audit_iterations")
+    .eq("workspace_id", ws)
     .eq("id", content_piece_id).single();
   if (pErr || !piece) throw new HTTPException(404, { message: "Content piece not found" });
   if (piece.status !== "auditing") {
@@ -36,7 +38,7 @@ auditRoutes.post("/", async (c) => {
   const content = String(payload.body ?? payload.text ?? payload.hook ?? payload.title ?? JSON.stringify(payload));
   if (!content) throw new HTTPException(400, { message: "Missing content in payload" });
 
-  const { data: voices } = await sb.from("brand_voice").select("*").limit(1);
+  const { data: voices } = await sb.from("brand_voice").select("*").eq("workspace_id", ws).limit(1);
   const voice = voices?.[0];
   if (!voice) throw new HTTPException(400, { message: "Configure brand voice first" });
   const brandVoiceStr = JSON.stringify({
@@ -56,7 +58,7 @@ auditRoutes.post("/", async (c) => {
       audit_notes: first.feedback || null,
       audit_iterations: iterations,
       updated_at: new Date().toISOString(),
-    }).eq("id", content_piece_id);
+    }).eq("workspace_id", ws).eq("id", content_piece_id);
     await logActivity({
       source: "ilita", source_type: "agent",
       event_type: "audit_pass",
@@ -73,7 +75,7 @@ auditRoutes.post("/", async (c) => {
       audit_notes: first.feedback,
       audit_iterations: iterations,
       updated_at: new Date().toISOString(),
-    }).eq("id", content_piece_id);
+    }).eq("workspace_id", ws).eq("id", content_piece_id);
     await logActivity({
       source: "ilita", source_type: "agent",
       event_type: "audit_reject_final",
@@ -85,12 +87,13 @@ auditRoutes.post("/", async (c) => {
 
   // Regen with feedback
   const { data: topic } = await sb.from("topics")
-    .select("topic_text, vertical").eq("id", piece.topic_id as string).single();
+    .select("topic_text, vertical").eq("workspace_id", ws).eq("id", piece.topic_id as string).single();
 
   const regenTopicText = `${topic?.topic_text ?? ""}\n\nIlita feedback (must address): ${first.feedback}`;
   let gen2: Awaited<ReturnType<typeof generateContent>>;
   try {
     gen2 = await generateContent({
+      workspace_id: ws,
       channel:     piece.channel_slug as ChannelSlug,
       topic_text:  regenTopicText,
       vertical:    (topic?.vertical as string | null) ?? null,
@@ -123,7 +126,7 @@ auditRoutes.post("/", async (c) => {
     audit_notes:      notes,
     audit_iterations: iterations,
     updated_at:       new Date().toISOString(),
-  }).eq("id", content_piece_id);
+  }).eq("workspace_id", ws).eq("id", content_piece_id);
 
   await logActivity({
     source: "ilita", source_type: "agent",

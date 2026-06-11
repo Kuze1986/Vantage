@@ -7,6 +7,8 @@ export type LogActivityInput = {
   summary: string;
   payload?: Record<string, unknown> | null;
   drill_uri?: string | null;
+  /** Owning workspace. Null/omitted for system-wide events (e.g. API errors). */
+  workspace_id?: string | null;
 };
 
 export async function logActivity(input: LogActivityInput): Promise<void> {
@@ -18,6 +20,7 @@ export async function logActivity(input: LogActivityInput): Promise<void> {
     summary: input.summary,
     payload: input.payload ?? null,
     drill_uri: input.drill_uri ?? null,
+    workspace_id: input.workspace_id ?? null,
   });
   if (error) {
     console.error("activity_events insert failed", error);

@@ -17,6 +17,7 @@ export const analyticsRoutes = new Hono();
 
 // ── Engagement over time ──────────────────────────────────────────────────────
 analyticsRoutes.get("/engagement", async (c) => {
+  const ws      = c.get("workspaceId");
   const sb      = getSupabaseAdmin();
   const period  = (c.req.query("period")   ?? "7d") as "7d" | "30d" | "90d";
   const groupBy = (c.req.query("group_by") ?? "day") as "day" | "channel" | "vertical";
@@ -30,6 +31,7 @@ analyticsRoutes.get("/engagement", async (c) => {
   const { data: events, error: evErr } = await sb
     .from("engagement_events")
     .select("id, content_piece_id, event_type, occurred_at")
+    .eq("workspace_id", ws)
     .gte("occurred_at", since)
     .order("occurred_at", { ascending: true })
     .limit(5000);
@@ -45,6 +47,7 @@ analyticsRoutes.get("/engagement", async (c) => {
     const { data: pieces } = await sb
       .from("content_pieces")
       .select("id, channel_slug, topic_id")
+      .eq("workspace_id", ws)
       .in("id", pieceIds);
     for (const p of pieces ?? []) {
       pieceMap[p.id as string] = { channel_slug: p.channel_slug as string, topic_id: p.topic_id as string | null };
@@ -55,7 +58,7 @@ analyticsRoutes.get("/engagement", async (c) => {
   const topicIds = [...new Set(Object.values(pieceMap).map((p) => p.topic_id).filter(Boolean) as string[])];
   let topicVertical: Record<string, string | null> = {};
   if (topicIds.length > 0) {
-    const { data: topics } = await sb.from("topics").select("id, vertical").in("id", topicIds);
+    const { data: topics } = await sb.from("topics").select("id, vertical").eq("workspace_id", ws).in("id", topicIds);
     for (const t of topics ?? []) topicVertical[t.id as string] = t.vertical as string | null;
   }
 
@@ -95,6 +98,7 @@ analyticsRoutes.get("/engagement", async (c) => {
 
 // ── Engagement by posting hour ────────────────────────────────────────────────
 analyticsRoutes.get("/posting-hours", async (c) => {
+  const ws      = c.get("workspaceId");
   const sb      = getSupabaseAdmin();
   const channel = c.req.query("channel");
   const since30d = new Date(Date.now() - 30 * 24 * 60 * 60_000).toISOString();
@@ -103,6 +107,7 @@ analyticsRoutes.get("/posting-hours", async (c) => {
   let piecesQ = sb
     .from("content_pieces")
     .select("id, channel_slug, published_at")
+    .eq("workspace_id", ws)
     .eq("status", "published")
     .gte("published_at", since30d);
   if (channel) piecesQ = piecesQ.eq("channel_slug", channel);
@@ -115,6 +120,7 @@ analyticsRoutes.get("/posting-hours", async (c) => {
     const { data: evs } = await sb
       .from("engagement_events")
       .select("content_piece_id")
+      .eq("workspace_id", ws)
       .in("content_piece_id", pieceIds);
     for (const ev of evs ?? []) {
       const pid = ev.content_piece_id as string;

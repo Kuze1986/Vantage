@@ -1,6 +1,7 @@
 import type { Context, Next } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { getSupabaseAnon, getSupabaseAdmin } from "./supabase.js";
+import { resolveOrCreateWorkspace } from "./workspace.js";
 
 export type AuthedUser = { id: string; email?: string };
 
@@ -19,38 +20,43 @@ const OWNERSHIP_TTL_MS = 60_000;
 const ownershipCache = new Map<string, number>(); // key `${userId}:${workspaceId}` -> expiry ms
 
 /**
- * Workspace ownership guard. Runs after authMiddleware.
+ * Workspace scoping guard. Runs after authMiddleware and ALWAYS resolves a
+ * workspace for the request, exposed as c.get("workspaceId"). Every authed
+ * route relies on it — core pipeline tables are now workspace-scoped, so a
+ * request can never be left unscoped.
  *
- * When a request carries an `x-workspace-id` header, verify the authenticated
- * user actually owns that workspace before any route handler trusts it. Without
- * this, any logged-in user could read/write another tenant's workspace-scoped
- * data simply by changing the header (IDOR).
- *
- * Requests with no header are left alone — routes that need a workspace enforce
- * its presence themselves; routes on global tables don't need one.
+ * - If the request carries an `x-workspace-id` header, verify the authenticated
+ *   user actually owns that workspace (prevents IDOR — changing the header to
+ *   another tenant's id).
+ * - If the header is absent, fall back to the user's own (lazily provisioned)
+ *   workspace, mirroring GET /v1/workspaces/me.
  */
 export async function workspaceGuard(c: Context, next: Next) {
-  const workspaceId = c.req.header("x-workspace-id");
-  if (workspaceId) {
-    if (!UUID_RE.test(workspaceId)) {
+  const user = c.get("user");
+  const headerWs = c.req.header("x-workspace-id");
+
+  if (headerWs) {
+    if (!UUID_RE.test(headerWs)) {
       throw new HTTPException(403, { message: "Invalid workspace" });
     }
-    const user = c.get("user");
-    const key = `${user.id}:${workspaceId}`;
+    const key = `${user.id}:${headerWs}`;
     const cached = ownershipCache.get(key);
     if (!cached || cached < Date.now()) {
       const sb = getSupabaseAdmin();
       const { data, error } = await sb
         .from("workspaces")
         .select("id")
-        .eq("id", workspaceId)
+        .eq("id", headerWs)
         .eq("owner_id", user.id)
         .maybeSingle();
       if (error) throw new HTTPException(500, { message: error.message });
       if (!data) throw new HTTPException(403, { message: "You do not have access to this workspace" });
       ownershipCache.set(key, Date.now() + OWNERSHIP_TTL_MS);
     }
-    c.set("workspaceId", workspaceId);
+    c.set("workspaceId", headerWs);
+  } else {
+    // No header — scope to the user's default workspace (create on first use).
+    c.set("workspaceId", await resolveOrCreateWorkspace(user.id));
   }
   await next();
 }

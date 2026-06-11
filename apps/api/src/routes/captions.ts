@@ -24,9 +24,10 @@ captionsRoutes.post("/", async (c) => {
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
   const { prompt, channel, count = 3, tone } = parsed.data;
+  const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
 
-  const { data: voices } = await sb.from("brand_voice").select("*").limit(1);
+  const { data: voices } = await sb.from("brand_voice").select("*").eq("workspace_id", ws).limit(1);
   const voice = voices?.[0];
   if (!voice) throw new HTTPException(400, { message: "Configure brand voice first" });
 
@@ -38,6 +39,7 @@ captionsRoutes.post("/", async (c) => {
   });
 
   const captions = await generateCaptions({
+    workspace_id: ws,
     prompt,
     channel: channel as ChannelSlug,
     count,

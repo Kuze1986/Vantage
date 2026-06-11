@@ -64,6 +64,7 @@ webhooksRoutes.post("/x", async (c) => {
     "unknown";
 
   let contentPieceId: string | null = null;
+  let workspaceId: string | null = null;
   const tweetId =
     typeof (payload as { tweet_id?: string }).tweet_id === "string"
       ? (payload as { tweet_id: string }).tweet_id
@@ -74,11 +75,15 @@ webhooksRoutes.post("/x", async (c) => {
   if (tweetId) {
     const { data: piece } = await sb
       .from("content_pieces")
-      .select("id")
+      .select("id, workspace_id")
       .eq("external_post_id", tweetId)
       .maybeSingle();
     contentPieceId = piece?.id ?? null;
+    workspaceId = (piece?.workspace_id as string | undefined) ?? null;
   }
+
+  // Engagement events are workspace-scoped; skip if we can't attribute the piece.
+  if (!workspaceId) return c.json({ ok: true, skipped: "unmatched" });
 
   // ── 3A-5: Derive external_event_id for deduplication ────────────────────
   const externalEventId = tweetId
@@ -86,6 +91,7 @@ webhooksRoutes.post("/x", async (c) => {
     : null;
 
   const { error } = await sb.from("engagement_events").insert({
+    workspace_id:      workspaceId,
     content_piece_id:  contentPieceId,
     event_type:        eventType,
     event_payload:     payload,
@@ -110,11 +116,12 @@ webhooksRoutes.post("/x", async (c) => {
     event_type: "webhook_received",
     summary: `X webhook ${eventType}`,
     payload: { eventType, tweetId },
+    workspace_id: workspaceId,
   });
   // Growth OS — Loop A: engagement on a published piece.
   await recordGrowthEvent({
     loop: "acquisition", kind: engagementKind(eventType), channel: "x",
-    meta: { event_type: eventType, tweet_id: tweetId, content_piece_id: contentPieceId },
+    meta: { event_type: eventType, tweet_id: tweetId, content_piece_id: contentPieceId, workspace_id: workspaceId },
   });
 
   return c.json({ ok: true });
@@ -153,14 +160,18 @@ webhooksRoutes.post("/linkedin", async (c) => {
       : null;
 
   let contentPieceId: string | null = null;
+  let workspaceId: string | null = null;
   if (shareId) {
     const { data: piece } = await sb
       .from("content_pieces")
-      .select("id")
+      .select("id, workspace_id")
       .eq("external_post_id", shareId)
       .maybeSingle();
     contentPieceId = piece?.id ?? null;
+    workspaceId = (piece?.workspace_id as string | undefined) ?? null;
   }
+
+  if (!workspaceId) return c.json({ ok: true, skipped: "unmatched" });
 
   // 3A-5: external_event_id for deduplication
   const liEventId = typeof payload.eventId === "string" ? payload.eventId : null;
@@ -169,6 +180,7 @@ webhooksRoutes.post("/linkedin", async (c) => {
     : shareId ? `linkedin_${eventType}_${shareId}` : null;
 
   await sb.from("engagement_events").insert({
+    workspace_id:      workspaceId,
     content_piece_id:  contentPieceId,
     event_type:        eventType,
     event_payload:     payload,
@@ -181,11 +193,12 @@ webhooksRoutes.post("/linkedin", async (c) => {
     event_type: "webhook_received",
     summary: `LinkedIn webhook: ${eventType}`,
     payload: { eventType, shareId },
+    workspace_id: workspaceId,
   });
   // Growth OS — Loop A: engagement on a published piece.
   await recordGrowthEvent({
     loop: "acquisition", kind: engagementKind(eventType), channel: "linkedin",
-    meta: { event_type: eventType, share_id: shareId, content_piece_id: contentPieceId },
+    meta: { event_type: eventType, share_id: shareId, content_piece_id: contentPieceId, workspace_id: workspaceId },
   });
 
   return c.json({ ok: true });
@@ -208,19 +221,24 @@ webhooksRoutes.post("/reddit", async (c) => {
       : null;
 
   let contentPieceId: string | null = null;
+  let workspaceId: string | null = null;
   if (postId) {
     const { data: piece } = await sb
       .from("content_pieces")
-      .select("id")
+      .select("id, workspace_id")
       .eq("external_post_id", postId)
       .maybeSingle();
     contentPieceId = piece?.id ?? null;
+    workspaceId = (piece?.workspace_id as string | undefined) ?? null;
   }
+
+  if (!workspaceId) return c.json({ ok: true, skipped: "unmatched" });
 
   // 3A-5: external_event_id for deduplication
   const redditExternalId = postId ? `reddit_${eventType}_${postId}` : null;
 
   await sb.from("engagement_events").insert({
+    workspace_id:      workspaceId,
     content_piece_id:  contentPieceId,
     event_type:        eventType,
     event_payload:     payload,
@@ -233,11 +251,12 @@ webhooksRoutes.post("/reddit", async (c) => {
     event_type: "webhook_received",
     summary: `Reddit event: ${eventType}`,
     payload: { eventType, postId },
+    workspace_id: workspaceId,
   });
   // Growth OS — Loop A: engagement on a published piece.
   await recordGrowthEvent({
     loop: "acquisition", kind: engagementKind(eventType), channel: "reddit",
-    meta: { event_type: eventType, post_id: postId, content_piece_id: contentPieceId },
+    meta: { event_type: eventType, post_id: postId, content_piece_id: contentPieceId, workspace_id: workspaceId },
   });
 
   return c.json({ ok: true });
@@ -266,8 +285,28 @@ webhooksRoutes.post("/email", async (c) => {
   const sb = getSupabaseAdmin();
   const eventType = typeof payload.type === "string" ? payload.type : "email_event";
 
+  // Attribute to a workspace via Resend's email_id → our external_post_id.
+  const emailId =
+    typeof (payload as { data?: { email_id?: string } }).data?.email_id === "string"
+      ? (payload as { data: { email_id: string } }).data.email_id
+      : null;
+  let contentPieceId: string | null = null;
+  let workspaceId: string | null = null;
+  if (emailId) {
+    const { data: piece } = await sb
+      .from("content_pieces")
+      .select("id, workspace_id")
+      .eq("external_post_id", emailId)
+      .maybeSingle();
+    contentPieceId = piece?.id ?? null;
+    workspaceId = (piece?.workspace_id as string | undefined) ?? null;
+  }
+
+  if (!workspaceId) return c.json({ ok: true, skipped: "unmatched" });
+
   await sb.from("engagement_events").insert({
-    content_piece_id: null, // email events don't map 1:1 to pieces easily
+    workspace_id:     workspaceId,
+    content_piece_id: contentPieceId,
     event_type: eventType,
     event_payload: payload,
     occurred_at: new Date().toISOString(),
@@ -278,6 +317,7 @@ webhooksRoutes.post("/email", async (c) => {
     event_type: "webhook_received",
     summary: `Resend webhook: ${eventType}`,
     payload: { eventType },
+    workspace_id: workspaceId,
   });
 
   return c.json({ ok: true });

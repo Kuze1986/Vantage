@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { getSupabaseAdmin } from '../lib/supabase.js';
+import { seedDefaultChannels } from '../lib/workspace.js';
 
 export const workspaceRoutes = new Hono();
 
@@ -43,6 +44,9 @@ workspaceRoutes.get('/me', async (c) => {
   if (insertError) {
     throw new HTTPException(500, { message: insertError.message });
   }
+
+  // Seed the seven default channel rows for the new tenant.
+  await seedDefaultChannels(sb, created.id as string);
 
   return c.json(created, 201);
 });

@@ -23,10 +23,10 @@ const DEFAULTS: PipelineSettings = {
   evergreen_recycle_days: 90,
 };
 
-export async function loadSettings(): Promise<PipelineSettings> {
+export async function loadSettings(workspaceId: string): Promise<PipelineSettings> {
   try {
     const sb = getSupabaseAdmin();
-    const { data } = await sb.from("settings").select("key, value");
+    const { data } = await sb.from("settings").select("key, value").eq("workspace_id", workspaceId);
     if (!data?.length) return { ...DEFAULTS };
 
     const map: Record<string, unknown> = {};
@@ -45,14 +45,15 @@ export async function loadSettings(): Promise<PipelineSettings> {
   }
 }
 
-export async function patchSettings(patch: Partial<PipelineSettings>): Promise<void> {
+export async function patchSettings(workspaceId: string, patch: Partial<PipelineSettings>): Promise<void> {
   const sb = getSupabaseAdmin();
   const rows = Object.entries(patch).map(([key, value]) => ({
+    workspace_id: workspaceId,
     key,
     value: value as unknown,
     updated_at: new Date().toISOString(),
   }));
   for (const row of rows) {
-    await sb.from("settings").upsert(row, { onConflict: "key" });
+    await sb.from("settings").upsert(row, { onConflict: "workspace_id,key" });
   }
 }

@@ -40,12 +40,13 @@ function inferVertical(text: string): string | null {
 }
 
 // ── Deduplication ─────────────────────────────────────────────────────────────
-async function isDuplicate(sourceRef: string): Promise<boolean> {
+async function isDuplicate(workspaceId: string, sourceRef: string): Promise<boolean> {
   const sb = getSupabaseAdmin();
   const cutoff = new Date(Date.now() - DEDUP_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const { data } = await sb
     .from("topics")
     .select("id")
+    .eq("workspace_id", workspaceId)
     .eq("source_product", "pulse")
     .eq("source_ref", sourceRef)
     .gte("created_at", cutoff)
@@ -209,6 +210,7 @@ async function fetchNewsSignals(): Promise<PulseSignal[]> {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 export async function refreshTopicsFromPulse(
+  workspaceId: string,
   subreddits: string[] = [],
 ): Promise<{ inserted: number; scanned: number }> {
   const [hn, reddit, news] = await Promise.all([
@@ -226,9 +228,10 @@ export async function refreshTopicsFromPulse(
 
   for (const signal of all) {
     if (signal.topic_text.length < 15) continue;
-    if (await isDuplicate(signal.source_ref)) continue;
+    if (await isDuplicate(workspaceId, signal.source_ref)) continue;
 
     const { error } = await sb.from("topics").insert({
+      workspace_id:    workspaceId,
       source_product:  "pulse",
       source_ref:      signal.source_ref,
       vertical:        signal.vertical,
@@ -247,6 +250,7 @@ export async function refreshTopicsFromPulse(
     event_type:  "pulse_scan_complete",
     summary:     `Pulse scan: ${inserted} inserted, ${all.length} scanned (${activeSources.join(", ")})`,
     payload:     { scanned: all.length, inserted, sources: activeSources, subreddits },
+    workspace_id: workspaceId,
   });
 
   return { inserted, scanned: all.length };

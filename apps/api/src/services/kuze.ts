@@ -22,13 +22,13 @@ function extractJson(text: string): Record<string, unknown> {
   return JSON.parse(trimmed.slice(start, end + 1)) as Record<string, unknown>;
 }
 
-async function loadWeights(channel: ChannelSlug): Promise<string> {
+async function loadWeights(workspaceId: string, channel: ChannelSlug): Promise<string> {
   try {
     const sb = getSupabaseAdmin();
     const { data } = await sb
-      
       .from("generation_weights")
       .select("pattern_key, weight, sample_size")
+      .eq("workspace_id", workspaceId)
       .eq("channel_slug", channel)
       .gte("weight", 1.1)
       .order("weight", { ascending: false })
@@ -43,6 +43,7 @@ async function loadWeights(channel: ChannelSlug): Promise<string> {
 }
 
 export interface GenerateContentInput {
+  workspace_id: string;
   channel: ChannelSlug;
   topic_text: string;
   vertical: string | null;
@@ -59,7 +60,7 @@ export interface GenerateContentOutput {
 
 export async function generateContent(input: GenerateContentInput): Promise<GenerateContentOutput> {
   const format  = channelFormatMap[input.channel] as ContentFormat;
-  const weights = await loadWeights(input.channel);
+  const weights = await loadWeights(input.workspace_id, input.channel);
   const client  = getClient();
 
   const msg = await client.messages.create({
@@ -105,6 +106,7 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
 
 // ── Caption generation (AI Caption Studio — 3C-2) ─────────────────────────────
 export interface GenerateCaptionsInput {
+  workspace_id: string;
   prompt: string;
   channel: ChannelSlug;
   count?: number;
@@ -113,7 +115,7 @@ export interface GenerateCaptionsInput {
 }
 
 export async function generateCaptions(input: GenerateCaptionsInput): Promise<string[]> {
-  const weights = await loadWeights(input.channel);
+  const weights = await loadWeights(input.workspace_id, input.channel);
   const client  = getClient();
 
   const channelLabel = input.channel.toUpperCase();
@@ -156,6 +158,7 @@ Generate ${countHint} caption variants for ${channelLabel}. Return a JSON array 
 
 // ── Legacy shim ────────────────────────────────────────────────────────────────
 export async function generateTweet(params: {
+  workspace_id: string;
   topic_text: string;
   vertical: string | null;
   brand_voice: string;

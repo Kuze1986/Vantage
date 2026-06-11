@@ -54,6 +54,7 @@ const scriptStepSchema = z.object({
 });
 
 const jobSchema = z.object({
+  workspace_id:     z.string().uuid(),
   content_piece_id: z.string().uuid().optional(),
   target_format:    z.enum(["tiktok", "linkedin", "instagram"]),
   url:              z.string().url(),
@@ -70,7 +71,7 @@ app.post("/jobs", async (c) => {
   const parsed = jobSchema.safeParse(json);
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
-  const { content_piece_id, target_format, url, script, music_track_id, voice_id } = parsed.data;
+  const { workspace_id, content_piece_id, target_format, url, script, music_track_id, voice_id } = parsed.data;
 
   const jobId = randomUUID();
   const sb    = getSupabase();
@@ -78,6 +79,7 @@ app.post("/jobs", async (c) => {
   // Persist job record
   const { error } = await sb.from("demoforge_jobs").insert({
     id:               jobId,
+    workspace_id,
     content_piece_id: content_piece_id ?? null,
     status:           "pending",
     target_format,

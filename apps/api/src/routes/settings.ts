@@ -7,7 +7,7 @@ export const settingsRoutes = new Hono();
 
 // GET /v1/settings — return all current settings
 settingsRoutes.get("/", async (c) => {
-  const settings = await loadSettings();
+  const settings = await loadSettings(c.get("workspaceId"));
   return c.json({ settings });
 });
 
@@ -24,7 +24,8 @@ settingsRoutes.patch("/", async (c) => {
   const parsed = patchSchema.safeParse(json);
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
-  await patchSettings(parsed.data);
-  const settings = await loadSettings();
+  const ws = c.get("workspaceId");
+  await patchSettings(ws, parsed.data);
+  const settings = await loadSettings(ws);
   return c.json({ ok: true, settings });
 });

@@ -29,15 +29,17 @@ generateRoutes.post("/:channel", async (c) => {
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
   const { topic_id, subreddit, generate_image, variants = 1 } = parsed.data;
+  const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
 
   const { data: topic, error: tErr } = await sb
     .from("topics")
     .select("id, topic_text, vertical, used_at")
+    .eq("workspace_id", ws)
     .eq("id", topic_id).single();
   if (tErr || !topic) throw new HTTPException(404, { message: "Topic not found" });
 
-  const { data: voices } = await sb.from("brand_voice").select("*").limit(1);
+  const { data: voices } = await sb.from("brand_voice").select("*").eq("workspace_id", ws).limit(1);
   const voice = voices?.[0];
   if (!voice) throw new HTTPException(400, { message: "Configure brand voice first" });
 
@@ -56,6 +58,7 @@ generateRoutes.post("/:channel", async (c) => {
     let gen: Awaited<ReturnType<typeof generateContent>>;
     try {
       gen = await generateContent({
+        workspace_id: ws,
         channel,
         topic_text:  topic.topic_text as string,
         vertical:    (topic.vertical as string | null) ?? null,
@@ -69,6 +72,7 @@ generateRoutes.post("/:channel", async (c) => {
         event_type: "generate_error",
         summary: msg,
         payload: { topic_id, channel, variant_index: i },
+        workspace_id: ws,
       });
       // On single-variant requests propagate immediately; on multi-variant continue
       if (variants === 1) throw new HTTPException(500, { message: msg });
@@ -79,6 +83,7 @@ generateRoutes.post("/:channel", async (c) => {
     const { data: piece, error: pErr } = await sb
       .from("content_pieces")
       .insert({
+        workspace_id:     ws,
         topic_id,
         channel_slug:     channel,
         format:           gen.format,
@@ -95,6 +100,7 @@ generateRoutes.post("/:channel", async (c) => {
         event_type: "insert_error",
         summary: pErr?.message ?? "unknown",
         payload: { topic_id, channel },
+        workspace_id: ws,
       });
       if (variants === 1) throw new HTTPException(500, { message: pErr?.message ?? "insert failed" });
       continue;
@@ -124,6 +130,7 @@ generateRoutes.post("/:channel", async (c) => {
           event_type: "image_generate_error",
           summary: imgMsg,
           payload: { content_piece_id: piece.id, channel },
+          workspace_id: ws,
         });
         // Non-fatal — piece continues without image
       }
@@ -134,7 +141,7 @@ generateRoutes.post("/:channel", async (c) => {
         content_payload: taggedPayload,
         ...(imageUrl ? { image_url: imageUrl } : {}),
       })
-      .eq("id", piece.id);
+      .eq("workspace_id", ws).eq("id", piece.id);
 
     createdPieces.push({ content_piece_id: piece.id, format: gen.format, status: "auditing" });
 
@@ -148,12 +155,13 @@ generateRoutes.post("/:channel", async (c) => {
         ...(imageUrl ? { has_image: true } : {}),
       },
       drill_uri: `/queue?piece=${piece.id}`,
+      workspace_id: ws,
     });
   }
 
   if (!topic.used_at) {
     await sb.from("topics")
-      .update({ used_at: new Date().toISOString() }).eq("id", topic_id);
+      .update({ used_at: new Date().toISOString() }).eq("workspace_id", ws).eq("id", topic_id);
   }
 
   if (createdPieces.length === 0) {

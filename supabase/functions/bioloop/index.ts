@@ -105,10 +105,16 @@ function getClient() {
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
-async function loadSettings(sb: ReturnType<typeof getClient>) {
+async function listWorkspaceIds(sb: ReturnType<typeof getClient>): Promise<string[]> {
+  const { data } = await sb.from("workspaces").select("id");
+  return (data ?? []).map((w) => w.id as string);
+}
+
+async function loadSettings(sb: ReturnType<typeof getClient>, workspaceId: string) {
   const { data } = await sb
     .from("settings")
     .select("key, value")
+    .eq("workspace_id", workspaceId)
     .in("key", ["bioloop_enabled", "evergreen_threshold", "evergreen_recycle_days"]);
 
   const map: Record<string, string> = {};
@@ -125,6 +131,7 @@ async function loadSettings(sb: ReturnType<typeof getClient>) {
 
 async function logActivity(
   sb: ReturnType<typeof getClient>,
+  workspaceId: string,
   event_type: string,
   summary: string,
   payload: Record<string, unknown>,
@@ -132,6 +139,7 @@ async function logActivity(
   await sb.from("activity_events").insert({
     source: "bioloop", source_type: "system",
     event_type, summary, payload,
+    workspace_id: workspaceId,
     occurred_at: new Date().toISOString(),
   });
 }
@@ -140,6 +148,7 @@ async function logActivity(
 
 async function runBioLoop(
   sb: ReturnType<typeof getClient>,
+  workspaceId: string,
 ): Promise<{ analyzed: number; updated: number }> {
   const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -147,13 +156,14 @@ async function runBioLoop(
   const { data: pieces, error: pErr } = await sb
     .from("content_pieces")
     .select("id, channel_slug, format, content_payload")
+    .eq("workspace_id", workspaceId)
     .eq("status", "published")
     .gte("published_at", since7d);
 
   if (pErr) throw new Error(`BioLoop DB error (pieces): ${pErr.message}`);
 
   if (!pieces?.length) {
-    await logActivity(sb, "bioloop_skipped",
+    await logActivity(sb, workspaceId, "bioloop_skipped",
       "BioLoop skipped — no published pieces in last 7 days", {});
     return { analyzed: 0, updated: 0 };
   }
@@ -163,6 +173,7 @@ async function runBioLoop(
   const { data: events } = await sb
     .from("engagement_events")
     .select("content_piece_id")
+    .eq("workspace_id", workspaceId)
     .in("content_piece_id", pieceIds);
 
   const engagementCount: Record<string, number> = {};
@@ -193,7 +204,8 @@ async function runBioLoop(
   // 4. Load existing weights for EWMA
   const { data: existingWeights } = await sb
     .from("generation_weights")
-    .select("channel_slug, pattern_key, weight");
+    .select("channel_slug, pattern_key, weight")
+    .eq("workspace_id", workspaceId);
 
   const existingMap: Record<string, number> = {};
   for (const row of existingWeights ?? []) {
@@ -223,18 +235,19 @@ async function runBioLoop(
       const { error: uErr } = await sb
         .from("generation_weights")
         .upsert({
+          workspace_id: workspaceId,
           channel_slug: channel,
           pattern_key:  patternKey,
           weight:       parseFloat(smoothed.toFixed(4)),
           sample_size:  stat.total,
           last_updated: new Date().toISOString(),
-        }, { onConflict: "channel_slug,pattern_key" });
+        }, { onConflict: "workspace_id,channel_slug,pattern_key" });
 
       if (!uErr) updatedCount++;
     }
   }
 
-  await logActivity(sb, "bioloop_complete",
+  await logActivity(sb, workspaceId, "bioloop_complete",
     `BioLoop: analyzed ${pieces.length} pieces, updated ${updatedCount} pattern weights`,
     { analyzed: pieces.length, updated: updatedCount },
   );
@@ -247,6 +260,7 @@ async function runBioLoop(
 
 async function identifyEvergreenTopics(
   sb: ReturnType<typeof getClient>,
+  workspaceId: string,
   evergreen_threshold: number,
   evergreen_recycle_days: number,
 ): Promise<{ scanned: number; marked: number }> {
@@ -255,6 +269,7 @@ async function identifyEvergreenTopics(
   const { data: pieces, error } = await sb
     .from("content_pieces")
     .select("id, topic_id")
+    .eq("workspace_id", workspaceId)
     .eq("status", "published")
     .gte("published_at", since90d)
     .not("topic_id", "is", null);
@@ -265,6 +280,7 @@ async function identifyEvergreenTopics(
   const { data: engagements } = await sb
     .from("engagement_events")
     .select("content_piece_id")
+    .eq("workspace_id", workspaceId)
     .in("content_piece_id", pieceIds);
 
   const engageCount: Record<string, number> = {};
@@ -287,13 +303,13 @@ async function identifyEvergreenTopics(
   for (const [topicId, totalEng] of Object.entries(topicEngagement)) {
     if (totalEng >= evergreen_threshold) {
       await sb.from("topics").update({ recycle_after: recycleAfter, used_at: null })
-        .eq("id", topicId);
+        .eq("workspace_id", workspaceId).eq("id", topicId);
       marked++;
     }
   }
 
   if (marked > 0) {
-    await logActivity(sb, "evergreen_recycled",
+    await logActivity(sb, workspaceId, "evergreen_recycled",
       `Evergreen: marked ${marked} high-performing topics for recycling in ${evergreen_recycle_days}d`,
       { scanned: pieces.length, marked, threshold: evergreen_threshold },
     );
@@ -312,27 +328,35 @@ Deno.serve(async (req: Request) => {
 
   try {
     const sb = getClient();
-    const settings = await loadSettings(sb);
+    const workspaceIds = await listWorkspaceIds(sb);
 
-    if (!settings.bioloop_enabled) {
-      console.log("[bioloop] skipped — disabled via settings");
-      return Response.json({ ok: true, skipped: true, reason: "bioloop_disabled" });
+    // Run the daily cycle once per workspace, each with its own settings.
+    const results: Array<{
+      workspace_id: string;
+      skipped?: boolean;
+      bioloop?: { analyzed: number; updated: number };
+      evergreen?: { scanned: number; marked: number };
+    }> = [];
+
+    for (const ws of workspaceIds) {
+      const settings = await loadSettings(sb, ws);
+      if (!settings.bioloop_enabled) {
+        results.push({ workspace_id: ws, skipped: true });
+        continue;
+      }
+      const [bioloopResult, evergreenResult] = await Promise.all([
+        runBioLoop(sb, ws),
+        identifyEvergreenTopics(
+          sb,
+          ws,
+          settings.evergreen_threshold,
+          settings.evergreen_recycle_days,
+        ),
+      ]);
+      results.push({ workspace_id: ws, bioloop: bioloopResult, evergreen: evergreenResult });
     }
 
-    const [bioloopResult, evergreenResult] = await Promise.all([
-      runBioLoop(sb),
-      identifyEvergreenTopics(
-        sb,
-        settings.evergreen_threshold,
-        settings.evergreen_recycle_days,
-      ),
-    ]);
-
-    const body = {
-      ok: true,
-      bioloop:   bioloopResult,
-      evergreen: evergreenResult,
-    };
+    const body = { ok: true, workspaces: results.length, results };
 
     console.log("[bioloop] edge function complete", JSON.stringify(body));
     return Response.json(body);

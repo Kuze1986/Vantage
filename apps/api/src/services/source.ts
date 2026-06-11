@@ -26,13 +26,13 @@ function rowVertical(row: ShiftRow): string | null {
 }
 
 /** Check if a source_ref was already ingested within the dedup window. */
-async function isDuplicate(sourceProduct: string, sourceRef: string, dedupDays: number): Promise<boolean> {
+async function isDuplicate(workspaceId: string, sourceProduct: string, sourceRef: string, dedupDays: number): Promise<boolean> {
   const sb = getSupabaseAdmin();
   const cutoff = new Date(Date.now() - dedupDays * 24 * 60 * 60 * 1000).toISOString();
   const { data } = await sb
-    
     .from("topics")
     .select("id")
+    .eq("workspace_id", workspaceId)
     .eq("source_product", sourceProduct)
     .eq("source_ref", sourceRef)
     .gte("created_at", cutoff)
@@ -41,7 +41,7 @@ async function isDuplicate(sourceProduct: string, sourceRef: string, dedupDays: 
   return !!data?.id;
 }
 
-async function insertTopic(params: {
+async function insertTopic(workspaceId: string, params: {
   source_product: string;
   source_ref: string | null;
   vertical: string | null;
@@ -51,6 +51,7 @@ async function insertTopic(params: {
 }): Promise<boolean> {
   const sb = getSupabaseAdmin();
   const { error } = await sb.from("topics").insert({
+    workspace_id:    workspaceId,
     source_product:  params.source_product,
     source_ref:      params.source_ref,
     vertical:        params.vertical,
@@ -72,8 +73,8 @@ async function insertTopic(params: {
 }
 
 /** Pull topics from shift.questions — respects active_verticals and dedup_days settings. */
-export async function refreshTopicsFromShift(): Promise<{ inserted: number; scanned: number }> {
-  const { dedup_days, active_verticals } = await loadSettings();
+export async function refreshTopicsFromShift(workspaceId: string): Promise<{ inserted: number; scanned: number }> {
+  const { dedup_days, active_verticals } = await loadSettings(workspaceId);
   const { data: rows, error } = await getSupabaseForSchema("shift").from("questions").select("*").limit(500);
 
   if (error) {
@@ -100,9 +101,9 @@ export async function refreshTopicsFromShift(): Promise<{ inserted: number; scan
     // Filter to active verticals if configured
     if (active_verticals.length > 0 && vertical && !active_verticals.includes(vertical)) continue;
 
-    if (sourceRef && await isDuplicate("shift", sourceRef, dedup_days)) continue;
+    if (sourceRef && await isDuplicate(workspaceId, "shift", sourceRef, dedup_days)) continue;
 
-    const ok = await insertTopic({
+    const ok = await insertTopic(workspaceId, {
       source_product:  "shift",
       source_ref:      sourceRef,
       vertical,
@@ -125,8 +126,8 @@ export async function refreshTopicsFromShift(): Promise<{ inserted: number; scan
 }
 
 /** Pull topics from scripta.lessons — respects scripta_enabled and dedup_days settings. */
-export async function refreshTopicsFromScripta(): Promise<{ inserted: number; scanned: number }> {
-  const { dedup_days, scripta_enabled } = await loadSettings();
+export async function refreshTopicsFromScripta(workspaceId: string): Promise<{ inserted: number; scanned: number }> {
+  const { dedup_days, scripta_enabled } = await loadSettings(workspaceId);
   if (!scripta_enabled) {
     return { inserted: 0, scanned: 0 };
   }
@@ -164,9 +165,9 @@ export async function refreshTopicsFromScripta(): Promise<{ inserted: number; sc
     const vertical  = rowVertical(row);
 
     if (topicText.length < 15) continue;
-    if (sourceRef && await isDuplicate("scripta", sourceRef, dedup_days)) continue;
+    if (sourceRef && await isDuplicate(workspaceId, "scripta", sourceRef, dedup_days)) continue;
 
-    const ok = await insertTopic({
+    const ok = await insertTopic(workspaceId, {
       source_product:  "scripta",
       source_ref:      sourceRef,
       vertical,
@@ -189,19 +190,19 @@ export async function refreshTopicsFromScripta(): Promise<{ inserted: number; sc
 }
 
 /** Combined refresh: Shift + Scripta. */
-export async function refreshAllSources(): Promise<{ shift: { inserted: number; scanned: number }; scripta: { inserted: number; scanned: number } }> {
+export async function refreshAllSources(workspaceId: string): Promise<{ shift: { inserted: number; scanned: number }; scripta: { inserted: number; scanned: number } }> {
   const [shift, scripta] = await Promise.all([
-    refreshTopicsFromShift().catch(async (e) => {
+    refreshTopicsFromShift(workspaceId).catch(async (e) => {
       const msg = e instanceof Error ? e.message : String(e);
-      await logActivity({ source: "source", source_type: "system", event_type: "shift_pull_error", summary: msg, payload: {} });
+      await logActivity({ source: "source", source_type: "system", event_type: "shift_pull_error", summary: msg, payload: {}, workspace_id: workspaceId });
       return { inserted: 0, scanned: 0 };
     }),
-    refreshTopicsFromScripta().catch(async () => ({ inserted: 0, scanned: 0 })),
+    refreshTopicsFromScripta(workspaceId).catch(async () => ({ inserted: 0, scanned: 0 })),
   ]);
   return { shift, scripta };
 }
 
-export async function listNextTopics(limit: number): Promise<{
+export async function listNextTopics(workspaceId: string, limit: number): Promise<{
   id: string;
   topic_text: string;
   vertical: string | null;
@@ -218,6 +219,7 @@ export async function listNextTopics(limit: number): Promise<{
   const { data, error } = await sb
     .from("topics")
     .select("id, topic_text, vertical, priority, source_ref, source_product, recycle_after")
+    .eq("workspace_id", workspaceId)
     .or(`used_at.is.null,recycle_after.lte.${now}`)
     .order("priority", { ascending: false })
     .order("created_at", { ascending: false })
@@ -231,9 +233,9 @@ export async function listNextTopics(limit: number): Promise<{
 }
 
 /** Pick the single best unused topic. Returns null if none available. */
-export async function pickNextTopic(): Promise<{
+export async function pickNextTopic(workspaceId: string): Promise<{
   id: string; topic_text: string; vertical: string | null;
 } | null> {
-  const topics = await listNextTopics(1);
+  const topics = await listNextTopics(workspaceId, 1);
   return topics[0] ?? null;
 }

@@ -36,13 +36,14 @@ type RedditListingResponse = {
   };
 };
 
-export async function pollRedditEngagement(): Promise<{ polled: number; inserted: number }> {
+export async function pollRedditEngagement(workspaceId: string): Promise<{ polled: number; inserted: number }> {
   const sb = getSupabaseAdmin();
 
   // Load all published Reddit pieces with an external_post_id
   const { data: pieces, error } = await sb
     .from("content_pieces")
     .select("id, external_post_id")
+    .eq("workspace_id", workspaceId)
     .eq("channel_slug", "reddit")
     .eq("status", "published")
     .not("external_post_id", "is", null);
@@ -107,6 +108,7 @@ export async function pollRedditEngagement(): Promise<{ polled: number; inserted
       // Insert one "score" event + one "comment" event per poll — deduplicated by hour
       const { error: insErr } = await sb.from("engagement_events").insert([
         {
+          workspace_id:      workspaceId,
           content_piece_id:  contentPieceId,
           event_type:        "reddit_score",
           event_payload:     eventPayload,
@@ -114,6 +116,7 @@ export async function pollRedditEngagement(): Promise<{ polled: number; inserted
           occurred_at:       new Date().toISOString(),
         },
         {
+          workspace_id:      workspaceId,
           content_piece_id:  contentPieceId,
           event_type:        "reddit_comment_count",
           event_payload:     { post_id: postId, num_comments: d.num_comments ?? 0, polled_at: new Date().toISOString() },
@@ -138,6 +141,7 @@ export async function pollRedditEngagement(): Promise<{ polled: number; inserted
       event_type:  "poll_complete",
       summary:     `Reddit engagement poll: ${totalInserted} events from ${postIds.length} posts`,
       payload:     { polled: postIds.length, inserted: totalInserted },
+      workspace_id: workspaceId,
     });
   }
 

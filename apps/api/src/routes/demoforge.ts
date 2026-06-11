@@ -75,13 +75,14 @@ const jobBodySchema = z.object({
 
 // POST /v1/demoforge/jobs — create a video job
 demoforgeRoutes.post("/jobs", async (c) => {
+  const ws = c.get("workspaceId");
   const json   = await c.req.json().catch(() => ({}));
   const parsed = jobBodySchema.safeParse(json);
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
   const result = await demoFetch("/jobs", {
     method: "POST",
-    body:   JSON.stringify(parsed.data),
+    body:   JSON.stringify({ ...parsed.data, workspace_id: ws }),
   }) as { job_id: string; status: string };
 
   await logActivity({
@@ -89,6 +90,7 @@ demoforgeRoutes.post("/jobs", async (c) => {
     event_type: "demoforge_job_created",
     summary: `DemoForge job created for ${parsed.data.target_format}`,
     payload: { job_id: result.job_id, target_format: parsed.data.target_format },
+    workspace_id: ws,
   });
 
   return c.json(result, 202);
@@ -103,11 +105,13 @@ demoforgeRoutes.get("/jobs/:id", async (c) => {
 
 // GET /v1/demoforge/jobs — list recent jobs from the DB (no DemoForge call needed)
 demoforgeRoutes.get("/jobs", async (c) => {
+  const ws = c.get("workspaceId");
   const limit = Math.min(Number(c.req.query("limit") ?? "50"), 200);
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
     .from("demoforge_jobs")
     .select("id, content_piece_id, status, target_format, output_url, error_message, created_at, updated_at")
+    .eq("workspace_id", ws)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw new HTTPException(500, { message: error.message });

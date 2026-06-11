@@ -620,7 +620,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
   }
 
   // Brand voice for generation (first row, like the cadence engine).
-  const { data: voices } = await sb.from('brand_voice').select('*').limit(1);
+  const { data: voices } = await sb.from('brand_voice').select('*').eq('workspace_id', workspaceId).limit(1);
   const voice = voices?.[0];
   const brandVoiceStr = voice
     ? JSON.stringify({
@@ -646,6 +646,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
       const { data: topic, error: topicErr } = await sb
         .from('topics')
         .insert({
+          workspace_id: workspaceId,
           source_product: 'campaign',
           source_ref: campaignId,
           vertical: null,
@@ -657,6 +658,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
       if (topicErr || !topic) throw new Error(topicErr?.message ?? 'Failed to create topic');
 
       const gen = await generateContent({
+        workspace_id: workspaceId,
         channel,
         topic_text: `${idea.title}\n\n${idea.outline ?? ''}`.trim(),
         vertical: null,
@@ -679,6 +681,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
       const { data: piece, error: pieceErr } = await sb
         .from('content_pieces')
         .insert({
+          workspace_id: workspaceId,
           topic_id: topic.id,
           channel_slug: channel,
           format: gen.format,

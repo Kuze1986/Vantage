@@ -95,7 +95,7 @@ function ewma(newWeight: number, existingWeight: number | null): number {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export async function runBioLoop(): Promise<{ analyzed: number; updated: number }> {
+export async function runBioLoop(workspaceId: string): Promise<{ analyzed: number; updated: number }> {
   const sb     = getSupabaseAdmin();
   const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -103,6 +103,7 @@ export async function runBioLoop(): Promise<{ analyzed: number; updated: number 
   const { data: pieces, error: pErr } = await sb
     .from("content_pieces")
     .select("id, channel_slug, format, content_payload")
+    .eq("workspace_id", workspaceId)
     .eq("status", "published")
     .gte("published_at", since7d);
 
@@ -114,6 +115,7 @@ export async function runBioLoop(): Promise<{ analyzed: number; updated: number 
       event_type: "bioloop_skipped",
       summary: "BioLoop skipped — no published pieces in last 7 days",
       payload: {},
+      workspace_id: workspaceId,
     });
     return { analyzed: 0, updated: 0 };
   }
@@ -123,6 +125,7 @@ export async function runBioLoop(): Promise<{ analyzed: number; updated: number 
   const { data: events } = await sb
     .from("engagement_events")
     .select("content_piece_id")
+    .eq("workspace_id", workspaceId)
     .in("content_piece_id", pieceIds);
 
   const engagementCount: Record<string, number> = {};
@@ -156,7 +159,8 @@ export async function runBioLoop(): Promise<{ analyzed: number; updated: number 
   // 4. Load existing weights for EWMA
   const { data: existingWeights } = await sb
     .from("generation_weights")
-    .select("channel_slug, pattern_key, weight");
+    .select("channel_slug, pattern_key, weight")
+    .eq("workspace_id", workspaceId);
 
   const existingMap: Record<string, number> = {};
   for (const row of existingWeights ?? []) {
@@ -187,12 +191,13 @@ export async function runBioLoop(): Promise<{ analyzed: number; updated: number 
       const { error: uErr } = await sb
         .from("generation_weights")
         .upsert({
+          workspace_id: workspaceId,
           channel_slug: channel,
           pattern_key:  patternKey,
           weight:       parseFloat(smoothed.toFixed(4)),
           sample_size:  stat.total,
           last_updated: new Date().toISOString(),
-        }, { onConflict: "channel_slug,pattern_key" });
+        }, { onConflict: "workspace_id,channel_slug,pattern_key" });
 
       if (!uErr) updatedCount++;
     }
@@ -203,6 +208,7 @@ export async function runBioLoop(): Promise<{ analyzed: number; updated: number 
     event_type: "bioloop_complete",
     summary: `BioLoop: analyzed ${pieces.length} pieces, updated ${updatedCount} pattern weights`,
     payload: { analyzed: pieces.length, updated: updatedCount },
+    workspace_id: workspaceId,
   });
 
   console.log(`[bioloop] analyzed=${pieces.length} updated=${updatedCount}`);
@@ -216,15 +222,16 @@ export async function runBioLoop(): Promise<{ analyzed: number; updated: number 
  * in the last 90 days have their recycle_after set and used_at cleared,
  * making them eligible for fresh generation after the recycle window.
  */
-export async function identifyEvergreenTopics(): Promise<{ scanned: number; marked: number }> {
+export async function identifyEvergreenTopics(workspaceId: string): Promise<{ scanned: number; marked: number }> {
   const sb = getSupabaseAdmin();
-  const { evergreen_threshold, evergreen_recycle_days } = await loadSettings();
+  const { evergreen_threshold, evergreen_recycle_days } = await loadSettings(workspaceId);
   const since90d = new Date(Date.now() - 90 * 24 * 60 * 60_000).toISOString();
 
   // Load published pieces in last 90d that have a topic_id
   const { data: pieces, error } = await sb
     .from("content_pieces")
     .select("id, topic_id")
+    .eq("workspace_id", workspaceId)
     .eq("status", "published")
     .gte("published_at", since90d)
     .not("topic_id", "is", null);
@@ -236,6 +243,7 @@ export async function identifyEvergreenTopics(): Promise<{ scanned: number; mark
   const { data: engagements } = await sb
     .from("engagement_events")
     .select("content_piece_id")
+    .eq("workspace_id", workspaceId)
     .in("content_piece_id", pieceIds);
 
   const engageCount: Record<string, number> = {};
@@ -261,7 +269,7 @@ export async function identifyEvergreenTopics(): Promise<{ scanned: number; mark
       await sb.from("topics").update({
         recycle_after: recycleAfter,
         used_at:       null, // reset so it can be picked again after the recycle window
-      }).eq("id", topicId);
+      }).eq("workspace_id", workspaceId).eq("id", topicId);
       marked++;
     }
   }
@@ -272,6 +280,7 @@ export async function identifyEvergreenTopics(): Promise<{ scanned: number; mark
       event_type: "evergreen_recycled",
       summary: `Evergreen: marked ${marked} high-performing topics for recycling in ${evergreen_recycle_days}d`,
       payload: { scanned: pieces.length, marked, threshold: evergreen_threshold },
+      workspace_id: workspaceId,
     });
   }
 

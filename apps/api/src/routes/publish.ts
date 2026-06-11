@@ -26,11 +26,13 @@ publishRoutes.post("/:channel", async (c) => {
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
   const { content_piece_id, external_post_url } = parsed.data;
+  const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
 
   const { data: piece, error } = await sb
     .from("content_pieces")
     .select("id, channel_slug, format, content_payload, status")
+    .eq("workspace_id", ws)
     .eq("id", content_piece_id).single();
   if (error || !piece) throw new HTTPException(404, { message: "Not found" });
   if (piece.status !== "approved" && piece.status !== "queued") {
@@ -53,17 +55,18 @@ publishRoutes.post("/:channel", async (c) => {
       published_at:     now,
       external_post_id: external_post_url,
       updated_at:       now,
-    }).eq("id", content_piece_id);
+    }).eq("workspace_id", ws).eq("id", content_piece_id);
     await logActivity({
       source: `adapter:${slug}`, source_type: "adapter",
       event_type: "published_manual",
       summary: `Manual publish recorded for ${slug} piece ${content_piece_id}`,
       payload: { content_piece_id, external_post_url, channel: slug },
+      workspace_id: ws,
     });
     // Growth OS — Loop A: a published piece is an acquisition impression.
     await recordGrowthEvent({
       loop: "acquisition", kind: "impression", channel: slug,
-      meta: { content_piece_id, external_post_id: external_post_url, manual: true },
+      meta: { content_piece_id, external_post_id: external_post_url, manual: true, workspace_id: ws },
     });
     return c.json({ ok: true, external_post_id: external_post_url, manual: true });
   }
@@ -89,7 +92,7 @@ publishRoutes.post("/:channel", async (c) => {
       case "reddit": {
         // Load subreddit from channel cadence_config, using round-robin index (3A-4)
         const { data: ch } = await sb.from("channels")
-          .select("cadence_config").eq("slug", "reddit").single();
+          .select("cadence_config").eq("workspace_id", ws).eq("slug", "reddit").single();
         const cadence = (ch?.cadence_config ?? {}) as { subreddits?: string[]; subreddit_index?: number };
         const subs: string[] = cadence.subreddits ?? [];
         if (!subs.length) throw new Error("No subreddits configured for Reddit channel");
@@ -99,7 +102,7 @@ publishRoutes.post("/:channel", async (c) => {
         // Persist the updated index back to cadence_config
         await sb.from("channels").update({
           cadence_config: { ...cadence, subreddit_index: nextIndex },
-        }).eq("slug", "reddit");
+        }).eq("workspace_id", ws).eq("slug", "reddit");
         ({ id: externalId } = await postToSubreddit({
           subreddit,
           title:        String(payload.title ?? payload.body ?? "").slice(0, 300),
@@ -127,18 +130,19 @@ publishRoutes.post("/:channel", async (c) => {
       published_at:     now,
       external_post_id: externalId,
       updated_at:       now,
-    }).eq("id", content_piece_id);
+    }).eq("workspace_id", ws).eq("id", content_piece_id);
 
     await logActivity({
       source: `adapter:${slug}`, source_type: "adapter",
       event_type: "published",
       summary: `Published ${slug} piece → ${externalId}`,
       payload: { content_piece_id, external_post_id: externalId, channel: slug },
+      workspace_id: ws,
     });
     // Growth OS — Loop A: a published piece is an acquisition impression.
     await recordGrowthEvent({
       loop: "acquisition", kind: "impression", channel: slug,
-      meta: { content_piece_id, external_post_id: externalId },
+      meta: { content_piece_id, external_post_id: externalId, workspace_id: ws },
     });
 
     return c.json({ ok: true, external_post_id: externalId });
@@ -147,12 +151,13 @@ publishRoutes.post("/:channel", async (c) => {
     const msg = e instanceof Error ? e.message : String(e);
     await sb.from("content_pieces").update({
       status: "failed", audit_notes: msg, updated_at: new Date().toISOString(),
-    }).eq("id", content_piece_id);
+    }).eq("workspace_id", ws).eq("id", content_piece_id);
     await logActivity({
       source: `adapter:${slug}`, source_type: "adapter",
       event_type: "publish_failed",
       summary: msg.slice(0, 500),
       payload: { content_piece_id, channel: slug },
+      workspace_id: ws,
     });
     throw new HTTPException(502, { message: msg });
   }

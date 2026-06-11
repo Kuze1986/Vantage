@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from "../lib/supabase.js";
 export const dashboardRoutes = new Hono();
 
 dashboardRoutes.get("/overview", async (c) => {
+  const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
   const now = new Date();
   const since24h   = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -14,24 +15,28 @@ dashboardRoutes.get("/overview", async (c) => {
   const [activityRes, piecesRes, engagementRes, channelsRes, topPiecesRes, verticalRes] = await Promise.all([
     sb.from("activity_events")
       .select("id, source, source_type, event_type, summary, occurred_at")
+      .eq("workspace_id", ws)
       .gte("occurred_at", since24h)
       .order("occurred_at", { ascending: false })
       .limit(100),
 
-    sb.from("content_pieces").select("id, status, channel_slug, published_at"),
+    sb.from("content_pieces").select("id, status, channel_slug, published_at").eq("workspace_id", ws),
 
     sb.from("engagement_events")
       .select("id, content_piece_id, event_type, occurred_at")
+      .eq("workspace_id", ws)
       .gte("occurred_at", since7d)
       .order("occurred_at", { ascending: false })
       .limit(200),
 
     sb.from("channels")
-      .select("slug, enabled, access_token_hash, cadence_config"),
+      .select("slug, enabled, access_token_hash, cadence_config")
+      .eq("workspace_id", ws),
 
     // Top published pieces in last 7d for engagement ranking
     sb.from("content_pieces")
       .select("id, channel_slug, content_payload, published_at")
+      .eq("workspace_id", ws)
       .eq("status", "published")
       .gte("published_at", since7d)
       .order("published_at", { ascending: false })
@@ -40,6 +45,7 @@ dashboardRoutes.get("/overview", async (c) => {
     // 3A-8: Per-vertical breakdown — join content_pieces → topics
     sb.from("content_pieces")
       .select("id, status, published_at, topics!inner(vertical)")
+      .eq("workspace_id", ws)
       .not("topics.vertical", "is", null)
       .gte("published_at", since7d),
   ]);

@@ -20,10 +20,12 @@ export const channelsAuthedRoutes = new Hono();
 
 // ── GET / — list all channels with connection status ─────────────────────────
 channelsAuthedRoutes.get("/", async (c) => {
+  const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
   const { data: channels, error } = await sb
     .from("channels")
     .select("slug, enabled, cadence_config, connected_at, access_token_hash")
+    .eq("workspace_id", ws)
     .order("slug");
   if (error) throw new HTTPException(500, { message: error.message });
 
@@ -41,6 +43,7 @@ channelsAuthedRoutes.get("/", async (c) => {
 // ── PATCH /:slug/cadence — update cadence config ──────────────────────────────
 channelsAuthedRoutes.patch("/:slug/cadence", async (c) => {
   const slug = c.req.param("slug");
+  const ws = c.get("workspaceId");
   const json = await c.req.json().catch(() => ({}));
   const parsed = cadenceSchema.safeParse(json);
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
@@ -50,13 +53,13 @@ channelsAuthedRoutes.patch("/:slug/cadence", async (c) => {
   // Load current config so we can merge (patch semantics)
   const { data: ch, error: fetchErr } = await sb
     .from("channels")
-    .select("cadence_config").eq("slug", slug).single();
+    .select("cadence_config").eq("workspace_id", ws).eq("slug", slug).single();
   if (fetchErr || !ch) throw new HTTPException(404, { message: `Channel ${slug} not found` });
 
   const merged = { ...(ch.cadence_config as object), ...parsed.data };
   const { error } = await sb.from("channels")
     .update({ cadence_config: merged, updated_at: new Date().toISOString() })
-    .eq("slug", slug);
+    .eq("workspace_id", ws).eq("slug", slug);
   if (error) throw new HTTPException(500, { message: error.message });
 
   return c.json({ ok: true, slug, cadence_config: merged });
@@ -65,12 +68,13 @@ channelsAuthedRoutes.patch("/:slug/cadence", async (c) => {
 // ── PATCH /:slug/toggle — enable/disable channel ─────────────────────────────
 channelsAuthedRoutes.patch("/:slug/toggle", async (c) => {
   const slug = c.req.param("slug");
+  const ws = c.get("workspaceId");
   const json = await c.req.json().catch(() => ({}));
   const { enabled } = z.object({ enabled: z.boolean() }).parse(json);
 
   const sb = getSupabaseAdmin();
   const { error } = await sb.from("channels")
-    .update({ enabled, updated_at: new Date().toISOString() }).eq("slug", slug);
+    .update({ enabled, updated_at: new Date().toISOString() }).eq("workspace_id", ws).eq("slug", slug);
   if (error) throw new HTTPException(500, { message: error.message });
 
   return c.json({ ok: true, slug, enabled });
