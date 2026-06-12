@@ -1,7 +1,7 @@
 import type { Context, Next } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { getSupabaseAnon, getSupabaseAdmin } from "./supabase.js";
-import { resolveOrCreateWorkspace } from "./workspace.js";
+import { getSupabaseAnon } from "./supabase.js";
+import { resolveOrCreateWorkspace, getMembershipRole, type WorkspaceRole } from "./workspace.js";
 
 export type AuthedUser = { id: string; email?: string };
 
@@ -9,15 +9,16 @@ declare module "hono" {
   interface ContextVariableMap {
     user: AuthedUser;
     workspaceId: string;
+    workspaceRole: WorkspaceRole;
   }
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Small TTL cache of verified (user, workspace) pairs so the guard does not hit
-// the DB on every request. Ownership rarely changes; 60s staleness is fine.
+// Small TTL cache of verified (user, workspace) → role so the guard does not hit
+// the DB on every request. Membership rarely changes; 60s staleness is fine.
 const OWNERSHIP_TTL_MS = 60_000;
-const ownershipCache = new Map<string, number>(); // key `${userId}:${workspaceId}` -> expiry ms
+const ownershipCache = new Map<string, { role: WorkspaceRole; expiry: number }>(); // key `${userId}:${workspaceId}`
 
 /**
  * Workspace scoping guard. Runs after authMiddleware and ALWAYS resolves a
@@ -26,10 +27,10 @@ const ownershipCache = new Map<string, number>(); // key `${userId}:${workspaceI
  * request can never be left unscoped.
  *
  * - If the request carries an `x-workspace-id` header, verify the authenticated
- *   user actually owns that workspace (prevents IDOR — changing the header to
- *   another tenant's id).
- * - If the header is absent, fall back to the user's own (lazily provisioned)
- *   workspace, mirroring GET /v1/workspaces/me.
+ *   user is a MEMBER of that workspace (prevents IDOR — changing the header to
+ *   another tenant's id). The member's role is exposed as c.get("workspaceRole").
+ * - If the header is absent, fall back to a workspace the user belongs to
+ *   (lazily provisioned), mirroring GET /v1/workspaces/me.
  */
 export async function workspaceGuard(c: Context, next: Next) {
   const user = c.get("user");
@@ -41,22 +42,22 @@ export async function workspaceGuard(c: Context, next: Next) {
     }
     const key = `${user.id}:${headerWs}`;
     const cached = ownershipCache.get(key);
-    if (!cached || cached < Date.now()) {
-      const sb = getSupabaseAdmin();
-      const { data, error } = await sb
-        .from("workspaces")
-        .select("id")
-        .eq("id", headerWs)
-        .eq("owner_id", user.id)
-        .maybeSingle();
-      if (error) throw new HTTPException(500, { message: error.message });
-      if (!data) throw new HTTPException(403, { message: "You do not have access to this workspace" });
-      ownershipCache.set(key, Date.now() + OWNERSHIP_TTL_MS);
+    let role: WorkspaceRole;
+    if (cached && cached.expiry >= Date.now()) {
+      role = cached.role;
+    } else {
+      const found = await getMembershipRole(headerWs, user.id);
+      if (!found) throw new HTTPException(403, { message: "You do not have access to this workspace" });
+      role = found;
+      ownershipCache.set(key, { role, expiry: Date.now() + OWNERSHIP_TTL_MS });
     }
     c.set("workspaceId", headerWs);
+    c.set("workspaceRole", role);
   } else {
-    // No header — scope to the user's default workspace (create on first use).
-    c.set("workspaceId", await resolveOrCreateWorkspace(user.id));
+    // No header — scope to a workspace the user belongs to (create on first use).
+    const ws = await resolveOrCreateWorkspace(user.id);
+    c.set("workspaceId", ws);
+    c.set("workspaceRole", (await getMembershipRole(ws, user.id)) ?? "owner");
   }
   await next();
 }

@@ -40,23 +40,43 @@ export async function listAllWorkspaceIds(): Promise<string[]> {
   return (data ?? []).map((w) => w.id as string);
 }
 
+export type WorkspaceRole = "owner" | "admin" | "editor" | "viewer";
+
 /**
- * Resolve (and lazily provision) the workspace owned by a user. Returns the
- * workspace id, creating a default workspace + channel rows on first access.
- * This mirrors GET /v1/workspaces/me so the guard can scope requests that omit
- * the x-workspace-id header.
+ * The caller's role in a workspace, or null if they are not a member.
+ * This is the authorization primitive the guard and member routes build on.
+ */
+export async function getMembershipRole(workspaceId: string, userId: string): Promise<WorkspaceRole | null> {
+  const sb = getSupabaseAdmin();
+  const { data } = await sb
+    .from("workspace_members")
+    .select("role")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  return (data?.role as WorkspaceRole | undefined) ?? null;
+}
+
+/**
+ * Resolve (and lazily provision) a workspace for a user. Returns the workspace
+ * id of any workspace they belong to (preferring one they own), creating a
+ * default workspace + owner membership + channel rows on first access. Mirrors
+ * GET /v1/workspaces/me so the guard can scope requests that omit the header.
  */
 export async function resolveOrCreateWorkspace(userId: string): Promise<string> {
   const sb = getSupabaseAdmin();
 
-  const { data: existing } = await sb
-    .from("workspaces")
-    .select("id")
-    .eq("owner_id", userId)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (existing) return existing.id as string;
+  // Any existing membership (owner first) satisfies the request.
+  const { data: membership } = await sb
+    .from("workspace_members")
+    .select("workspace_id, role")
+    .eq("user_id", userId)
+    .order("role", { ascending: true }) // 'admin','editor','owner','viewer' — see below
+    .limit(50);
+  if (membership?.length) {
+    const owned = membership.find((m) => m.role === "owner");
+    return (owned ?? membership[0]).workspace_id as string;
+  }
 
   const slug = `workspace-${userId.slice(0, 8)}`;
   const { data: created, error } = await sb
@@ -66,6 +86,7 @@ export async function resolveOrCreateWorkspace(userId: string): Promise<string> 
     .single();
   if (error || !created) throw new Error(error?.message ?? "Failed to create workspace");
 
+  await sb.from("workspace_members").insert({ workspace_id: created.id, user_id: userId, role: "owner" });
   await seedDefaultChannels(sb, created.id as string);
   return created.id as string;
 }
