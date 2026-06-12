@@ -10,10 +10,17 @@ multi-tenant SaaS. Ordered by leverage. Each phase is independently shippable.
 
 ---
 
-> **Status:** Phase 1 (1a–1d) implemented and committed on `main`
-> (`29eeffa` migration, `8c85d84` app layer). Typecheck + build pass. The
-> migration `20260702000000_core_tenancy.sql` still needs manual review + apply
-> to the database (it could not be DB-tested in-session). Phase 2 is next.
+> **Status (updated):**
+> - **Phase 1 (1a–1d) ✅** committed (`29eeffa` migration, `8c85d84` app layer).
+> - **Phase 2c (publish lock) ✅** committed (`361d25d` engine + migration
+>   `20260703000000_publish_lock.sql`, `5751e98` manual-publish claim).
+> - **Phase 3 (tests + CI) ✅ started** (`fb49c0e`): Vitest harness + 26 tests
+>   (workspace guard / IDOR, parseRetryAfter, engagementKind, tagUrls) + GitHub
+>   Actions CI. More suites (publish state machine, full tenancy isolation) still to add.
+> - **Pending:** both migrations (`20260702…`, `20260703…`) need manual review +
+>   apply to the DB (not DB-tested in-session). **Phase 2a/2b (auth + per-tenant
+>   credentials)** is the remaining major work — best done after the migrations
+>   are applied and a second workspace exists to test against.
 
 ## Phase 1 — Tenancy migration (the blocker)  ✅ done
 
