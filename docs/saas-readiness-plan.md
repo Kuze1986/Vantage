@@ -19,10 +19,13 @@ multi-tenant SaaS. Ordered by leverage. Each phase is independently shippable.
 >   machine + claim lock (`7350cd1`), workspace guard / IDOR, webhook signature +
 >   workspace attribution (webhooks), plus utility units. Remaining: audit-gating
 >   path (autoGenerateTick) and broader route-level tenancy isolation.
-> - **Pending:** both migrations (`20260702…`, `20260703…`) need manual review +
->   apply to the DB (not DB-tested in-session). **Phase 2a/2b (auth + per-tenant
->   credentials)** is the remaining major work — best done after the migrations
->   are applied and a second workspace exists to test against.
+> - **Phase 2b (per-tenant credentials) ✅** committed (`f217c80`): adapters thread
+>   `workspaceId`; tokens/recipients scoped to `(workspace_id, slug)`; OAuth callback
+>   resolves the workspace from the pending state. 37 tests.
+> - **Both migrations applied** to the DB (2026-06-12).
+> - **Remaining:** **Phase 2a** (real auth — replace the stub `authMiddleware` with a
+>   `workspace_members` membership model) and **billing**. The audit-gating test is the
+>   last Phase 3 gap.
 
 ## Phase 1 — Tenancy migration (the blocker)  ✅ done
 
