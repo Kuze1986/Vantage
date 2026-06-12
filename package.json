@@ -9,7 +9,8 @@
     "dev": "concurrently -n web,api -c cyan,magenta \"pnpm --filter @vantage/web dev\" \"pnpm --filter @vantage/api dev\"",
     "build": "pnpm --filter @vantage/shared-types build && pnpm --filter @vantage/prompts build && pnpm --filter @vantage/api build && pnpm --filter @vantage/web build",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --if-present test"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

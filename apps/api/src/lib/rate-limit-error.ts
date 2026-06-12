@@ -16,9 +16,14 @@ export class RateLimitError extends Error {
 /** Parse Retry-After header (seconds or HTTP-date). Falls back to defaultMs. */
 export function parseRetryAfter(header: string | null, defaultMs: number): number {
   if (!header) return defaultMs;
-  const secs = Number(header);
-  if (!isNaN(secs) && secs > 0) return secs * 1000;
-  const date = Date.parse(header);
+  const trimmed = header.trim();
+  // A purely numeric header is delta-seconds. Handle it explicitly so values
+  // like "0" don't fall through to Date.parse (which would read "0" as a year).
+  if (/^-?\d+$/.test(trimmed)) {
+    const secs = Number(trimmed);
+    return secs > 0 ? secs * 1000 : defaultMs;
+  }
+  const date = Date.parse(trimmed);
   if (!isNaN(date)) return Math.max(0, date - Date.now());
   return defaultMs;
 }
