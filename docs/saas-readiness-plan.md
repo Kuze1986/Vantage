@@ -14,9 +14,11 @@ multi-tenant SaaS. Ordered by leverage. Each phase is independently shippable.
 > - **Phase 1 (1a–1d) ✅** committed (`29eeffa` migration, `8c85d84` app layer).
 > - **Phase 2c (publish lock) ✅** committed (`361d25d` engine + migration
 >   `20260703000000_publish_lock.sql`, `5751e98` manual-publish claim).
-> - **Phase 3 (tests + CI) ✅ started** (`fb49c0e`): Vitest harness + 26 tests
->   (workspace guard / IDOR, parseRetryAfter, engagementKind, tagUrls) + GitHub
->   Actions CI. More suites (publish state machine, full tenancy isolation) still to add.
+> - **Phase 3 (tests + CI) ✅ in progress** — Vitest harness + GitHub Actions CI
+>   (`fb49c0e`), now **35 tests** across 4 of the 5 priority areas: publish state
+>   machine + claim lock (`7350cd1`), workspace guard / IDOR, webhook signature +
+>   workspace attribution (webhooks), plus utility units. Remaining: audit-gating
+>   path (autoGenerateTick) and broader route-level tenancy isolation.
 > - **Pending:** both migrations (`20260702…`, `20260703…`) need manual review +
 >   apply to the DB (not DB-tested in-session). **Phase 2a/2b (auth + per-tenant
 >   credentials)** is the remaining major work — best done after the migrations
