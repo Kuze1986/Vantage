@@ -46,6 +46,10 @@ type ContentPieceRow = {
 // 3A-6: Exponential backoff delays — [0]=5m, [1]=15m, [2]=1h, then give up
 const RETRY_DELAYS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000];
 
+// 2c: a piece left in 'publishing' longer than this is assumed orphaned by a
+// crashed/restarted worker and re-queued by the reaper.
+const PUBLISH_LOCK_STALE_MS = 10 * 60_000;
+
 // ── Manual schedule: mark a piece queued with optional time ──────────────────
 export async function scheduleContentPiece(workspaceId: string, contentPieceId: string, scheduledForIso?: string): Promise<void> {
   const sb = getSupabaseAdmin();
@@ -134,7 +138,8 @@ async function publishPiece(workspaceId: string, piece: ContentPieceRow, channel
 
     const now = new Date().toISOString();
     await sb.from("content_pieces").update({
-      status: "published", published_at: now, external_post_id: externalId, updated_at: now,
+      status: "published", published_at: now, external_post_id: externalId,
+      locked_at: null, updated_at: now,
     }).eq("workspace_id", workspaceId).eq("id", piece.id);
 
     await logActivity({
@@ -152,6 +157,8 @@ async function publishPiece(workspaceId: string, piece: ContentPieceRow, channel
     if (e instanceof RateLimitError) {
       const retryAfter = e.retryAfter.toISOString();
       await sb.from("content_pieces").update({
+        status:      "queued", // release the claim so the retry window can re-pick it
+        locked_at:   null,
         retry_after: retryAfter,
         audit_notes: `Rate limited: ${msg.slice(0, 400)}`,
         updated_at:  now.toISOString(),
@@ -174,6 +181,8 @@ async function publishPiece(workspaceId: string, piece: ContentPieceRow, channel
       // 3A-6: Schedule a retry with exponential backoff — keep status "queued"
       const retryAfter = new Date(now.getTime() + delayMs).toISOString();
       await sb.from("content_pieces").update({
+        status:      "queued", // release the claim — keep it queued for the backoff retry
+        locked_at:   null,
         retry_count: retryCount + 1,
         retry_after: retryAfter,
         audit_notes: `Retry ${retryCount + 1}: ${msg.slice(0, 400)}`,
@@ -190,6 +199,7 @@ async function publishPiece(workspaceId: string, piece: ContentPieceRow, channel
       // Max retries exhausted — mark as failed permanently
       await sb.from("content_pieces").update({
         status:      "failed",
+        locked_at:   null,
         audit_notes: `Failed after ${retryCount} retries: ${msg.slice(0, 400)}`,
         updated_at:  now.toISOString(),
       }).eq("workspace_id", workspaceId).eq("id", piece.id);
@@ -226,6 +236,15 @@ async function cadenceTickForWorkspace(workspaceId: string): Promise<void> {
   const sb  = getSupabaseAdmin();
   const now = new Date().toISOString();
 
+  // 2c: Reap orphaned locks — pieces a crashed worker left mid-publish. Re-queue
+  // them so they get retried instead of being stuck in 'publishing' forever.
+  const staleBefore = new Date(Date.now() - PUBLISH_LOCK_STALE_MS).toISOString();
+  await sb.from("content_pieces")
+    .update({ status: "queued", locked_at: null, updated_at: now })
+    .eq("workspace_id", workspaceId)
+    .eq("status", "publishing")
+    .lt("locked_at", staleBefore);
+
   // 3A-6: also check retry_after — only pick up pieces whose retry window has elapsed
   const { data: pieces, error } = await sb
     .from("content_pieces")
@@ -250,6 +269,19 @@ async function cadenceTickForWorkspace(workspaceId: string): Promise<void> {
   for (const piece of pieces as ContentPieceRow[]) {
     const channelRow = channelMap[piece.channel_slug] as ChannelRow | undefined;
     if (!channelRow) continue;
+
+    // 2c: Atomic claim — flip queued→publishing only if still queued. The WHERE
+    // status='queued' makes this a compare-and-swap: a concurrent tick (or a
+    // second instance) that already claimed this row updates zero rows here and
+    // is skipped, so a piece can never be published twice.
+    const { data: claimed } = await sb.from("content_pieces")
+      .update({ status: "publishing", locked_at: now, updated_at: now })
+      .eq("workspace_id", workspaceId)
+      .eq("id", piece.id)
+      .eq("status", "queued")
+      .select("id");
+    if (!claimed?.length) continue;
+
     try {
       await publishPiece(workspaceId, piece, channelRow);
     } catch {
