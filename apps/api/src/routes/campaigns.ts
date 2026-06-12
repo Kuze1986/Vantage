@@ -455,11 +455,16 @@ campaignRoutes.delete('/:id/timeline/:day', async (c) => {
 const CONTENT_TYPES = ['promotional', 'educational', 'engagement', 'behind_the_scenes', 'mixed'] as const;
 const CHANNELS = ['x', 'linkedin', 'reddit'] as const;
 
+// The LLM frequently drifts on these fields (e.g. emits a numeric pillar index
+// instead of the UUID, or an off-enum channel/content_type). Validation here is
+// intentionally permissive — the downstream normalization below re-checks every
+// value against the real pillar ids / channels and supplies safe fallbacks, so a
+// single bad field must not reject the entire timeline.
 const generatedDaySchema = z.object({
-  messaging_pillar_id: z.string().optional(),
-  content_type: z.enum(CONTENT_TYPES).optional(),
-  primary_channel: z.enum(CHANNELS),
-  secondary_channels: z.array(z.enum(CHANNELS)).optional(),
+  messaging_pillar_id: z.union([z.string(), z.number()]).transform(String).optional().nullable(),
+  content_type: z.enum(CONTENT_TYPES).optional().catch(undefined),
+  primary_channel: z.enum(CHANNELS).optional().catch(undefined),
+  secondary_channels: z.array(z.enum(CHANNELS)).optional().catch(undefined),
   content_idea: z.object({ title: z.string(), outline: z.string() }),
 });
 
@@ -525,11 +530,15 @@ Return JSON: {"days":[{ "messaging_pillar_id": <one of the pillar ids or omit>, 
 
 Produce exactly ${total} day objects, sequenced as a coherent narrative arc (awareness → consideration → conversion). Vary channels and pillars sensibly. Respond with ONLY the JSON object.`;
 
-  let generated: z.infer<typeof generatedTimelineSchema>;
+  type GeneratedTimeline = z.infer<typeof generatedTimelineSchema>;
+  let generated: GeneratedTimeline;
   try {
-    generated = await provider.generateStructured(
+    generated = await provider.generateStructured<GeneratedTimeline>(
       prompt,
-      { description: 'Campaign content timeline', schema: generatedTimelineSchema },
+      {
+        description: 'Campaign content timeline',
+        schema: generatedTimelineSchema as unknown as z.ZodSchema<GeneratedTimeline>,
+      },
       { max_tokens: 4000, temperature: 0.7 },
     );
   } catch (e) {
@@ -545,7 +554,7 @@ Produce exactly ${total} day objects, sequenced as a coherent narrative arc (awa
     date_scheduled: dateFor(i),
     messaging_pillar_id: d.messaging_pillar_id && pillarIds.has(d.messaging_pillar_id) ? d.messaging_pillar_id : null,
     content_type: d.content_type ?? 'mixed',
-    primary_channel: channels.includes(d.primary_channel) ? d.primary_channel : channels[0],
+    primary_channel: d.primary_channel && channels.includes(d.primary_channel) ? d.primary_channel : channels[0],
     secondary_channels: (d.secondary_channels ?? []).filter((ch) => channels.includes(ch) && ch !== d.primary_channel),
     content_ideas: [{ id: crypto.randomUUID(), title: d.content_idea.title, outline: d.content_idea.outline }],
     published_pieces: [],
