@@ -89,7 +89,7 @@ export async function publishPiece(workspaceId: string, piece: ContentPieceRow, 
     switch (slug) {
       case "x": {
         const body = String(payload.body ?? "");
-        const { id } = await postTweet(body);
+        const { id } = await postTweet(workspaceId, body);
         externalId = id;
         break;
       }
@@ -98,7 +98,7 @@ export async function publishPiece(workspaceId: string, piece: ContentPieceRow, 
         const headline = payload.headline ? String(payload.headline) : undefined;
         // 3A-3: pass image_url for LinkedIn image card
         const imageUrl = typeof payload.image_url === "string" ? payload.image_url : undefined;
-        const { id }   = await postLinkedIn(body, headline, imageUrl);
+        const { id }   = await postLinkedIn(workspaceId, body, headline, imageUrl);
         externalId = id;
         break;
       }
@@ -114,7 +114,7 @@ export async function publishPiece(workspaceId: string, piece: ContentPieceRow, 
         await sbAdmin.from("channels").update({
           cadence_config: { ...cadence, subreddit_index: nextIndex },
         }).eq("workspace_id", workspaceId).eq("slug", "reddit");
-        const { id } = await postToSubreddit({
+        const { id } = await postToSubreddit(workspaceId, {
           subreddit,
           title: String(payload.title ?? payload.body ?? "").slice(0, 300),
           body:  String(payload.body ?? ""),
@@ -125,7 +125,7 @@ export async function publishPiece(workspaceId: string, piece: ContentPieceRow, 
       }
       case "email": {
         // 3A-2: pass pieceId for UTM tagging
-        const { id } = await sendEmail({
+        const { id } = await sendEmail(workspaceId, {
           subject: String(payload.subject ?? "NEXUS Newsletter"),
           html:    String(payload.body ?? ""),
           pieceId: piece.id,

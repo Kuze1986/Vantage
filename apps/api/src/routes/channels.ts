@@ -83,13 +83,14 @@ channelsAuthedRoutes.patch("/:slug/toggle", async (c) => {
 // ── POST /:slug/auth/start — begin OAuth flow ─────────────────────────────────
 channelsAuthedRoutes.post("/:slug/auth/start", async (c) => {
   const slug = c.req.param("slug");
+  const ws = c.get("workspaceId");
   const state = randomBytes(16).toString("hex");
 
   switch (slug) {
     case "x": {
       try {
         const { verifier, challenge } = generatePkce();
-        await xSavePending(state, verifier);
+        await xSavePending(ws, state, verifier);
         const url = xAuthorizeUrl({ state, code_challenge: challenge });
         return c.json({ authorize_url: url, state });
       } catch (e) {
@@ -105,7 +106,7 @@ channelsAuthedRoutes.post("/:slug/auth/start", async (c) => {
     }
     case "linkedin": {
       try {
-        await liSavePending(state);
+        await liSavePending(ws, state);
         const url = liAuthorizeUrl(state);
         return c.json({ authorize_url: url, state });
       } catch (e) {
@@ -118,7 +119,7 @@ channelsAuthedRoutes.post("/:slug/auth/start", async (c) => {
     }
     case "reddit": {
       try {
-        await redditSavePending(state);
+        await redditSavePending(ws, state);
         const url = redditAuthorizeUrl(state);
         return c.json({ authorize_url: url, state });
       } catch (e) {

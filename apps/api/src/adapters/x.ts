@@ -45,28 +45,31 @@ type XAuthState = {
   };
 };
 
-export async function savePendingOAuth(state: string, verifier: string): Promise<void> {
+export async function savePendingOAuth(workspaceId: string, state: string, verifier: string): Promise<void> {
   const sb = getSupabaseAdmin();
   const auth_state: XAuthState = {
     pending_oauth: { state, code_verifier: verifier, created_at: new Date().toISOString() },
   };
   const { error } = await sb
-    
     .from("channels")
     .update({ auth_state })
+    .eq("workspace_id", workspaceId)
     .eq("slug", "x");
   if (error) throw new Error(error.message);
 }
 
 export async function exchangeCodeForTokens(code: string, state: string): Promise<void> {
   const sb = getSupabaseAdmin();
-  const { data: row, error } = await sb.from("channels").select("auth_state").eq("slug", "x").single();
+  // The callback is unauthenticated — find which workspace's channel owns this
+  // pending OAuth state, then scope all writes to that (workspace_id, slug) row.
+  const { data: rows, error } = await sb.from("channels").select("workspace_id, auth_state").eq("slug", "x");
   if (error) throw new Error(error.message);
-  const auth = (row?.auth_state ?? {}) as XAuthState;
-  const pending = auth.pending_oauth;
-  if (!pending || pending.state !== state) {
-    throw new Error("Invalid OAuth state");
-  }
+  const match = (rows ?? []).find(
+    (r) => ((r.auth_state ?? {}) as XAuthState).pending_oauth?.state === state,
+  );
+  if (!match) throw new Error("Invalid OAuth state");
+  const workspaceId = match.workspace_id as string;
+  const pending = ((match.auth_state ?? {}) as XAuthState).pending_oauth!;
   const clientId = process.env.X_CLIENT_ID;
   const clientSecret = process.env.X_CLIENT_SECRET;
   const redirect = process.env.X_REDIRECT_URI;
@@ -110,9 +113,9 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
     tokens: { access_token, refresh_token, expires_at },
   };
   const { error: upErr } = await sb
-    
     .from("channels")
     .update({ auth_state: next, enabled: true })
+    .eq("workspace_id", workspaceId)
     .eq("slug", "x");
   if (upErr) throw new Error(upErr.message);
 
@@ -125,21 +128,21 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
   });
 }
 
-async function getAccessToken(): Promise<string> {
+async function getAccessToken(workspaceId: string): Promise<string> {
   const sb = getSupabaseAdmin();
-  const { data, error } = await sb.from("channels").select("auth_state").eq("slug", "x").single();
+  const { data, error } = await sb.from("channels").select("auth_state").eq("workspace_id", workspaceId).eq("slug", "x").single();
   if (error) throw new Error(error.message);
   const auth = (data?.auth_state ?? {}) as XAuthState;
   const token = auth.tokens?.access_token;
   if (!token) throw new Error("X channel not connected");
   const exp = auth.tokens?.expires_at ? Date.parse(auth.tokens.expires_at) : 0;
   if (exp && Date.now() > exp - 60_000 && auth.tokens?.refresh_token) {
-    return refreshAccessToken(auth.tokens.refresh_token);
+    return refreshAccessToken(workspaceId, auth.tokens.refresh_token);
   }
   return token;
 }
 
-async function refreshAccessToken(refreshToken: string): Promise<string> {
+async function refreshAccessToken(workspaceId: string, refreshToken: string): Promise<string> {
   const clientId = process.env.X_CLIENT_ID;
   const clientSecret = process.env.X_CLIENT_SECRET;
   if (!clientId || !clientSecret) throw new Error("Missing X OAuth env");
@@ -168,13 +171,13 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
   const expires_at = new Date(Date.now() + expires_in * 1000).toISOString();
   const sb = getSupabaseAdmin();
   const next: XAuthState = { tokens: { access_token, refresh_token: new_refresh, expires_at } };
-  const { error } = await sb.from("channels").update({ auth_state: next }).eq("slug", "x");
+  const { error } = await sb.from("channels").update({ auth_state: next }).eq("workspace_id", workspaceId).eq("slug", "x");
   if (error) throw new Error(error.message);
   return access_token;
 }
 
-export async function postTweet(text: string): Promise<{ id: string }> {
-  const access = await getAccessToken();
+export async function postTweet(workspaceId: string, text: string): Promise<{ id: string }> {
+  const access = await getAccessToken(workspaceId);
   const res = await fetch(X_TWEETS, {
     method: "POST",
     headers: {

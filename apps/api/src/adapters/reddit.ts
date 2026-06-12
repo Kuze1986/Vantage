@@ -35,19 +35,23 @@ export function buildAuthorizeUrl(stateToken: string): string {
   return u.toString();
 }
 
-export async function savePendingOAuth(state: string): Promise<void> {
+export async function savePendingOAuth(workspaceId: string, state: string): Promise<void> {
   const sb = getSupabaseAdmin();
   const auth_state: RedditAuthState = { pending_oauth: { state, created_at: new Date().toISOString() } };
-  const { error } = await sb.from("channels").update({ auth_state }).eq("slug", "reddit");
+  const { error } = await sb.from("channels").update({ auth_state }).eq("workspace_id", workspaceId).eq("slug", "reddit");
   if (error) throw new Error(error.message);
 }
 
 export async function exchangeCodeForTokens(code: string, state: string): Promise<void> {
   const { clientId, clientSecret, redirect } = requireEnv();
   const sb = getSupabaseAdmin();
-  const { data: row } = await sb.from("channels").select("auth_state").eq("slug", "reddit").single();
-  const pending = ((row?.auth_state ?? {}) as RedditAuthState).pending_oauth;
-  if (!pending || pending.state !== state) throw new Error("Invalid OAuth state");
+  // Unauthenticated callback — resolve the workspace by matching the pending state.
+  const { data: rows } = await sb.from("channels").select("workspace_id, auth_state").eq("slug", "reddit");
+  const match = (rows ?? []).find(
+    (r) => ((r.auth_state ?? {}) as RedditAuthState).pending_oauth?.state === state,
+  );
+  if (!match) throw new Error("Invalid OAuth state");
+  const workspaceId = match.workspace_id as string;
 
   const body = new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirect });
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
@@ -66,25 +70,25 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
   const expires_at = new Date(Date.now() + expires_in * 1000).toISOString();
 
   const next: RedditAuthState = { tokens: { access_token, refresh_token, expires_at } };
-  const { error } = await sb.from("channels").update({ auth_state: next, enabled: true }).eq("slug", "reddit");
+  const { error } = await sb.from("channels").update({ auth_state: next, enabled: true }).eq("workspace_id", workspaceId).eq("slug", "reddit");
   if (error) throw new Error(error.message);
 
   await logActivity({ source: "adapter:reddit", source_type: "adapter", event_type: "oauth_connected", summary: "Reddit account connected", payload: {} });
 }
 
-async function getAccessToken(): Promise<string> {
+async function getAccessToken(workspaceId: string): Promise<string> {
   const sb = getSupabaseAdmin();
-  const { data } = await sb.from("channels").select("auth_state").eq("slug", "reddit").single();
+  const { data } = await sb.from("channels").select("auth_state").eq("workspace_id", workspaceId).eq("slug", "reddit").single();
   const auth = ((data?.auth_state ?? {}) as RedditAuthState).tokens;
   if (!auth?.access_token) throw new Error("Reddit channel not connected");
   const exp = auth.expires_at ? Date.parse(auth.expires_at) : 0;
   if (exp && Date.now() > exp - 60_000 && auth.refresh_token) {
-    return refreshAccessToken(auth.refresh_token);
+    return refreshAccessToken(workspaceId, auth.refresh_token);
   }
   return auth.access_token;
 }
 
-async function refreshAccessToken(refreshToken: string): Promise<string> {
+async function refreshAccessToken(workspaceId: string, refreshToken: string): Promise<string> {
   const { clientId, clientSecret } = requireEnv();
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken });
@@ -100,22 +104,22 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
   const expires_in = typeof json.expires_in === "number" ? json.expires_in : 3600;
   const expires_at = new Date(Date.now() + expires_in * 1000).toISOString();
   const sb = getSupabaseAdmin();
-  const cur = await sb.from("channels").select("auth_state").eq("slug", "reddit").single();
+  const cur = await sb.from("channels").select("auth_state").eq("workspace_id", workspaceId).eq("slug", "reddit").single();
   const prev = ((cur.data?.auth_state ?? {}) as RedditAuthState).tokens;
   await sb.from("channels").update({
     auth_state: { tokens: { access_token, refresh_token: prev?.refresh_token ?? refreshToken, expires_at } }
-  }).eq("slug", "reddit");
+  }).eq("workspace_id", workspaceId).eq("slug", "reddit");
   return access_token;
 }
 
-export async function postToSubreddit(params: {
+export async function postToSubreddit(workspaceId: string, params: {
   subreddit: string;
   title: string;
   body: string;
   is_link_post?: boolean;
   url?: string;
 }): Promise<{ id: string; permalink: string }> {
-  const token = await getAccessToken();
+  const token = await getAccessToken(workspaceId);
   const formBody = new URLSearchParams({
     api_type:  "json",
     sr:        params.subreddit,

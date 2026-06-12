@@ -13,7 +13,7 @@ function requireEnv(): { apiKey: string; fromAddress: string } {
   return { apiKey, fromAddress };
 }
 
-export async function sendEmail(params: {
+export async function sendEmail(workspaceId: string, params: {
   subject: string;
   html: string;
   to?: string[];      // if omitted, sends to all active subscribers
@@ -24,11 +24,11 @@ export async function sendEmail(params: {
 
   let recipients = params.to ?? [];
   if (recipients.length === 0) {
-    // Pull active subscribers from newsletter_subscribers
+    // Pull this workspace's active subscribers from newsletter_subscribers
     const { data, error } = await sb
-      
       .from("newsletter_subscribers")
       .select("email")
+      .eq("workspace_id", workspaceId)
       .is("unsubscribed_at", null);
     if (error) throw new Error(`Failed to load subscribers: ${error.message}`);
     recipients = (data ?? []).map((r: { email: string }) => r.email);
@@ -78,8 +78,8 @@ export async function sendEmail(params: {
   return { id: firstId, recipient_count: recipients.length };
 }
 
-export async function subscriberCount(): Promise<number> {
+export async function subscriberCount(workspaceId: string): Promise<number> {
   const sb = getSupabaseAdmin();
-  const { count } = await sb.from("newsletter_subscribers").select("*", { count: "exact", head: true }).is("unsubscribed_at", null);
+  const { count } = await sb.from("newsletter_subscribers").select("*", { count: "exact", head: true }).eq("workspace_id", workspaceId).is("unsubscribed_at", null);
   return count ?? 0;
 }

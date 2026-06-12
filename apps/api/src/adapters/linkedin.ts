@@ -35,12 +35,12 @@ export function buildAuthorizeUrl(stateToken: string): string {
   return u.toString();
 }
 
-export async function savePendingOAuth(state: string): Promise<void> {
+export async function savePendingOAuth(workspaceId: string, state: string): Promise<void> {
   const sb = getSupabaseAdmin();
   const auth_state: LinkedInAuthState = {
     pending_oauth: { state, created_at: new Date().toISOString() },
   };
-  const { error } = await sb.from("channels").update({ auth_state }).eq("slug", "linkedin");
+  const { error } = await sb.from("channels").update({ auth_state }).eq("workspace_id", workspaceId).eq("slug", "linkedin");
   if (error) throw new Error(error.message);
 }
 
@@ -48,9 +48,13 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
   const { clientId, clientSecret, redirect } = requireEnv();
   const sb = getSupabaseAdmin();
 
-  const { data: row } = await sb.from("channels").select("auth_state").eq("slug", "linkedin").single();
-  const pending = ((row?.auth_state ?? {}) as LinkedInAuthState).pending_oauth;
-  if (!pending || pending.state !== state) throw new Error("Invalid OAuth state");
+  // Unauthenticated callback — resolve the workspace by matching the pending state.
+  const { data: rows } = await sb.from("channels").select("workspace_id, auth_state").eq("slug", "linkedin");
+  const match = (rows ?? []).find(
+    (r) => ((r.auth_state ?? {}) as LinkedInAuthState).pending_oauth?.state === state,
+  );
+  if (!match) throw new Error("Invalid OAuth state");
+  const workspaceId = match.workspace_id as string;
 
   const body = new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirect, client_id: clientId, client_secret: clientSecret });
   const res = await fetch(LI_TOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
@@ -68,15 +72,15 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
   const person_urn = typeof me.sub === "string" ? `urn:li:person:${me.sub}` : undefined;
 
   const next: LinkedInAuthState = { tokens: { access_token, expires_at, person_urn } };
-  const { error } = await sb.from("channels").update({ auth_state: next, enabled: true }).eq("slug", "linkedin");
+  const { error } = await sb.from("channels").update({ auth_state: next, enabled: true }).eq("workspace_id", workspaceId).eq("slug", "linkedin");
   if (error) throw new Error(error.message);
 
   await logActivity({ source: "adapter:linkedin", source_type: "adapter", event_type: "oauth_connected", summary: "LinkedIn account connected", payload: { person_urn } });
 }
 
-async function getAccessToken(): Promise<{ token: string; personUrn: string }> {
+async function getAccessToken(workspaceId: string): Promise<{ token: string; personUrn: string }> {
   const sb = getSupabaseAdmin();
-  const { data } = await sb.from("channels").select("auth_state").eq("slug", "linkedin").single();
+  const { data } = await sb.from("channels").select("auth_state").eq("workspace_id", workspaceId).eq("slug", "linkedin").single();
   const auth = ((data?.auth_state ?? {}) as LinkedInAuthState).tokens;
   if (!auth?.access_token) throw new Error("LinkedIn channel not connected");
   const personUrn = auth.person_urn ?? "";
@@ -124,8 +128,8 @@ async function uploadImageToLinkedIn(imageUrl: string, token: string, personUrn:
   return assetUrn;
 }
 
-export async function postLinkedIn(body: string, _headline?: string, imageUrl?: string): Promise<{ id: string }> {
-  const { token, personUrn } = await getAccessToken();
+export async function postLinkedIn(workspaceId: string, body: string, _headline?: string, imageUrl?: string): Promise<{ id: string }> {
+  const { token, personUrn } = await getAccessToken(workspaceId);
 
   // 3A-3: Include image media if provided
   let shareMedia: unknown[] = [];

@@ -92,7 +92,7 @@ publishRoutes.post("/:channel", async (c) => {
       case "x": {
         const body = String(payload.body ?? "");
         if (!body) throw new Error("Missing tweet body");
-        ({ id: externalId } = await postTweet(body));
+        ({ id: externalId } = await postTweet(ws, body));
         break;
       }
       case "linkedin": {
@@ -100,7 +100,7 @@ publishRoutes.post("/:channel", async (c) => {
         const headline = payload.headline ? String(payload.headline) : undefined;
         // 3A-3: pass image_url so LinkedIn can include an image card
         const imageUrl = typeof payload.image_url === "string" ? payload.image_url : undefined;
-        ({ id: externalId } = await postLinkedIn(body, headline, imageUrl));
+        ({ id: externalId } = await postLinkedIn(ws, body, headline, imageUrl));
         break;
       }
       case "reddit": {
@@ -117,7 +117,7 @@ publishRoutes.post("/:channel", async (c) => {
         await sb.from("channels").update({
           cadence_config: { ...cadence, subreddit_index: nextIndex },
         }).eq("workspace_id", ws).eq("slug", "reddit");
-        ({ id: externalId } = await postToSubreddit({
+        ({ id: externalId } = await postToSubreddit(ws, {
           subreddit,
           title:        String(payload.title ?? payload.body ?? "").slice(0, 300),
           body:         String(payload.body ?? ""),
@@ -127,7 +127,7 @@ publishRoutes.post("/:channel", async (c) => {
       }
       case "email": {
         // 3A-2: pass pieceId so UTM tags are applied to links in the HTML body
-        ({ id: externalId } = await sendEmail({
+        ({ id: externalId } = await sendEmail(ws, {
           subject: String(payload.subject ?? "NEXUS Newsletter"),
           html:    String(payload.body ?? ""),
           pieceId: content_piece_id,
