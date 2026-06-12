@@ -78,7 +78,8 @@ export async function scheduleContentPiece(workspaceId: string, contentPieceId: 
 }
 
 // ── Publish one piece via its channel adapter ─────────────────────────────────
-async function publishPiece(workspaceId: string, piece: ContentPieceRow, channelRow: ChannelRow): Promise<void> {
+// Exported for unit tests (the publish state machine); not part of the public API.
+export async function publishPiece(workspaceId: string, piece: ContentPieceRow, channelRow: ChannelRow): Promise<void> {
   const sb = getSupabaseAdmin();
   const slug = piece.channel_slug as ChannelSlug;
   const payload = piece.content_payload;
@@ -232,7 +233,8 @@ async function cadenceTick(): Promise<void> {
   }
 }
 
-async function cadenceTickForWorkspace(workspaceId: string): Promise<void> {
+// Exported for unit tests (the claim-lock gating); not part of the public API.
+export async function cadenceTickForWorkspace(workspaceId: string): Promise<void> {
   const sb  = getSupabaseAdmin();
   const now = new Date().toISOString();
 
