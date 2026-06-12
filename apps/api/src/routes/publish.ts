@@ -39,6 +39,19 @@ publishRoutes.post("/:channel", async (c) => {
     throw new HTTPException(400, { message: `Cannot publish from status ${piece.status}` });
   }
 
+  // 2c: if the piece is queued, claim it atomically so this manual publish can't
+  // race the cadence engine and double-publish. Approved pieces aren't picked up
+  // by the engine, so no claim is needed there.
+  if (piece.status === "queued") {
+    const { data: claimed } = await sb.from("content_pieces")
+      .update({ status: "publishing", locked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq("workspace_id", ws).eq("id", content_piece_id).eq("status", "queued")
+      .select("id");
+    if (!claimed?.length) {
+      throw new HTTPException(409, { message: "Piece is already being published by the cadence engine" });
+    }
+  }
+
   const payload = piece.content_payload as Record<string, unknown>;
   const slug    = piece.channel_slug as string;
 
@@ -54,6 +67,7 @@ publishRoutes.post("/:channel", async (c) => {
       status:           "published",
       published_at:     now,
       external_post_id: external_post_url,
+      locked_at:        null,
       updated_at:       now,
     }).eq("workspace_id", ws).eq("id", content_piece_id);
     await logActivity({
@@ -129,6 +143,7 @@ publishRoutes.post("/:channel", async (c) => {
       status:           "published",
       published_at:     now,
       external_post_id: externalId,
+      locked_at:        null,
       updated_at:       now,
     }).eq("workspace_id", ws).eq("id", content_piece_id);
 
@@ -150,7 +165,7 @@ publishRoutes.post("/:channel", async (c) => {
     if (e instanceof HTTPException) throw e;
     const msg = e instanceof Error ? e.message : String(e);
     await sb.from("content_pieces").update({
-      status: "failed", audit_notes: msg, updated_at: new Date().toISOString(),
+      status: "failed", locked_at: null, audit_notes: msg, updated_at: new Date().toISOString(),
     }).eq("workspace_id", ws).eq("id", content_piece_id);
     await logActivity({
       source: `adapter:${slug}`, source_type: "adapter",
