@@ -36,6 +36,7 @@
 26. [Phase 3A — Gaps & Fixes](#phase-3a--gaps--fixes)
 27. [Phase 3B — New Capabilities](#phase-3b--new-capabilities)
 28. [Phase 3C — Creative Studio](#phase-3c--creative-studio)
+29. [Phase 4 — SaaS Readiness](#phase-4--saas-readiness)
 
 ---
 
@@ -51,13 +52,30 @@ session token (JWT) is stored in the browser. Every API call attaches it as a
 `Bearer` token. The API's `authMiddleware` verifies it against the Supabase project's
 JWT secret and rejects unauthenticated requests with 401.
 
-The app is currently single-tenant — one operator account (Brandon) controls the entire
-pipeline. Row-level security on all Supabase tables is enforced through the `authenticated`
-and `service_role` Postgres roles. The `vantage-api` service uses the `SUPABASE_SERVICE_ROLE_KEY`
-which bypasses RLS for writes; the web app uses the anon/user key which is RLS-restricted.
+**Multi-tenant (Phase 1/2a — see [Phase 4 — SaaS Readiness](#phase-4--saas-readiness)).**
+The app is multi-tenant: data is partitioned by **workspace**. After authentication,
+`workspaceGuard` resolves the request's workspace — from a validated, owned `x-workspace-id`
+header, or the caller's default workspace if absent — and exposes it as `c.get("workspaceId")`
+to every route. Authorization is by **membership**: `vantage.workspace_members` maps users to
+workspaces with a role (`owner` / `admin` / `editor` / `viewer`), exposed as
+`c.get("workspaceRole")`. Changing the header to a workspace the user is not a member of is
+rejected with 403 (IDOR-safe). A user's first request lazily provisions a workspace, an owner
+membership, and that workspace's seven channel rows.
+
+Row-level security on all Supabase tables is enforced through the `authenticated` and
+`service_role` Postgres roles, with workspace-scoped policies as a defense-in-depth backstop.
+The `vantage-api` service uses the `SUPABASE_SERVICE_ROLE_KEY` (bypasses RLS; the API itself is
+the enforcement point via `workspaceGuard` + per-query `workspace_id` scoping); the web app uses
+the anon/user key which is RLS-restricted.
+
+> Optional single-user lockdown: setting `BRANDON_USER_ID` pins the API to one Supabase user.
+> **Unset it for any multi-user / multi-tenant deployment** or all other users get 403.
 
 **Files:**
-- `apps/api/src/lib/auth.ts` — Hono middleware that extracts and verifies the JWT
+- `apps/api/src/lib/auth.ts` — JWT verification + `workspaceGuard` (membership-based)
+- `apps/api/src/lib/workspace.ts` — workspace/membership provisioning, `getMembershipRole`, channel seeding
+- `apps/api/src/routes/workspaces.ts` — `/v1/workspaces/me` + member management routes
+- `apps/web/src/lib/WorkspaceContext.tsx` — fetches/creates the workspace, sends `x-workspace-id`
 - `apps/web/src/lib/supabase.ts` — supabase-js singleton used by the web app
 - `apps/web/src/pages/LoginPage.tsx` — email/password login form
 
@@ -78,9 +96,10 @@ Fields:
 - `per_channel_tone` — JSONB object keyed by channel slug with tone instructions per platform
 - `off_topics` — array of subjects Kuze must never write about
 
-The configuration is saved to `vantage.brand_voice` and upserted on save (there is always
-exactly one row). On every generation call, the row is loaded and serialized to JSON, then
-passed to Kuze as part of the user prompt.
+The configuration is saved to `vantage.brand_voice` and upserted on save (exactly one row
+**per workspace** — `brand_voice` carries a `workspace_id` with a unique index). On every
+generation call, the workspace's row is loaded and serialized to JSON, then passed to Kuze as
+part of the user prompt.
 
 **Files:**
 - `apps/web/src/pages/VoicePage.tsx` — form UI
@@ -214,18 +233,22 @@ appended to the topic prompt. If the second attempt also fails, the piece is mar
 Every content piece moves through a defined status machine stored in `content_pieces.status`:
 
 ```
-draft → auditing → approved → queued → published
-                └→ rejected
-                             └→ failed (on publish error)
+draft → auditing → approved → queued → publishing → published
+                └→ rejected              ↑   └→ (re)queued (retry / rate-limit)
+                                          └→ failed (on publish error / retries exhausted)
 ```
 
 - **draft** — generated but not yet audited (not used in current flow; pieces enter as `auditing`)
 - **auditing** — pending Ilita review
 - **approved** — passed audit, waiting for operator approval or auto-approve
 - **queued** — approved and scheduled (`scheduled_for` timestamp set), waiting for cadence tick
+- **publishing** — transient claim state (Phase 2c): a worker atomically claimed the piece
+  (`queued → publishing` compare-and-swap) and is posting it. Released back to `queued` on
+  retry/rate-limit or advanced to `published`/`failed`. A reaper re-queues pieces stuck here
+  (stale `locked_at`) after a crashed worker.
 - **published** — successfully sent to platform; `published_at` and `external_post_id` set
 - **rejected** — failed audit twice in auto-approve, or manually rejected
-- **failed** — publish attempt threw an error; error stored in `audit_notes`
+- **failed** — publish attempt threw an error / retries exhausted; error stored in `audit_notes`
 
 The `scheduled_for` field controls when the cadence tick will attempt publishing. It is
 set either by the manual schedule endpoint or automatically by the auto-approve pipeline
@@ -244,6 +267,13 @@ based on the channel's `posting_hours` config.
 **What it does:**
 Each channel has an adapter that takes a `content_payload` and posts it to the platform.
 
+> **Per-tenant credentials (Phase 2b).** Every adapter is scoped by `workspaceId`: OAuth
+> tokens live on the workspace's own `channels` row (keyed `(workspace_id, slug)`), and the
+> email adapter sends only to that workspace's subscribers. Platform **app** credentials
+> (client ids/secrets, `RESEND_API_KEY`) remain global env. The unauthenticated OAuth callback
+> resolves which workspace a flow belongs to by matching the pending OAuth `state` across
+> channel rows.
+
 #### X (Twitter)
 Posts via Twitter API v2 `POST /2/tweets`. Uses OAuth 2.0 access token stored in
 `vantage.channels` (`access_token`, `refresh_token`, `token_expiry`). Handles the
@@ -260,7 +290,8 @@ Supports text posts (`kind: "self"`) and link posts (`kind: "link"`). Returns th
 `id`. Subreddit selection currently uses random choice from configured list.
 
 #### Email
-Sends via Resend API to all active subscribers (where `unsubscribed_at IS NULL`).
+Sends via Resend API to the workspace's active subscribers (where `workspace_id` matches and
+`unsubscribed_at IS NULL`).
 Fetches subscriber list, sends one email per subscriber via Resend's single-send endpoint.
 Runs `tagUrls()` on the HTML body before sending so all `<a href="...">` links carry UTM
 parameters. Returns the Resend message ID.
@@ -289,14 +320,19 @@ requires `RESEND_API_KEY`. Email sender configured via `RESEND_FROM_EMAIL`.
 ### 8. Cadence Engine
 
 **What it does:**
-A scheduler that runs three recurring ticks in a single Node.js process. Started at API
-boot via `startCadenceEngine()`.
+A scheduler that runs four recurring ticks in a single Node.js process. Started at API
+boot via `startCadenceEngine()`. Every tick **iterates all workspaces** and operates per-tenant
+(loading that workspace's channels/voice/settings, scoping every query by `workspace_id`).
 
 #### Cadence tick (every 60 seconds)
-Queries `content_pieces` for pieces with `status = 'queued'` and `scheduled_for ≤ now`.
-For each, calls the appropriate channel adapter to publish. On success: sets status to
-`published`, records `published_at` and `external_post_id`. On failure: sets status to
-`failed`, records error in `audit_notes`. Processes up to 20 pieces per tick.
+For each workspace, queries `content_pieces` for pieces with `status = 'queued'` and
+`scheduled_for ≤ now`. Before publishing, it **atomically claims** each piece
+(`queued → publishing` compare-and-swap, Phase 2c) so a slow tick or a second API instance can
+never double-publish; a reaper first re-queues pieces left in `publishing` past a stale lock
+window. For each claimed piece, calls the appropriate channel adapter. On success: status →
+`published`, records `published_at` and `external_post_id`. On retry/rate-limit: released back
+to `queued` with backoff. On exhausted retries: `failed`. Processes up to 20 pieces per
+workspace per tick.
 
 #### Auto-generate tick (every 5 minutes)
 For each enabled channel with `auto_approve: true`, calculates the deficit between
@@ -313,9 +349,10 @@ deduplicates, and inserts new pulse topics. Loads subreddit list from the Reddit
 `cadence_config`.
 
 #### BioLoop (Supabase Edge Function — daily at 02:00 UTC)
-Runs as `supabase/functions/bioloop/index.ts` on a pg_cron schedule. Calls `runBioLoop()`
-and `identifyEvergreenTopics()` in parallel if `bioloop_enabled` is true in settings.
-Can also be triggered manually via the Dashboard 🧬 BioLoop button or `POST /v1/bioloop/run`.
+Runs as `supabase/functions/bioloop/index.ts` on a pg_cron schedule. Iterates every workspace
+and runs `runBioLoop()` + `identifyEvergreenTopics()` for each whose `bioloop_enabled` setting
+is true. Can also be triggered manually (for the caller's workspace) via the Dashboard 🧬
+BioLoop button or `POST /v1/bioloop/run`.
 
 **Files:**
 - `apps/api/src/services/scheduler.ts`
@@ -401,6 +438,11 @@ stored token.
 **What it does:**
 Receives platform engagement events and stores them in `vantage.engagement_events`,
 linking to `content_pieces` via `external_post_id` ↔ `content_piece_id`.
+
+> **Workspace attribution (Phase 1).** Webhooks are unauthenticated, so each handler derives
+> the `workspace_id` from the matched content piece (via `external_post_id`) and stamps the
+> engagement row with it. Events that match no piece are acknowledged (200) but **not** written,
+> since `engagement_events` is workspace-scoped and an unattributable event has no owner.
 
 #### X webhook (`GET /v1/webhooks/x`)
 Handles the CRC challenge-response required by Twitter's Account Activity API.
@@ -665,18 +707,27 @@ All application data lives in the `vantage` Postgres schema on Supabase. PostgRE
 exposes only the `public` schema by default, so auto-updatable views in `public` proxy
 every `vantage.*` table for RLS-compatible read/write access.
 
-**Core tables:**
-- `vantage.channels` — channel config, tokens, cadence
+**Tenancy:** `vantage.workspaces` is the tenant root and `vantage.workspace_members` maps
+users → workspaces with roles. Every core table carries a `workspace_id` (NOT NULL, FK to
+`workspaces`), so all tenant data is partitioned by workspace. `channels` is keyed
+`(workspace_id, slug)` and `settings` `(workspace_id, key)`; `content_pieces` /
+`generation_weights` use composite FKs to `channels`. `music_tracks` and `sound_effects` are a
+shared global library (no `workspace_id`).
+
+**Core tables** (all workspace-scoped unless noted):
+- `vantage.workspaces` — tenant root (owner, name, slug, default LLM provider)
+- `vantage.workspace_members` — user↔workspace roles (owner/admin/editor/viewer)
+- `vantage.channels` — channel config, per-tenant tokens, cadence — PK `(workspace_id, slug)`
 - `vantage.topics` — ingested source topics
-- `vantage.content_pieces` — generated content with full status history
+- `vantage.content_pieces` — generated content with full status history (+ `locked_at` claim lock)
 - `vantage.engagement_events` — platform engagement signals
-- `vantage.activity_events` — pipeline audit log
-- `vantage.brand_voice` — brand identity config
+- `vantage.activity_events` — pipeline audit log (`workspace_id` nullable for system events)
+- `vantage.brand_voice` — brand identity config (one row per workspace)
 - `vantage.generation_weights` — BioLoop pattern weights
-- `vantage.newsletter_subscribers` — email list
-- `vantage.music_tracks` — DemoForge music registry
+- `vantage.newsletter_subscribers` — email list (unique email per workspace)
+- `vantage.music_tracks` — DemoForge music registry (shared/global)
 - `vantage.demoforge_jobs` — video generation job queue
-- `vantage.settings` — global pipeline configuration
+- `vantage.settings` — pipeline configuration — PK `(workspace_id, key)`
 
 **Public views:** Each table has a `CREATE OR REPLACE VIEW public.<table> AS SELECT * FROM vantage.<table>`.
 Postgres auto-updatable views pass INSERT/UPDATE/DELETE/RETURNING through to the base
@@ -689,6 +740,15 @@ table including defaults and FK constraints.
 - `20260603000000_newsletter_subscribers.sql` — subscriber table
 - `20260604000000_phase2.sql` — variant_group_id, image_url, music_tracks, demoforge_jobs
 - `20260605000000_settings.sql` — settings table
+- `20260620000000_workspaces.sql` — workspaces (tenant root)
+- `20260630000000_expose_vantage_views.sql` — auto-expose every `vantage` table via a `public`
+  view + event trigger (rebuilt after column adds)
+- `20260702000000_core_tenancy.sql` — **Phase 1:** add `workspace_id` to all core tables,
+  backfill to a default workspace, re-key channels/settings, composite FKs, RLS backstop
+- `20260703000000_publish_lock.sql` — **Phase 2c:** `publishing` status + `locked_at`
+- `20260704000000_workspace_members.sql` — **Phase 2a:** membership/roles table
+- (plus phase3a/3b, email_templates, sound_effects, campaign/intelligence/audience/virality,
+  llm_provider_settings, and grant-hardening migrations)
 
 ---
 
@@ -1731,4 +1791,108 @@ app router + sidebar.
 
 ---
 
-*Last updated: 22 core Vantage features operational. Phase 2 — Campaign Builder (Feature 22): campaign planning, timeline, KPI tracking with LLM-powered content ideation. Phase 3 — Strategic Intelligence (Feature 23): competitive monitoring, trend detection, gap analysis. Phase 4 — Audience Model (Feature 24): behavioral segmentation, LTV calculation, churn prediction, GA4 sync, ML-ready scoring. Phase 5 — BioLoop Virality Signals (Feature 25): viral growth detection, pattern recognition, segment-aware strategies. Workspace-scoped architecture with pluggable LLM providers (Claude/GPT-4o/Grok). Phase 3A (15 gaps/fixes), Phase 3B (5 new capabilities), and Phase 3C — Creative Studio (7 items) all shipped. Social Kit (Feature 20), Sound Effects + Audio Mixer (Feature 21) complete.*
+## Phase 4 — SaaS Readiness
+
+> Multi-tenancy, real auth, reliability, and test/CI work that turns the single-operator app
+> into a sellable multi-tenant SaaS. Plan + status live in `docs/saas-readiness-plan.md`.
+> **Migrations note:** `20260702…` and `20260703…` are applied; `20260704…` (workspace_members)
+> must be applied before the membership guard works.
+
+---
+
+### 4-1 — Core Multi-Tenancy
+
+**Status:** ✅ Shipped
+
+Every core table carries a NOT-NULL `workspace_id`; every API query is scoped to the request's
+workspace and every insert is stamped with it. `channels` re-keyed to `(workspace_id, slug)`,
+`settings` to `(workspace_id, key)`, with composite FKs from `content_pieces`/`generation_weights`.
+`workspaceGuard` is mandatory on all authed routes and resolves the workspace from a validated,
+owned `x-workspace-id` header (or the caller's default). Public proxy views rebuilt so the new
+column is visible to PostgREST; workspace-scoped RLS added as a backstop.
+
+**Files:** `supabase/migrations/20260702000000_core_tenancy.sql`, `apps/api/src/lib/auth.ts`,
+`apps/api/src/lib/workspace.ts`, every `apps/api/src/routes/*` and `services/*`.
+
+---
+
+### 4-2 — Tenant-Aware Scheduler & Background Jobs
+
+**Status:** ✅ Shipped
+
+The cadence, auto-generate, pulse, and reddit-engagement ticks iterate all workspaces and run
+per-tenant; the BioLoop edge function does the same on its daily cron. Shared services
+(`source`, `pulse`, `kuze`, `bioloop`, `reddit-engagement`, `settings`, `activity`) thread
+`workspaceId` so every read/write is scoped.
+
+**Files:** `apps/api/src/services/scheduler.ts`, `supabase/functions/bioloop/index.ts`.
+
+---
+
+### 4-3 — Workspace Membership & Roles
+
+**Status:** ✅ Shipped
+
+`vantage.workspace_members` maps users to workspaces with `owner`/`admin`/`editor`/`viewer`
+roles (existing owners backfilled as `owner`). The guard authorizes by membership and exposes
+`c.get("workspaceRole")`. Member-management routes (`GET`/`POST`/`DELETE
+/v1/workspaces/:id/members`) are gated to owners/admins and refuse to remove the last owner.
+
+**Files:** `supabase/migrations/20260704000000_workspace_members.sql`,
+`apps/api/src/routes/workspaces.ts`, `apps/api/src/lib/workspace.ts`, `apps/api/src/lib/auth.ts`.
+
+---
+
+### 4-4 — Per-Tenant Channel Credentials
+
+**Status:** ✅ Shipped
+
+Adapters (X / LinkedIn / Reddit / Email) thread `workspaceId`, so OAuth tokens and the email
+recipient list are scoped to `(workspace_id, slug)`. OAuth start writes the pending state to
+the caller's workspace; the unauthenticated callback resolves the workspace by matching that
+state across channel rows. Platform app credentials stay global env.
+
+**Files:** `apps/api/src/adapters/{x,linkedin,reddit,email}.ts`, `apps/api/src/routes/channels.ts`,
+`apps/api/src/routes/publish.ts`, `apps/api/src/services/scheduler.ts`.
+
+---
+
+### 4-5 — Claim-Based Publish Lock
+
+**Status:** ✅ Shipped
+
+A transient `publishing` status + `locked_at` let a worker atomically claim a queued piece
+(`queued → publishing` compare-and-swap) so a slow tick or a second instance can't
+double-publish. A reaper re-queues pieces left mid-publish by a crashed worker; the lock is
+released on retry/rate-limit. The manual-publish route claims queued pieces too (409 if the
+engine already has it).
+
+**Files:** `supabase/migrations/20260703000000_publish_lock.sql`,
+`apps/api/src/services/scheduler.ts`, `apps/api/src/routes/publish.ts`.
+
+---
+
+### 4-6 — Test Suite & CI
+
+**Status:** ✅ Shipped
+
+Vitest harness in `@vantage/api` with **42 tests** across the highest-risk paths: publish state
+machine (success / retry-backoff / exhausted-fail+alert / rate-limit), cadence claim lock,
+auto-generate audit gating (pass→queued, fail→regen→approved/rejected), membership/IDOR guard,
+multi-tenant OAuth state resolution, webhook signature verification + workspace attribution, and
+utilities. A GitHub Actions workflow runs typecheck + tests + build on every push/PR.
+
+**Files:** `apps/api/vitest.config.ts`, `apps/api/src/**/*.test.ts`, `.github/workflows/ci.yml`.
+
+---
+
+### 4-7 — Billing & Plans
+
+**Status:** ⬜ Planned
+
+Stripe integration + plan tiers + quota/metering enforcement. Needs product decisions (pricing
+model, tier boundaries, what to meter). Tracked separately; not yet started.
+
+---
+
+*Last updated: 22 core Vantage features operational. Phase 2 — Campaign Builder (Feature 22): campaign planning, timeline, KPI tracking with LLM-powered content ideation. Phase 3 — Strategic Intelligence (Feature 23): competitive monitoring, trend detection, gap analysis. Phase 4 — Audience Model (Feature 24): behavioral segmentation, LTV calculation, churn prediction, GA4 sync, ML-ready scoring. Phase 5 — BioLoop Virality Signals (Feature 25): viral growth detection, pattern recognition, segment-aware strategies. Workspace-scoped architecture with pluggable LLM providers (Claude/GPT-4o/Grok). Phase 3A (15 gaps/fixes), Phase 3B (5 new capabilities), and Phase 3C — Creative Studio (7 items) all shipped. Social Kit (Feature 20), Sound Effects + Audio Mixer (Feature 21) complete. **Phase 4 — SaaS Readiness: core multi-tenancy, tenant-aware scheduler, workspace membership/roles, per-tenant channel credentials, and a claim-based publish lock all shipped, with a 42-test Vitest suite + CI; billing is the remaining item.***
