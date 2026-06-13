@@ -27,8 +27,10 @@ multi-tenant SaaS. Ordered by leverage. Each phase is independently shippable.
 >   owner/admin/editor/viewer, role-gated member routes. 39 tests.
 > - **Migrations applied:** `20260702…`, `20260703…` (2026-06-12). **`20260704…`
 >   (workspace_members) NOT yet applied** — needs manual apply.
-> - **Remaining:** **billing** (Phase 4 — Stripe + plan/quota; needs pricing decisions)
->   and the audit-gating test (last Phase 3 gap).
+> - **Phase 3 complete:** **42 tests** covering all 5 priority areas (publish state
+>   machine, claim lock, membership/IDOR guard, webhook signature + attribution,
+>   audit gating) + multi-tenant OAuth + utilities.
+> - **Remaining:** **billing** (Phase 4 — Stripe + plan/quota; needs pricing decisions).
 
 ## Phase 1 — Tenancy migration (the blocker)  ✅ done
 

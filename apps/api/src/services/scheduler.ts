@@ -303,7 +303,8 @@ async function autoGenerateTick(): Promise<void> {
   }
 }
 
-async function autoGenerateTickForWorkspace(workspaceId: string): Promise<void> {
+// Exported for unit tests (the audit-gating path); not part of the public API.
+export async function autoGenerateTickForWorkspace(workspaceId: string): Promise<void> {
   const sb  = getSupabaseAdmin();
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
