@@ -3,6 +3,8 @@ export const channelFormatMap = {
   x:         'tweet',
   linkedin:  'linkedin_post',
   reddit:    'reddit_thread',
+  threads:   'threads_post',
+  bluesky:   'bluesky_post',
   email:     'email_newsletter',
   tiktok:    'tiktok_script',
   instagram: 'instagram_caption',
@@ -41,6 +43,16 @@ Rules: Professional but conversational. Open with a bold claim or surprising sta
 Format: reddit_thread
 Output schema: {"title":"<post title, max 300 chars>","body":"<post body, 100–800 words>","is_link_post":false}
 Rules: Value-first — teach something useful. Never a direct ad. Frame as a tip, resource, or experience. Subreddit context is provided in the prompt. No self-promotion in title.`,
+
+    threads_post: `
+Format: threads_post
+Output schema: {"body":"<post text, max 500 chars>"}
+Rules: Conversational and casual — Threads rewards personality over polish. Hook in the first line. Light emoji use is fine. Max 1–2 hashtags. Count characters.`,
+
+    bluesky_post: `
+Format: bluesky_post
+Output schema: {"body":"<post text, max 300 chars>"}
+Rules: Concise and authentic — the Bluesky audience skews technical and dislikes marketing-speak. Lead with the useful idea. No hashtag spam. Count characters (300 hard limit).`,
 
     email_newsletter: `
 Format: email_newsletter
@@ -150,6 +162,8 @@ export function ilitaAuditSystemPrompt(format: ContentFormat): string {
     tweet: 'Tweet (max 280 chars): verify character count, hook quality, brand compliance.',
     linkedin_post: 'LinkedIn post: verify professional tone, accuracy of any statistics cited, no unsubstantiated claims.',
     reddit_thread: 'Reddit thread: verify value-first framing, no overt advertising, subreddit-appropriate tone.',
+    threads_post: 'Threads post (max 500 chars): verify character count, conversational hook, minimal hashtags, brand compliance.',
+    bluesky_post: 'Bluesky post (max 300 chars): verify character count, authentic non-markety tone, no hashtag spam, brand compliance.',
     email_newsletter: 'Email newsletter: verify subject line is not clickbait, HTML is well-formed, CTA is present and honest.',
     tiktok_script: 'TikTok script: verify hook lands in ≤3 seconds, pacing is natural for spoken word, CTA is verbal and clear.',
     instagram_caption: 'Instagram caption: verify hook is in first line, hashtags are relevant and not spammy, alt text is descriptive.',

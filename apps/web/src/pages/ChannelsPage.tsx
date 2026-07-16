@@ -13,14 +13,16 @@ const CHANNEL_META: Record<string, {
   x:         { icon: '𝕏',  accent: 'cyan',  description: 'Post tweets and threads. OAuth 2.0 PKCE.', meta: ['OAuth 2.0', 'API v2'], authMethod: 'oauth' },
   linkedin:  { icon: 'in', accent: 'cyan',  description: 'Publish professional posts and articles.', meta: ['OAuth 2.0', 'UGC Posts'], authMethod: 'oauth' },
   reddit:    { icon: 'r/', accent: 'amber', description: 'Post to subreddits with subreddit-aware cadence.', meta: ['OAuth 2.0', 'Subreddit targeting'], authMethod: 'oauth' },
+  threads:   { icon: '@',  accent: 'cyan',  description: 'Publish text posts to Threads. Meta Graph API.', meta: ['OAuth 2.0', 'Text posts'], authMethod: 'oauth' },
+  bluesky:   { icon: '🦋', accent: 'cyan',  description: 'Post to Bluesky via AT Protocol. App password.', meta: ['App password', 'AT Protocol'], authMethod: 'api_key' },
   email:     { icon: '✉',  accent: 'green', description: 'Newsletter via Resend. HTML email.', meta: ['Resend API', 'HTML email'], authMethod: 'api_key' },
   tiktok:    { icon: '♪',  accent: 'red',   description: 'Script queue for one-click manual upload.', meta: ['Manual post', 'Video queue'], authMethod: 'manual' },
   instagram: { icon: '◉',  accent: 'gold',  description: 'Caption queue for manual Instagram upload.', meta: ['Manual post', 'Reels queue'], authMethod: 'manual' },
   facebook:  { icon: 'f',  accent: 'amber', description: 'Queue for manual Facebook Page publishing.', meta: ['Manual post'], authMethod: 'manual' },
 }
 
-const CHANNEL_ORDER = ['x', 'linkedin', 'reddit', 'email', 'tiktok', 'instagram', 'facebook']
-const OAUTH_CHANNELS = ['x', 'linkedin', 'reddit']
+const CHANNEL_ORDER = ['x', 'linkedin', 'reddit', 'threads', 'bluesky', 'email', 'tiktok', 'instagram', 'facebook']
+const OAUTH_CHANNELS = ['x', 'linkedin', 'reddit', 'threads']
 
 function CadenceForm({ slug, config, onSave }: {
   slug: string
@@ -104,6 +106,54 @@ function CadenceForm({ slug, config, onSave }: {
         onClick={() => void handleSave()}
         disabled={saving}
       />
+    </div>
+  )
+}
+
+function BlueskyConnectForm({ onConnect }: { onConnect: (handle: string, appPassword: string) => Promise<void> }) {
+  const [handle, setHandle]         = React.useState('')
+  const [appPassword, setAppPassword] = React.useState('')
+  const [busy, setBusy]             = React.useState(false)
+
+  const submit = async () => {
+    if (!handle.trim() || !appPassword.trim()) return
+    setBusy(true)
+    try {
+      await onConnect(handle.trim(), appPassword.trim())
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <input
+        type="text"
+        className="vg-input"
+        placeholder="handle.bsky.social"
+        value={handle}
+        onChange={(e) => setHandle(e.target.value)}
+        autoComplete="off"
+      />
+      <input
+        type="password"
+        className="vg-input"
+        placeholder="App password (Settings → App Passwords)"
+        value={appPassword}
+        onChange={(e) => setAppPassword(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') void submit() }}
+        autoComplete="off"
+      />
+      <Button
+        label={busy ? 'Connecting…' : 'Connect Bluesky'}
+        variant="secondary"
+        size="sm"
+        onClick={() => void submit()}
+        disabled={busy || !handle.trim() || !appPassword.trim()}
+      />
+      <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', margin: 0 }}>
+        Use an app password, not your main password. Create one at bsky.app → Settings → App Passwords.
+      </p>
     </div>
   )
 }
@@ -250,6 +300,18 @@ export function ChannelsPage() {
     }
   }
 
+  const connectBluesky = async (handle: string, appPassword: string) => {
+    setErr(null)
+    try {
+      const { handle: connectedHandle } = await vantageApi.connectBluesky(handle, appPassword)
+      setMsg(`Bluesky connected as @${connectedHandle}`)
+      await load()
+      setTimeout(() => setMsg(null), 3000)
+    } catch (e) {
+      setErr(String((e as Error).message))
+    }
+  }
+
   const saveCadence = async (slug: string, patch: Partial<ChannelStatus['cadence_config']>) => {
     setErr(null)
     try {
@@ -327,6 +389,16 @@ export function ChannelsPage() {
               )}
               {/* Already connected — show disconnect hint */}
               {meta.authMethod === 'oauth' && OAUTH_CHANNELS.includes(slug) && connected && (
+                <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', marginTop: 6, textAlign: 'center' }}>
+                  ✓ Connected — click tile to configure cadence
+                </p>
+              )}
+
+              {/* Bluesky credential connect form */}
+              {slug === 'bluesky' && !connected && (
+                <BlueskyConnectForm onConnect={connectBluesky} />
+              )}
+              {slug === 'bluesky' && connected && (
                 <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', marginTop: 6, textAlign: 'center' }}>
                   ✓ Connected — click tile to configure cadence
                 </p>

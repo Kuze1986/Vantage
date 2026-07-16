@@ -6,6 +6,8 @@ import { getSupabaseAdmin } from "../lib/supabase.js";
 import { generatePkce, buildAuthorizeUrl as xAuthorizeUrl, savePendingOAuth as xSavePending } from "../adapters/x.js";
 import { buildAuthorizeUrl as liAuthorizeUrl, savePendingOAuth as liSavePending } from "../adapters/linkedin.js";
 import { buildAuthorizeUrl as redditAuthorizeUrl, savePendingOAuth as redditSavePending } from "../adapters/reddit.js";
+import { buildAuthorizeUrl as threadsAuthorizeUrl, savePendingOAuth as threadsSavePending } from "../adapters/threads.js";
+import { connect as blueskyConnect } from "../adapters/bluesky.js";
 
 const cadenceSchema = z.object({
   posts_per_day:   z.number().int().min(0).max(20).optional(),
@@ -24,18 +26,23 @@ channelsAuthedRoutes.get("/", async (c) => {
   const sb = getSupabaseAdmin();
   const { data: channels, error } = await sb
     .from("channels")
-    .select("slug, enabled, cadence_config, connected_at, access_token_hash")
+    .select("slug, enabled, cadence_config, connected_at, access_token_hash, auth_state")
     .eq("workspace_id", ws)
     .order("slug");
   if (error) throw new HTTPException(500, { message: error.message });
 
-  const rows = (channels ?? []).map((ch: Record<string, unknown>) => ({
-    slug:           ch.slug,
-    enabled:        ch.enabled,
-    cadence_config: ch.cadence_config,
-    connected:      !!ch.access_token_hash,
-    connected_at:   ch.connected_at ?? null,
-  }));
+  const rows = (channels ?? []).map((ch: Record<string, unknown>) => {
+    // Adapters store credentials in auth_state.tokens on successful connect.
+    // Fall back to the legacy access_token_hash column if present.
+    const tokens = (ch.auth_state as { tokens?: unknown } | null)?.tokens;
+    return {
+      slug:           ch.slug,
+      enabled:        ch.enabled,
+      cadence_config: ch.cadence_config,
+      connected:      !!tokens || !!ch.access_token_hash,
+      connected_at:   ch.connected_at ?? null,
+    };
+  });
 
   return c.json({ channels: rows });
 });
@@ -112,7 +119,7 @@ channelsAuthedRoutes.post("/:slug/auth/start", async (c) => {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes("Missing")) {
-          throw new HTTPException(503, { message: "LinkedIn OAuth not configured. Set LI_CLIENT_ID, LI_CLIENT_SECRET, and LI_REDIRECT_URI in Railway." });
+          throw new HTTPException(503, { message: "LinkedIn OAuth not configured. Set LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET, and LINKEDIN_REDIRECT_URI in Railway." });
         }
         throw e;
       }
@@ -130,7 +137,43 @@ channelsAuthedRoutes.post("/:slug/auth/start", async (c) => {
         throw e;
       }
     }
+    case "threads": {
+      try {
+        await threadsSavePending(ws, state);
+        const url = threadsAuthorizeUrl(state);
+        return c.json({ authorize_url: url, state });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("not configured")) {
+          throw new HTTPException(503, { message: "Threads OAuth not configured. Set THREADS_CLIENT_ID, THREADS_CLIENT_SECRET, and THREADS_REDIRECT_URI in Railway." });
+        }
+        throw e;
+      }
+    }
     default:
       throw new HTTPException(400, { message: `OAuth not supported for channel: ${slug}` });
+  }
+});
+
+// ── POST /:slug/connect — credential-based connect (Bluesky app password) ─────
+const blueskyConnectSchema = z.object({
+  handle:       z.string().min(1),
+  app_password: z.string().min(1),
+});
+
+channelsAuthedRoutes.post("/:slug/connect", async (c) => {
+  const slug = c.req.param("slug");
+  const ws = c.get("workspaceId");
+  if (slug !== "bluesky") {
+    throw new HTTPException(400, { message: `Credential connect not supported for channel: ${slug}` });
+  }
+  const parsed = blueskyConnectSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) throw new HTTPException(400, { message: "handle and app_password are required" });
+  try {
+    const { did, handle } = await blueskyConnect(ws, parsed.data.handle, parsed.data.app_password);
+    return c.json({ ok: true, did, handle });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new HTTPException(400, { message: msg });
   }
 });

@@ -19,6 +19,8 @@ export const channelSlugSchema = z.enum([
   "x",
   "linkedin",
   "reddit",
+  "threads",
+  "bluesky",
   "email",
   "tiktok",
   "instagram",
@@ -31,6 +33,8 @@ export const channelFormatMap: Record<ChannelSlug, string> = {
   x:         "tweet",
   linkedin:  "linkedin_post",
   reddit:    "reddit_thread",
+  threads:   "threads_post",
+  bluesky:   "bluesky_post",
   email:     "email_newsletter",
   tiktok:    "tiktok_script",
   instagram: "instagram_caption",
@@ -38,7 +42,7 @@ export const channelFormatMap: Record<ChannelSlug, string> = {
 };
 
 // Channels that post via API (vs manual queue)
-export const API_CHANNELS: ChannelSlug[] = ["x", "linkedin", "reddit", "email"];
+export const API_CHANNELS: ChannelSlug[] = ["x", "linkedin", "reddit", "threads", "bluesky", "email"];
 // Channels that require manual upload
 export const MANUAL_CHANNELS: ChannelSlug[] = ["tiktok", "instagram", "facebook"];
 

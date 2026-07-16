@@ -16,6 +16,8 @@ import type { ChannelSlug } from "@vantage/prompts";
 import { postTweet } from "../adapters/x.js";
 import { postLinkedIn } from "../adapters/linkedin.js";
 import { postToSubreddit } from "../adapters/reddit.js";
+import { postThread } from "../adapters/threads.js";
+import { postBluesky } from "../adapters/bluesky.js";
 import { sendEmail } from "../adapters/email.js";
 
 const TICK_MS               = 60_000;            // check queue every 60 seconds
@@ -120,6 +122,16 @@ export async function publishPiece(workspaceId: string, piece: ContentPieceRow, 
           body:  String(payload.body ?? ""),
           is_link_post: payload.is_link_post === true,
         });
+        externalId = id;
+        break;
+      }
+      case "threads": {
+        const { id } = await postThread(workspaceId, String(payload.body ?? ""));
+        externalId = id;
+        break;
+      }
+      case "bluesky": {
+        const { id } = await postBluesky(workspaceId, String(payload.body ?? ""));
         externalId = id;
         break;
       }

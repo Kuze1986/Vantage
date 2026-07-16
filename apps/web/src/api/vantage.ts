@@ -167,6 +167,13 @@ export const vantageApi = {
   startOAuth: (slug: string) =>
     vantageFetch(`/v1/channels/${slug}/auth/start`, { method: "POST" }) as Promise<{ authorize_url: string }>,
 
+  // Credential-based connect (Bluesky app password)
+  connectBluesky: (handle: string, appPassword: string) =>
+    vantageFetch("/v1/channels/bluesky/connect", {
+      method: "POST",
+      body: JSON.stringify({ handle, app_password: appPassword }),
+    }) as Promise<{ ok: boolean; did: string; handle: string }>,
+
   // Legacy alias
   startXOAuth: () =>
     vantageFetch("/v1/channels/x/auth/start", { method: "POST" }) as Promise<{ authorize_url: string }>,

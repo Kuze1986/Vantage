@@ -9,6 +9,8 @@ import { recordGrowthEvent } from "../lib/growth.js";
 import { postTweet } from "../adapters/x.js";
 import { postLinkedIn } from "../adapters/linkedin.js";
 import { postToSubreddit } from "../adapters/reddit.js";
+import { postThread } from "../adapters/threads.js";
+import { postBluesky } from "../adapters/bluesky.js";
 import { sendEmail } from "../adapters/email.js";
 
 const bodySchema = z.object({
@@ -123,6 +125,18 @@ publishRoutes.post("/:channel", async (c) => {
           body:         String(payload.body ?? ""),
           is_link_post: payload.is_link_post === true,
         }));
+        break;
+      }
+      case "threads": {
+        const body = String(payload.body ?? "");
+        if (!body) throw new Error("Missing Threads post body");
+        ({ id: externalId } = await postThread(ws, body));
+        break;
+      }
+      case "bluesky": {
+        const body = String(payload.body ?? "");
+        if (!body) throw new Error("Missing Bluesky post body");
+        ({ id: externalId } = await postBluesky(ws, body));
         break;
       }
       case "email": {
