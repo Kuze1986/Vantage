@@ -50,7 +50,7 @@ auditRoutes.post("/", async (c) => {
 
   let iterations = (piece.audit_iterations as number) ?? 0;
 
-  const first = await auditContent({ content, format, brand_voice: brandVoiceStr });
+  const first = await auditContent({ content, format, brand_voice: brandVoiceStr, workspace_id: ws });
 
   if (first.verdict === "pass") {
     await sb.from("content_pieces").update({
@@ -115,7 +115,7 @@ auditRoutes.post("/", async (c) => {
     gen2.content_payload.body ?? gen2.content_payload.text ??
     gen2.content_payload.hook ?? gen2.content_payload.title ?? ""
   );
-  const second = await auditContent({ content: newContent, format: gen2.format, brand_voice: brandVoiceStr });
+  const second = await auditContent({ content: newContent, format: gen2.format, brand_voice: brandVoiceStr, workspace_id: ws });
 
   const status = second.verdict === "pass" ? "approved" : "rejected";
   const notes  = second.verdict === "pass" ? second.feedback : `${first.feedback} | ${second.feedback}`;

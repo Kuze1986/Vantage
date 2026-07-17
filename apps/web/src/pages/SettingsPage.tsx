@@ -20,24 +20,33 @@ function envPresent(key: string): boolean {
 }
 
 type Settings = {
-  dedup_days:       number
-  scripta_enabled:  boolean
-  bioloop_enabled:  boolean
-  active_verticals: string[]
+  dedup_days:            number
+  scripta_enabled:       boolean
+  bioloop_enabled:       boolean
+  active_verticals:      string[]
+  llm_provider_generate: string
+  llm_provider_audit:    string
 }
+
+type LLMProviderInfo = { name: string; displayName: string; available: boolean }
 
 export function SettingsPage() {
   const [settings, setSettings]   = React.useState<Settings | null>(null)
   const [draft, setDraft]         = React.useState<Settings | null>(null)
+  const [providers, setProviders] = React.useState<LLMProviderInfo[]>([])
   const [saving, setSaving]       = React.useState(false)
   const [saved, setSaved]         = React.useState(false)
   const [err, setErr]             = React.useState<string | null>(null)
 
   const load = React.useCallback(async () => {
     try {
-      const r = await vantageApi.getSettings()
+      const [r, p] = await Promise.all([
+        vantageApi.getSettings(),
+        vantageApi.listLLMProviders().catch(() => ({ providers: [] as LLMProviderInfo[] })),
+      ])
       setSettings(r.settings)
       setDraft(r.settings)
+      setProviders(p.providers)
     } catch (e) {
       setErr(String((e as Error).message))
     }
@@ -227,6 +236,59 @@ export function SettingsPage() {
               </div>
 
               {/* Save */}
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <Button
+                  label={saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save Settings'}
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleSave()}
+                  disabled={saving || !isDirty}
+                />
+                {isDirty && !saving && (
+                  <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-amber)' }}>Unsaved changes</span>
+                )}
+              </div>
+            </div>
+          )}
+        </Panel>
+
+        {/* ── AI Providers ───────────────────────────────────────────────── */}
+        <Panel title="AI Providers" titleAccent="amber">
+          {!draft ? (
+            <p className="vg-empty">Loading…</p>
+          ) : (
+            <div style={{ display: 'grid', gap: 16 }}>
+              <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', margin: 0, lineHeight: 1.6 }}>
+                Choose which model powers each AI task. "Inherit default" uses the server's
+                LLM_PROVIDER_* environment variable. A provider is selectable only if its API
+                key is configured server-side.
+              </p>
+
+              {([
+                { key: 'llm_provider_generate' as const, label: 'Content generation (Kuze)', hint: 'Writes posts, threads, captions' },
+                { key: 'llm_provider_audit' as const,    label: 'Compliance audit (Ilita)',  hint: 'Reviews content before it ships' },
+              ]).map(({ key, label, hint }) => (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                  <div>
+                    <div style={{ fontFamily: 'var(--nx-sans)', fontSize: 13, color: 'var(--nx-text-1)', marginBottom: 2 }}>{label}</div>
+                    <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)' }}>{hint}</div>
+                  </div>
+                  <select
+                    className="vg-input"
+                    value={draft[key]}
+                    onChange={(e) => patch(key, e.target.value)}
+                    style={{ width: 220 }}
+                  >
+                    <option value="">Inherit default</option>
+                    {providers.map((p) => (
+                      <option key={p.name} value={p.name} disabled={!p.available}>
+                        {p.displayName}{p.available ? '' : ' — no API key'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <Button
                   label={saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save Settings'}

@@ -1,14 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { ilitaAuditSystemPrompt, ilitaAuditUserPrompt } from "@vantage/prompts";
 import type { ContentFormat } from "@vantage/prompts";
-
-const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
-
-function getClient(): Anthropic {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new Error("Missing ANTHROPIC_API_KEY");
-  return new Anthropic({ apiKey: key });
-}
+import { resolveProvider } from "../lib/llm.js";
 
 function extractJson(text: string): Record<string, unknown> {
   const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
@@ -27,25 +19,21 @@ export type AuditResult =
  * canonical text of the piece (body, script, subject+body, etc.)
  */
 export async function auditContent(params: {
-  content:     string;
-  format:      ContentFormat;
-  brand_voice: string;
+  content:      string;
+  format:       ContentFormat;
+  brand_voice:  string;
+  workspace_id?: string;
 }): Promise<AuditResult> {
-  const client = getClient();
-  const msg = await client.messages.create({
-    model:      MODEL,
-    max_tokens: 400,
-    system:     ilitaAuditSystemPrompt(params.format),
-    messages:   [{ role: "user", content: ilitaAuditUserPrompt({
+  const provider = await resolveProvider("audit", params.workspace_id);
+  const text = (await provider.generateCompletion(
+    ilitaAuditUserPrompt({
       content:     params.content,
       format:      params.format,
       brand_voice: params.brand_voice,
-    }) }],
-  });
-
-  const block = msg.content.find((b) => b.type === "text");
-  if (!block || block.type !== "text") throw new Error("Ilita: empty response");
-  const text    = block.text;
+    }),
+    { system_prompt: ilitaAuditSystemPrompt(params.format), max_tokens: 400 },
+  )).trim();
+  if (!text) throw new Error("Ilita: empty response");
   const parsed  = extractJson(text);
   const verdict = parsed.verdict === "pass" || parsed.verdict === "fail" ? parsed.verdict : null;
   if (!verdict) throw new Error(`Ilita: invalid verdict in response: ${text.slice(0, 200)}`);

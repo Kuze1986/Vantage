@@ -415,9 +415,10 @@ export async function autoGenerateTickForWorkspace(workspaceId: string): Promise
 
         // Audit it
         const auditResult = await auditContent({
-          content:     gen.text_preview || JSON.stringify(gen.content_payload),
+          content:      gen.text_preview || JSON.stringify(gen.content_payload),
           format,
-          brand_voice: brandVoiceStr,
+          brand_voice:  brandVoiceStr,
+          workspace_id: workspaceId,
         });
 
         if (auditResult.verdict === "pass") {
@@ -450,7 +451,7 @@ export async function autoGenerateTickForWorkspace(workspaceId: string): Promise
             vertical: topic.vertical,
             brand_voice: brandVoiceStr,
           });
-          const audit2 = await auditContent({ content: gen2.text_preview, format: gen2.format, brand_voice: brandVoiceStr });
+          const audit2 = await auditContent({ content: gen2.text_preview, format: gen2.format, brand_voice: brandVoiceStr, workspace_id: workspaceId });
           const finalStatus = audit2.verdict === "pass" ? "approved" : "rejected";
           await sb.from("content_pieces").update({
             status: finalStatus,

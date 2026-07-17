@@ -12,6 +12,9 @@ export interface PipelineSettings {
   // 3B-6: evergreen recycling
   evergreen_threshold:   number;    // min engagement events to qualify for recycling (default 3)
   evergreen_recycle_days: number;   // days before a recycled topic can be used again (default 90)
+  // Multi-LLM: per-task provider override. "" = inherit env default (LLM_PROVIDER_*).
+  llm_provider_generate: string;    // content generation (Kuze)
+  llm_provider_audit:    string;    // compliance audit (Ilita)
 }
 
 const DEFAULTS: PipelineSettings = {
@@ -21,6 +24,8 @@ const DEFAULTS: PipelineSettings = {
   active_verticals:      [],
   evergreen_threshold:   3,
   evergreen_recycle_days: 90,
+  llm_provider_generate: "",
+  llm_provider_audit:    "",
 };
 
 export async function loadSettings(workspaceId: string): Promise<PipelineSettings> {
@@ -39,6 +44,8 @@ export async function loadSettings(workspaceId: string): Promise<PipelineSetting
       active_verticals:       Array.isArray(map.active_verticals)              ? map.active_verticals as string[] : DEFAULTS.active_verticals,
       evergreen_threshold:    typeof map.evergreen_threshold    === "number"  ? map.evergreen_threshold    : DEFAULTS.evergreen_threshold,
       evergreen_recycle_days: typeof map.evergreen_recycle_days === "number"  ? map.evergreen_recycle_days : DEFAULTS.evergreen_recycle_days,
+      llm_provider_generate:  typeof map.llm_provider_generate  === "string"  ? map.llm_provider_generate  : DEFAULTS.llm_provider_generate,
+      llm_provider_audit:     typeof map.llm_provider_audit     === "string"  ? map.llm_provider_audit     : DEFAULTS.llm_provider_audit,
     };
   } catch {
     return { ...DEFAULTS };

@@ -1,18 +1,10 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { kuzeSystemPrompt, kuzeUserPrompt, channelFormatMap } from "@vantage/prompts";
 import type { ChannelSlug, ContentFormat } from "@vantage/prompts";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { tagUrls } from "../lib/utm.js";
+import { resolveProvider } from "../lib/llm.js";
 
 export type { ChannelSlug, ContentFormat };
-
-const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-6";
-
-function getClient(): Anthropic {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) throw new Error("Missing ANTHROPIC_API_KEY");
-  return new Anthropic({ apiKey: key });
-}
 
 function extractJson(text: string): Record<string, unknown> {
   const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
@@ -59,28 +51,20 @@ export interface GenerateContentOutput {
 }
 
 export async function generateContent(input: GenerateContentInput): Promise<GenerateContentOutput> {
-  const format  = channelFormatMap[input.channel] as ContentFormat;
-  const weights = await loadWeights(input.workspace_id, input.channel);
-  const client  = getClient();
+  const format   = channelFormatMap[input.channel] as ContentFormat;
+  const weights  = await loadWeights(input.workspace_id, input.channel);
+  const provider = await resolveProvider("generate", input.workspace_id);
 
-  const msg = await client.messages.create({
-    model:      MODEL,
-    max_tokens: 1400,
-    system:     kuzeSystemPrompt(format),
-    messages:   [{ role: "user", content: kuzeUserPrompt({
+  const rawText = (await provider.generateCompletion(
+    kuzeUserPrompt({
       format,
       topic_text:  input.topic_text,
       vertical:    input.vertical,
       brand_voice: input.brand_voice,
       extras: { subreddit: input.extras?.subreddit, weights: weights || undefined },
-    }) }],
-  });
-
-  const rawText = msg.content
-    .filter((b) => b.type === "text")
-    .map((b) => (b as { type: "text"; text: string }).text)
-    .join("")
-    .trim();
+    }),
+    { system_prompt: kuzeSystemPrompt(format), max_tokens: 1400 },
+  )).trim();
 
   const parsed = extractJson(rawText);
 
@@ -115,8 +99,8 @@ export interface GenerateCaptionsInput {
 }
 
 export async function generateCaptions(input: GenerateCaptionsInput): Promise<string[]> {
-  const weights = await loadWeights(input.workspace_id, input.channel);
-  const client  = getClient();
+  const weights  = await loadWeights(input.workspace_id, input.channel);
+  const provider = await resolveProvider("generate", input.workspace_id);
 
   const channelLabel = input.channel.toUpperCase();
   const toneHint     = input.tone ? `Tone: ${input.tone}. ` : '';
@@ -135,17 +119,10 @@ Topic/angle: ${input.prompt}
 ${toneHint}
 Generate ${countHint} caption variants for ${channelLabel}. Return a JSON array of strings only.`;
 
-  const msg = await client.messages.create({
-    model:      MODEL,
+  const raw = (await provider.generateCompletion(userContent, {
+    system_prompt: systemPrompt,
     max_tokens: 1200,
-    system:     systemPrompt,
-    messages:   [{ role: 'user', content: userContent }],
-  });
-
-  const raw = msg.content
-    .filter((b) => b.type === 'text')
-    .map((b) => (b as { type: 'text'; text: string }).text)
-    .join('')
+  }))
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/, '')

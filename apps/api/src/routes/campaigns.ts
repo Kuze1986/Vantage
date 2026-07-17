@@ -680,6 +680,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
           content: gen.text_preview || JSON.stringify(gen.content_payload),
           format: gen.format,
           brand_voice: brandVoiceStr,
+          workspace_id: workspaceId,
         });
         auditNotes = `[${audit.verdict}] ${audit.feedback}`.slice(0, 1000);
       } catch {

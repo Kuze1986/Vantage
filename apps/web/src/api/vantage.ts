@@ -199,14 +199,18 @@ export const vantageApi = {
         scripta_enabled: boolean;
         bioloop_enabled: boolean;
         active_verticals: string[];
+        llm_provider_generate: string;
+        llm_provider_audit: string;
       }
     }>,
 
   patchSettings: (patch: {
-    dedup_days?:       number;
-    scripta_enabled?:  boolean;
-    bioloop_enabled?:  boolean;
-    active_verticals?: string[];
+    dedup_days?:            number;
+    scripta_enabled?:       boolean;
+    bioloop_enabled?:       boolean;
+    active_verticals?:      string[];
+    llm_provider_generate?: string;
+    llm_provider_audit?:    string;
   }) =>
     vantageFetch("/v1/settings", { method: "PATCH", body: JSON.stringify(patch) }) as Promise<{
       ok: boolean;
@@ -215,7 +219,14 @@ export const vantageApi = {
         scripta_enabled: boolean;
         bioloop_enabled: boolean;
         active_verticals: string[];
+        llm_provider_generate: string;
+        llm_provider_audit: string;
       }
+    }>,
+
+  listLLMProviders: () =>
+    vantageFetch("/v1/settings/llm-providers") as Promise<{
+      providers: { name: string; displayName: string; available: boolean }[]
     }>,
 
   // ── Calendar ──────────────────────────────────────────────────────────────

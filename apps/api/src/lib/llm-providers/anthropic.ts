@@ -20,7 +20,9 @@ export class AnthropicProvider implements LLMProvider {
   readonly displayName = 'Claude (Anthropic)';
 
   private client: Anthropic | null = null;
-  private model = process.env.ANTHROPIC_MODEL || 'claude-opus-4-1-20250805';
+  // Matches the previous kuze/ilita default so behaviour is unchanged when
+  // ANTHROPIC_MODEL is unset. Override via ANTHROPIC_MODEL.
+  private model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
 
   get available(): boolean {
     return !!process.env.ANTHROPIC_API_KEY;
