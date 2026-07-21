@@ -9,7 +9,9 @@ const REDDIT_API   = "https://oauth.reddit.com";
 // Reddit blocks generic/non-compliant User-Agents (403). Format Reddit expects:
 // "<platform>:<app id>:<version> (by /u/<your reddit username>)". Set REDDIT_USER_AGENT
 // in the API env with your real username for best results.
-const USER_AGENT   = process.env.REDDIT_USER_AGENT ?? "web:vantage:1.0.0 (by /u/vantage-app)";
+// .trim(): a stray leading/trailing space (easy to introduce in a Railway env value)
+// makes the header malformed and Reddit's edge 403s it.
+const USER_AGENT   = (process.env.REDDIT_USER_AGENT ?? "web:vantage:1.0.0 (by /u/vantage-app)").trim();
 
 type RedditAuthState = {
   pending_oauth?: { state: string; created_at: string };
