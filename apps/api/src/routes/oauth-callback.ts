@@ -14,8 +14,22 @@ const EXCHANGERS: Record<string, (code: string, state: string) => Promise<void>>
   threads:  exchangeThreads,
 };
 
+/**
+ * Canonical web-app base to bounce back to after OAuth. Prefer WEB_APP_URL; else
+ * fall back to the FIRST entry of CORS_ORIGIN (which may be a comma-separated
+ * allow-list — using the whole string would produce an invalid redirect URL).
+ * Normalizes a missing scheme and strips any trailing slash.
+ */
+function webAppBase(): string {
+  const raw = (process.env.WEB_APP_URL?.trim())
+    || (process.env.CORS_ORIGIN ?? "http://localhost:5173").split(",")[0].trim();
+  const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  return withScheme.replace(/\/+$/, "");
+}
+
 export async function oauthCallbackGet(c: Context) {
-  const slug = c.req.param("slug") ?? "";
+  // Slugs are lowercase; tolerate a mis-cased redirect URI path (e.g. .../channels/X/...).
+  const slug = (c.req.param("slug") ?? "").toLowerCase();
   const exchange = EXCHANGERS[slug];
   if (!exchange) return c.text("unsupported channel", 400);
   const code = c.req.query("code");
@@ -42,6 +56,5 @@ export async function oauthCallbackGet(c: Context) {
     }).catch(() => {});
     return c.html(`<p>Token exchange failed: ${msg}</p>`, 500);
   }
-  const spa = process.env.CORS_ORIGIN ?? "http://localhost:5173";
-  return c.redirect(`${spa}/channels?connected=${slug}`);
+  return c.redirect(`${webAppBase()}/channels?connected=${slug}`);
 }
