@@ -6,7 +6,10 @@ import { RateLimitError, parseRetryAfter } from "../lib/rate-limit-error.js";
 const REDDIT_AUTH  = "https://www.reddit.com/api/v1/authorize";
 const REDDIT_TOKEN = "https://www.reddit.com/api/v1/access_token";
 const REDDIT_API   = "https://oauth.reddit.com";
-const USER_AGENT   = "vantage-marketing-bot/1.0";
+// Reddit blocks generic/non-compliant User-Agents (403). Format Reddit expects:
+// "<platform>:<app id>:<version> (by /u/<your reddit username>)". Set REDDIT_USER_AGENT
+// in the API env with your real username for best results.
+const USER_AGENT   = process.env.REDDIT_USER_AGENT ?? "web:vantage:1.0.0 (by /u/vantage-app)";
 
 type RedditAuthState = {
   pending_oauth?: { state: string; created_at: string };
