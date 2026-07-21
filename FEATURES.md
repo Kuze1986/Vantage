@@ -60,7 +60,7 @@ to every route. Authorization is by **membership**: `vantage.workspace_members` 
 workspaces with a role (`owner` / `admin` / `editor` / `viewer`), exposed as
 `c.get("workspaceRole")`. Changing the header to a workspace the user is not a member of is
 rejected with 403 (IDOR-safe). A user's first request lazily provisions a workspace, an owner
-membership, and that workspace's seven channel rows.
+membership, and that workspace's nine channel rows.
 
 Row-level security on all Supabase tables is enforced through the `authenticated` and
 `service_role` Postgres roles, with workspace-scoped policies as a defense-in-depth backstop.
@@ -158,7 +158,8 @@ respective Postgres schemas to be accessible from the same Supabase instance.
 
 **What it does:**
 Kuze is the AI copywriter. It takes a topic, the brand voice, and (optionally) BioLoop
-performance weights, and returns a channel-formatted JSON content payload via Claude.
+performance weights, and returns a channel-formatted JSON content payload via the workspace's
+configured LLM provider (Claude, GPT-4o, or Grok — see [Pluggable LLM Providers](#4-8--pluggable-llm-providers)).
 
 **Supported formats and output schemas:**
 
@@ -167,6 +168,8 @@ performance weights, and returns a channel-formatted JSON content payload via Cl
 | X | `tweet` | `body` (≤280 chars) |
 | LinkedIn | `linkedin_post` | `body`, `headline` (optional) |
 | Reddit | `reddit_thread` | `title`, `body`, `is_link_post` |
+| Threads | `threads_post` | `body` (≤500 chars) |
+| Bluesky | `bluesky_post` | `body` (≤300 chars) |
 | Email | `email_newsletter` | `subject`, `preview_text`, `body` (HTML) |
 | TikTok | `tiktok_script` | `hook`, `script`, `on_screen_text`, `instructions` |
 | Instagram | `instagram_caption` | `caption`, `hashtags[]`, `alt_text`, `instructions` |
@@ -195,13 +198,16 @@ at the adapter level before sending via Resend.
 
 **Files:**
 - `apps/api/src/services/kuze.ts` — main generation logic, weight loading
+- `apps/api/src/lib/llm.ts` — per-task provider resolution (`resolveProvider("generate", …)`)
 - `apps/api/src/services/imageGen.ts` — DALL-E 3 integration
 - `apps/api/src/routes/generate.ts` — `POST /v1/generate/:channel`
 - `packages/prompts/src/index.ts` — system and user prompt builders, format schemas
 - `apps/api/src/lib/utm.ts` — URL tagging utility
 
-**Configuration:** `ANTHROPIC_API_KEY` (required), `ANTHROPIC_MODEL` (optional, default
-`claude-sonnet-4-6`), `OPENAI_API_KEY` (required only for image generation).
+**Configuration:** Kuze runs on the workspace's chosen generation provider (default Anthropic).
+At least one provider key must be set — `ANTHROPIC_API_KEY` (+ optional `ANTHROPIC_MODEL`,
+default `claude-sonnet-4-6`), `OPENAI_API_KEY` (+ `OPENAI_MODEL`), and/or `GROK_API_KEY`. Image
+generation additionally requires `OPENAI_API_KEY`. See [Pluggable LLM Providers](#4-8--pluggable-llm-providers).
 
 ---
 
@@ -209,7 +215,9 @@ at the adapter level before sending via Resend.
 
 **What it does:**
 Ilita is the AI brand-safety reviewer. It takes a content piece, its format, and the brand
-voice, then calls Claude to assess whether the content passes NEXUS brand guidelines.
+voice, then calls the workspace's configured **audit** provider (Claude, GPT-4o, or Grok —
+chosen independently of Kuze's generation provider) to assess whether the content passes NEXUS
+brand guidelines.
 
 Returns one of:
 - `"pass"` — content is approved, moves to `approved` status
@@ -220,10 +228,12 @@ appended to the topic prompt. If the second attempt also fails, the piece is mar
 `rejected`. The number of audit attempts is tracked in `audit_iterations`.
 
 **Files:**
-- `apps/api/src/services/ilita.ts` — audit logic
+- `apps/api/src/services/ilita.ts` — audit logic (`auditContent` takes `workspace_id` to resolve the provider)
+- `apps/api/src/lib/llm.ts` — `resolveProvider("audit", workspaceId)`
 - `apps/api/src/routes/audit.ts` — `POST /v1/audit`
 
-**Configuration:** Uses `ANTHROPIC_API_KEY` (same client as Kuze).
+**Configuration:** Uses whichever provider is selected for the audit task (defaults to Anthropic).
+See [Pluggable LLM Providers](#4-8--pluggable-llm-providers).
 
 ---
 
@@ -268,11 +278,11 @@ based on the channel's `posting_hours` config.
 Each channel has an adapter that takes a `content_payload` and posts it to the platform.
 
 > **Per-tenant credentials (Phase 2b).** Every adapter is scoped by `workspaceId`: OAuth
-> tokens live on the workspace's own `channels` row (keyed `(workspace_id, slug)`), and the
-> email adapter sends only to that workspace's subscribers. Platform **app** credentials
-> (client ids/secrets, `RESEND_API_KEY`) remain global env. The unauthenticated OAuth callback
-> resolves which workspace a flow belongs to by matching the pending OAuth `state` across
-> channel rows.
+> tokens (and Bluesky's app-password session) live on the workspace's own `channels` row (keyed
+> `(workspace_id, slug)`, in `auth_state.tokens`), and the email adapter sends only to that
+> workspace's subscribers. Platform **app** credentials (client ids/secrets, `RESEND_API_KEY`)
+> remain global env. The unauthenticated OAuth callback resolves which workspace a flow belongs
+> to by matching the pending OAuth `state` across channel rows.
 
 #### X (Twitter)
 Posts via Twitter API v2 `POST /2/tweets`. Uses OAuth 2.0 access token stored in
@@ -288,6 +298,18 @@ the post URN as ID.
 Posts via Reddit OAuth API (`POST /api/submit`). Routes to a configured subreddit.
 Supports text posts (`kind: "self"`) and link posts (`kind: "link"`). Returns the post
 `id`. Subreddit selection currently uses random choice from configured list.
+
+#### Threads
+Posts via the Meta Threads API (Graph-based). OAuth 2.0 with a short-lived → long-lived
+(~60-day) token exchange and auto-refresh. Publishing is two-step: create a text media
+container (`POST /{user-id}/threads`), then publish it (`POST /{user-id}/threads_publish`).
+Returns the media `id`. Text capped at 500 chars.
+
+#### Bluesky
+Posts via the AT Protocol (not OAuth). The workspace connects with a handle + **app password**
+(`com.atproto.server.createSession`); the session JWTs are stored on the channel row and
+refreshed on expiry. Publishing writes an `app.bsky.feed.post` record via
+`com.atproto.repo.createRecord`. Returns the post rkey. Text capped at 300 chars.
 
 #### Email
 Sends via Resend API to the workspace's active subscribers (where `workspace_id` matches and
@@ -306,6 +328,8 @@ manual upload; this URL is stored as `external_post_id`.
 - `apps/api/src/adapters/x.ts`
 - `apps/api/src/adapters/linkedin.ts`
 - `apps/api/src/adapters/reddit.ts`
+- `apps/api/src/adapters/threads.ts`
+- `apps/api/src/adapters/bluesky.ts`
 - `apps/api/src/adapters/email.ts`
 - `apps/api/src/adapters/tiktok.ts`
 - `apps/api/src/adapters/instagram.ts`
@@ -404,13 +428,18 @@ Weights can be inspected via `GET /v1/bioloop/weights?channel=<slug>`.
 ### 10. Channel Management
 
 **What it does:**
-Manages the seven distribution channels and their per-channel configuration.
+Manages the nine distribution channels and their per-channel configuration.
 
-**OAuth channels** (X, LinkedIn, Reddit): Full OAuth 2.0 PKCE flow.
-- `POST /v1/channels/:slug/auth/start` — generates the authorization URL with code verifier
-- `GET /v1/channels/:slug/auth/callback` — exchanges code for tokens, stores in `vantage.channels`
-- Tokens stored: `access_token`, `refresh_token`, `token_expiry`, `access_token_hash`
-- `connected` status = whether `access_token_hash` is populated
+**OAuth channels** (X, LinkedIn, Reddit, Threads): Full OAuth 2.0 flow (X uses PKCE).
+- `POST /v1/channels/:slug/auth/start` — generates the authorization URL (+ code verifier for X)
+- `GET /v1/channels/:slug/auth/callback` — dispatches by slug, exchanges code for tokens, stores
+  them in the workspace's `channels` row under `auth_state.tokens`
+- `connected` status = whether `auth_state.tokens` is present (falls back to the legacy
+  `access_token_hash` column)
+
+**App-password channel** (Bluesky): No OAuth redirect. The workspace connects with a handle +
+app password via `POST /v1/channels/:slug/connect`; the AT Protocol session is stored under
+`auth_state.tokens` and refreshed on expiry.
 
 **API key channel** (Email): No OAuth; credentials are server-side env vars only. The
 email channel row in `vantage.channels` tracks `enabled` and `cadence_config` but has no
@@ -526,33 +555,190 @@ the processor downloads the file from Storage for mixing.
 
 **What it does:**
 A separate Railway service (`apps/demoforge`) that produces platform-formatted marketing
-videos from a structured script + URL input.
+videos from a structured script + URL input. The pipeline is a full creative studio:
+overlays, auto-captions, color grading, intro/outro sequences, and timeline controls are
+all applied in post-processing by FFmpeg before upload.
 
 **Pipeline steps:**
-1. **Record** — Playwright launches a headless Chromium browser at the target URL,
+1. **Timeline pre-pass** — if `timeline_config.target_duration_sec` is set, all script step
+   `ms` values are scaled proportionally so the recording hits the target length before
+   Playwright is invoked.
+2. **Record** — Playwright launches a headless Chromium browser at the target URL,
    executes script steps (navigate / click / fill / wait / scroll / narrate), and
    records the session as a WebM video.
-2. **Synthesize** — ElevenLabs text-to-speech converts all `narration` fields from
-   the script steps into a single MP3 audio file. Voice ID is configurable per job.
-3. **Mix** — FFmpeg combines screen recording + narration audio + optional background
-   music track (at 15% volume). Scales to platform dimensions:
-   - TikTok: 1080×1920 (9:16 portrait)
-   - Instagram Reels: 1080×1920 (9:16 portrait)
-   - LinkedIn: 1920×1080 (16:9 landscape)
-4. **Upload** — MP4 output is uploaded to `vantage-media` Supabase Storage at
-   `demoforge/<format>/<job_id>.mp4`. Returns the public URL.
+3. **Synthesize** — a pluggable `TtsProvider` (see below) converts all `narration` fields
+   into audio + per-word timing data. Word timings feed the auto-caption generator.
+   Provider is selectable per job (`tts_provider`) or via `DEMOFORGE_TTS_PROVIDER`
+   (default `elevenlabs`); voice/profile is configurable per job.
+4. **Caption generation** — if `caption_config.enabled`, an ASS subtitle file is produced
+   from the word timings. Supports per-word karaoke highlight, font/size/color/position,
+   and optional background box.
+5. **Mix** — FFmpeg `complexFilter` chain:
+   - Trim (`trim=start/end + setpts=PTS-STARTPTS`) if `trim_start_sec`/`trim_end_sec` set.
+   - Scale + pad to platform dimensions (always in `complexFilter`, not `-vf`, to allow chaining).
+   - Global speed (`setpts=PTS/N` on video; chained `atempo` on audio) if multiplier ≠ 1.
+   - Text overlays (`drawtext`) and logo overlays (`overlay`) from `overlays[]`.
+   - Caption burn (`subtitles=captions.ass`) if caption file generated.
+   - Color grade (`eq` + `colorbalance` preset or custom) if `color_grade` set.
+   - Audio mix: narration + background music + sound effects → amix → master volume.
+   - Outputs to platform dimensions:
+     - TikTok: 1080×1920 (9:16 portrait)
+     - Instagram Reels: 1080×1920 (9:16 portrait)
+     - LinkedIn: 1920×1080 (16:9 landscape)
+6. **Intro/Outro concat** — if `intro_clip_id` or `outro_clip_id` set, clips are downloaded
+   from storage, normalized to match the main video's dimensions/codecs, and concatenated
+   using FFmpeg `concat` filter.
+7. **Keyframe extraction** — 5 frames are extracted at evenly-spaced timestamps and uploaded
+   to storage as PNG previews (`demoforge/frames/<job_id>/frame-N.png`).
+8. **Upload** — final MP4 uploaded to `vantage-media` at `demoforge/<format>/<job_id>.mp4`.
 
-**Job lifecycle:** Jobs are persisted to `vantage.demoforge_jobs` throughout.
-Status transitions: `pending → recording → synthesizing → mixing → done / failed`.
+**Job lifecycle:** `pending → recording → synthesizing → mixing → done / failed`.
 Processing is sequential (one job at a time) to avoid overloading the Railway worker.
 
 **Script step types:**
 - `navigate` — load a URL
 - `click` — click a CSS selector
 - `fill` — type into a field
-- `wait` — pause N milliseconds
+- `wait` — pause N milliseconds (scalable via target duration)
 - `scroll` — scroll down 300px
 - `narrate` — pause for narration (audio-only, no browser action)
+- `eval` — run arbitrary JS via `addInitScript` (fires on every navigation)
+
+Each step supports `speed_multiplier` (0.5–2×) when `timeline_config.per_step_speed` is enabled.
+
+---
+
+#### 14-P1 — Video Overlays ✅ Shipped
+
+Text and logo/image overlays burned into the video at configurable positions and times.
+
+**`input_payload.overlays[]`** — up to 10 overlays per job:
+- `type: "text"` — content, font (mono/sans/display), size, color, optional semi-transparent box; position by anchor (left/center/right × top/center/bottom) + pixel offset; optional start/end seconds.
+- `type: "image"` — references a Brand Kit by `brand_kit_id`; logo is downloaded from Supabase Storage and scaled to `width`; same position + timing controls.
+
+**Brand Kits** (`vantage.brand_kits`, `GET/POST/PATCH/DELETE /v1/brand-kits`): workspace-scoped logo, primary/secondary/accent colors, heading/body font preferences. Used by image overlays and as a workspace default.
+
+**Frontend:** `OverlayEditor.tsx` — collapsible panel, per-overlay row, count badge.
+
+**Files:**
+- `apps/demoforge/src/jobs/processor.ts` — `buildTextOverlayFilter()`, `buildImageOverlayFilter()`, logo download, complexFilter chain
+- `apps/api/src/routes/brand-kits.ts` — brand kit CRUD
+- `apps/web/src/creative/OverlayEditor.tsx`
+- `supabase/migrations/20260715000000_brand_kits.sql`
+
+---
+
+#### 14-P2 — Auto-Captions ✅ Shipped
+
+Narration-synced subtitles burned into the video as ASS format.
+
+**`input_payload.caption_config`:**
+- `enabled: boolean` — master toggle
+- `font_family` — `"mono"` | `"sans"`
+- `font_size` — default 56px portrait / 40px landscape
+- `primary_color`, `outline_color` — hex
+- `background` — semi-transparent box behind text
+- `position` — `"top"` | `"center"` | `"bottom"`
+- `word_highlight` — karaoke-style current-word color via ASS `\kf` tags
+- `highlight_color` — hex, default `#FFFF00`
+- `max_words_per_line` — default 4 portrait / 6 landscape
+
+Word timings depend on the TTS provider: **ElevenLabs** returns real character-level
+timing (`textToSpeech.convertWithTimestamps()` → `charAlignmentToWordTimings()` groups
+characters into word boundaries); **Voicebox** returns none, so `evenWordTimings()`
+approximates them by spreading words across each line's known duration (weighted by
+word length). Either way `generateCaptionASS()` writes the `.ass` file and FFmpeg
+`subtitles=` burns it in.
+
+**Frontend:** `CaptionStyler.tsx` — enable toggle, font/color/position/background/highlight controls, live mini-preview bar.
+
+**Files:**
+- `apps/demoforge/src/jobs/processor.ts` — `synthesizeNarration()`, `charAlignmentToWordTimings()`, `evenWordTimings()`, `hexToAssColor()`, `formatAssTime()`, `generateCaptionASS()`
+- `apps/web/src/creative/CaptionStyler.tsx`
+
+---
+
+#### 14-P6 — Pluggable TTS Providers ✅ Shipped
+
+Narration synthesis goes through a `TtsProvider` interface, selectable per job
+(`input_payload.tts_provider`) or via the `DEMOFORGE_TTS_PROVIDER` env var (default
+`elevenlabs`).
+
+- **`ElevenLabsProvider`** (cloud) — `textToSpeech.convertWithTimestamps()`, real
+  character-level timings, voice via `voice_id`. The production/cloud path.
+- **`VoiceBoxProvider`** (local, self-hosted **Qwen3-TTS voice cloning**) — calls the
+  Voicebox FastAPI server (`VOICEBOX_API_URL`, default `http://127.0.0.1:17493`):
+  `POST /generate` → poll `GET /generate/{id}/status` → `GET /audio/{id}`. Voices are
+  **profiles** (`VOICEBOX_PROFILE_ID`); no timing data, so captions use `evenWordTimings()`.
+  Local/self-hosted deployments only (server binds to localhost).
+
+**Prerequisites for Voicebox:** the app must be running with a model downloaded + loaded
+(`GET /health → model_loaded:true`) and at least one voice profile created. If the server
+is unreachable or the model isn't loaded, DemoForge logs a warning and produces a silent
+video (same graceful degradation as ElevenLabs running out of credits).
+
+**Files:**
+- `apps/demoforge/src/jobs/processor.ts` — `TtsProvider`, `ElevenLabsProvider`, `VoiceBoxProvider`, `evenWordTimings()`, `getTtsProvider()`
+- `apps/demoforge/src/jobs/queue.ts`, `apps/demoforge/src/index.ts`, `apps/api/src/routes/demoforge.ts` — `tts_provider` field
+
+---
+
+#### 14-P3 — Color Grading ✅ Shipped
+
+Named-preset and fully-custom color grade applied after overlays and captions in the filter chain.
+
+**`input_payload.color_grade`:**
+- `preset` — `"clean"` | `"warm"` | `"cinematic"` | `"vibrant"` | `"muted"` | `"cool"` | `"dark"`
+- `custom` — `brightness` (-1–1), `contrast` (0.5–2), `saturation` (0–3), `red_gain`/`green_gain`/`blue_gain` (-0.5–0.5), `gamma` (0.1–10)
+
+Presets are implemented as `eq` + `colorbalance` FFmpeg filter combinations. Custom values override preset defaults field-by-field. `clean` with no custom values produces no filter (identity pass).
+
+**Frontend:** `ColorGrader.tsx` — 4-column preset tile grid with gradient swatches, expandable 7-slider custom adjustment panel, active override badge in header.
+
+**Files:**
+- `apps/demoforge/src/jobs/processor.ts` — `buildColorGradeFilter()`, preset tables `PRESET_EQ` / `PRESET_COLORBALANCE`
+- `apps/web/src/creative/ColorGrader.tsx`
+
+---
+
+#### 14-P4 — Intro / Outro Sequences ✅ Shipped
+
+Branded clip bookends prepended/appended to the main recording.
+
+**`input_payload`:** `intro_clip_id?: string`, `outro_clip_id?: string`
+
+Clips live in `vantage.intro_outro_clips` (`type` in/outro/both, `target_format` tiktok/linkedin/instagram/all, `storage_path`, optional `brand_kit_id`, optional `preview_url` GIF). `workspace_id` nullable = global library entry. Each clip is downloaded from storage, normalized to the job's target dimensions via a dedicated `normalizeClip()` pass (scale + guaranteed AAC audio track), then concatenated using FFmpeg `concat=n=N:v=1:a=1`.
+
+**API:** `GET/POST/PATCH/DELETE /v1/intro-outro-clips` — `GET` supports `?format=&type=` and returns workspace clips + global library entries.
+
+**Frontend:** `SequencePicker.tsx` — collapsible panel, intro + outro sections, 4-column clip tile grid, GIF preview support, format-filtered, toggle-to-deselect.
+
+**Files:**
+- `apps/demoforge/src/jobs/processor.ts` — `normalizeClip()`, `concatSequences()`
+- `apps/api/src/routes/intro-outro-clips.ts`
+- `apps/web/src/creative/SequencePicker.tsx`
+- `supabase/migrations/20260720000000_intro_outro_clips.sql`
+
+---
+
+#### 14-P5 — Timeline Controls ✅ Shipped
+
+Target duration, trim, and global speed multiplier applied across the full video + audio pipeline.
+
+**`input_payload.timeline_config`:**
+- `target_duration_sec` — pre-recording: scales all step `ms` values by `target / Σ(ms)` so the browser recording hits the target length
+- `trim_start_sec` — cuts the first N seconds of the recording (`trim=start=N,setpts=PTS-STARTPTS`)
+- `trim_end_sec` — keeps only up to this timestamp (`trim=end=N`)
+- `global_speed_multiplier` — 0.25–4×; video uses `setpts=PTS/N`; audio uses chained `atempo` (single filter for 0.5–2; chained for extremes)
+- `per_step_speed` — enables `speed_multiplier` field on each `ScriptStep` (UI column in Script Steps panel)
+
+**Frontend:** `TimelineEditor.tsx` — target duration input + Best fit button (pre-fills from `Σ(step.ms)/1000`), trim start/end inputs, global speed section with 6 preset buttons (0.5×–2×) + fine-tune slider (0.25–4×), per-step speed opt-in toggle.
+
+**Files:**
+- `apps/demoforge/src/jobs/processor.ts` — `applyTargetDuration()`, `buildAtempoChain()`, trim/speed in `mixVideo()`
+- `apps/web/src/creative/TimelineEditor.tsx`
+
+---
 
 **API (internal, called via vantage-api proxy):**
 - `POST /jobs` — submit a job, returns `job_id` immediately (202)
@@ -562,17 +748,24 @@ Processing is sequential (one job at a time) to avoid overloading the Railway wo
 - `POST /v1/demoforge/jobs`
 - `GET /v1/demoforge/jobs/:id`
 - `GET /v1/demoforge/jobs` (lists recent jobs from DB)
+- `GET/POST/PATCH/DELETE /v1/brand-kits`
+- `GET/POST/PATCH/DELETE /v1/intro-outro-clips`
 
 The DemoForge job submission UI lives at `/demoforge` in the web app (`DemoForgePage.tsx`).
-It includes the target URL input, format selector, step editor, music library picker,
-job submission, and a 5-second status poller showing pipeline progress.
+Creative studio panels render in order: Overlays → Captions → Color Grade → Intro/Outro → Timeline → Audio Mixer.
 
-**Files:**
-- `apps/demoforge/src/index.ts` — Hono server
-- `apps/demoforge/src/jobs/queue.ts` — in-process job queue
-- `apps/demoforge/src/jobs/processor.ts` — pipeline orchestration
+**Core files:**
+- `apps/demoforge/src/index.ts` — Hono server + job schema validation
+- `apps/demoforge/src/jobs/queue.ts` — in-process job queue + all payload types
+- `apps/demoforge/src/jobs/processor.ts` — full pipeline orchestration + FFmpeg filter chain
 - `apps/demoforge/Dockerfile`
 - `apps/api/src/routes/demoforge.ts` — vantage-api proxy
+- `apps/api/src/routes/brand-kits.ts` — brand kit CRUD
+- `apps/api/src/routes/intro-outro-clips.ts` — clip library CRUD
+- `apps/web/src/pages/DemoForgePage.tsx` — main UI
+- `apps/web/src/creative/OverlayEditor.tsx`, `CaptionStyler.tsx`, `ColorGrader.tsx`, `SequencePicker.tsx`, `TimelineEditor.tsx`
+- `supabase/migrations/20260715000000_brand_kits.sql`
+- `supabase/migrations/20260720000000_intro_outro_clips.sql`
 
 **Configuration (DemoForge service):** `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
 `ELEVENLABS_API_KEY`, `DEMOFORGE_SECRET` (shared with vantage-api), `PORT`.
@@ -666,6 +859,12 @@ pipeline tick — no restart required.
 | `scripta_enabled` | boolean | true | When false, `refreshTopicsFromScripta()` returns immediately without querying the scripta schema. |
 | `bioloop_enabled` | boolean | true | When false, the daily BioLoop scheduler tick logs "skipped" and exits without running. |
 | `active_verticals` | string[] | [] (all) | When non-empty, Shift topics whose `vertical` field is not in this list are skipped during pull. Pulse topics are not filtered. |
+| `llm_provider_generate` | string | "" (inherit) | Provider for content generation (Kuze): `anthropic` \| `openai` \| `grok`, or "" to inherit the `LLM_PROVIDER_GENERATE`/`LLM_PROVIDER` env default. |
+| `llm_provider_audit` | string | "" (inherit) | Provider for compliance audit (Ilita): same values, chosen independently of generation. |
+
+The Settings page renders an **AI Providers** panel with a per-task dropdown for each; a provider
+is only selectable when its API key is configured server-side (surfaced via
+`GET /v1/settings/llm-providers`). See [Pluggable LLM Providers](#4-8--pluggable-llm-providers).
 
 **Non-configurable here (live in Channels page):**
 - Auto-approve toggle — per-channel in CadenceForm
@@ -675,6 +874,7 @@ pipeline tick — no restart required.
 - `apps/web/src/pages/SettingsPage.tsx`
 - `apps/api/src/routes/settings.ts`
 - `apps/api/src/lib/settings.ts`
+- `apps/api/src/lib/llm.ts` + `apps/api/src/lib/llm-providers/*`
 - `supabase/migrations/20260605000000_settings.sql`
 
 ---
@@ -715,7 +915,10 @@ users → workspaces with roles. Every core table carries a `workspace_id` (NOT 
 shared global library (no `workspace_id`).
 
 **Core tables** (all workspace-scoped unless noted):
-- `vantage.workspaces` — tenant root (owner, name, slug, default LLM provider)
+- `vantage.workspaces` — tenant root (owner, name, slug). (A legacy `llm_provider` column and
+  a `preferred_llm_provider` settings key exist from earlier scaffolding but are **not** read by
+  the wired path; the active choice lives in the `llm_provider_generate`/`llm_provider_audit`
+  settings keys — see [Pluggable LLM Providers](#4-8--pluggable-llm-providers).)
 - `vantage.workspace_members` — user↔workspace roles (owner/admin/editor/viewer)
 - `vantage.channels` — channel config, per-tenant tokens, cadence — PK `(workspace_id, slug)`
 - `vantage.topics` — ingested source topics
@@ -1895,4 +2098,62 @@ model, tier boundaries, what to meter). Tracked separately; not yet started.
 
 ---
 
-*Last updated: 22 core Vantage features operational. Phase 2 — Campaign Builder (Feature 22): campaign planning, timeline, KPI tracking with LLM-powered content ideation. Phase 3 — Strategic Intelligence (Feature 23): competitive monitoring, trend detection, gap analysis. Phase 4 — Audience Model (Feature 24): behavioral segmentation, LTV calculation, churn prediction, GA4 sync, ML-ready scoring. Phase 5 — BioLoop Virality Signals (Feature 25): viral growth detection, pattern recognition, segment-aware strategies. Workspace-scoped architecture with pluggable LLM providers (Claude/GPT-4o/Grok). Phase 3A (15 gaps/fixes), Phase 3B (5 new capabilities), and Phase 3C — Creative Studio (7 items) all shipped. Social Kit (Feature 20), Sound Effects + Audio Mixer (Feature 21) complete. **Phase 4 — SaaS Readiness: core multi-tenancy, tenant-aware scheduler, workspace membership/roles, per-tenant channel credentials, and a claim-based publish lock all shipped, with a 42-test Vitest suite + CI; billing is the remaining item.***
+### 4-8 — Pluggable LLM Providers
+
+**Status:** ✅ Shipped
+
+The AI services no longer hard-depend on Anthropic. Kuze (generation) and Ilita (audit) route
+through a provider registry (`lib/llm-providers/`) with **Anthropic**, **OpenAI**, and **Grok**
+implementations behind one interface. Selection is **per task** and **per workspace**:
+`resolveProvider(task, workspaceId)` picks the provider by precedence —
+per-workspace setting (`llm_provider_generate` / `llm_provider_audit`) →
+`LLM_PROVIDER_GENERATE`/`LLM_PROVIDER_AUDIT` env → `LLM_PROVIDER` env → first provider with a
+configured key. A missing/invalid choice never hard-fails while any provider is configured. The
+Settings page adds an **AI Providers** panel (per-task dropdowns, unconfigured providers greyed
+out); `GET /v1/settings/llm-providers` reports availability. The registry's `generateStructured`
+is intentionally not used — the services keep their tuned `@vantage/prompts` schemas and existing
+JSON extraction via `generateCompletion`. Anthropic's default model is aligned to
+`claude-sonnet-4-6` so behaviour is unchanged when `ANTHROPIC_MODEL` is unset.
+
+> Model choice is per-provider via env (`ANTHROPIC_MODEL`, `OPENAI_MODEL`; Grok pinned in
+> `grok.ts`) — the UI selects the provider, not a specific model.
+
+**Files:** `apps/api/src/lib/llm.ts`, `apps/api/src/lib/llm-providers/{index,types,anthropic,openai,grok}.ts`,
+`apps/api/src/services/{kuze,ilita}.ts`, `apps/api/src/routes/settings.ts`,
+`apps/api/src/lib/settings.ts`, `apps/web/src/pages/SettingsPage.tsx`,
+`apps/api/src/routes/{audit,campaigns}.ts`, `apps/api/src/services/scheduler.ts`.
+
+**Configuration:** any subset of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GROK_API_KEY`, with
+optional `ANTHROPIC_MODEL` / `OPENAI_MODEL` and the `LLM_PROVIDER*` defaults.
+
+---
+
+### 4-9 — Threads & Bluesky Channels
+
+**Status:** ✅ Shipped
+
+Two new distribution channels bring the total to nine. **Threads** (Meta Graph API) uses the
+standard OAuth 2.0 flow — a new `threads.ts` adapter mirrors LinkedIn with a short→long-lived
+token exchange and a two-step publish. **Bluesky** (AT Protocol) uses credential auth instead of
+an OAuth redirect: the workspace connects with a handle + app password via a new
+`POST /v1/channels/:slug/connect` endpoint, and posts via `com.atproto.repo.createRecord`. Both
+are wired into the publish route, the cadence scheduler, the per-workspace channel seed, and the
+Channels UI; `ChannelSlug` and the generation/audit prompt schemas were extended for both. A
+backfill migration adds the two channel rows to existing workspaces.
+
+This work also fixed two pre-existing OAuth defects: the channel list derived `connected` from a
+column no adapter writes (`access_token_hash`) — now from `auth_state.tokens`; and the OAuth
+callback only dispatched X, so LinkedIn/Reddit callbacks never exchanged tokens — now dispatches
+all OAuth channels and logs failures to `activity_events`.
+
+**Files:** `apps/api/src/adapters/{threads,bluesky}.ts`, `apps/api/src/routes/{channels,oauth-callback,publish}.ts`,
+`apps/api/src/services/scheduler.ts`, `apps/api/src/lib/workspace.ts`,
+`packages/{shared-types,prompts}/src/index.ts`, `apps/web/src/pages/ChannelsPage.tsx`,
+`apps/web/src/api/vantage.ts`, `supabase/migrations/20260725000000_threads_bluesky_channels.sql`.
+
+**Configuration:** `THREADS_CLIENT_ID` / `THREADS_CLIENT_SECRET` / `THREADS_REDIRECT_URI` for
+Threads; Bluesky needs no app credentials (per-user app passwords; optional `BLUESKY_PDS_URL`).
+
+---
+
+*Last updated: 22 core Vantage features operational. Phase 2 — Campaign Builder (Feature 22): campaign planning, timeline, KPI tracking with LLM-powered content ideation. Phase 3 — Strategic Intelligence (Feature 23): competitive monitoring, trend detection, gap analysis. Phase 4 — Audience Model (Feature 24): behavioral segmentation, LTV calculation, churn prediction, GA4 sync, ML-ready scoring. Phase 5 — BioLoop Virality Signals (Feature 25): viral growth detection, pattern recognition, segment-aware strategies. Workspace-scoped architecture with pluggable LLM providers (Claude/GPT-4o/Grok), now wired end-to-end and selectable **per task** (generation vs audit) per workspace. Nine distribution channels (X, LinkedIn, Reddit, Threads, Bluesky, Email + three manual). Phase 3A (15 gaps/fixes), Phase 3B (5 new capabilities), and Phase 3C — Creative Studio (7 items) all shipped. Social Kit (Feature 20), Sound Effects + Audio Mixer (Feature 21) complete. **Phase 4 — SaaS Readiness: core multi-tenancy, tenant-aware scheduler, workspace membership/roles, per-tenant channel credentials, a claim-based publish lock, pluggable LLM providers (4-8), and Threads + Bluesky channels (4-9) all shipped, with a 42-test Vitest suite + CI; billing is the remaining item.***
