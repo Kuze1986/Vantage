@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { fetch as undiciFetch, ProxyAgent, type RequestInit as UndiciRequestInit } from "undici";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import { RateLimitError, parseRetryAfter } from "../lib/rate-limit-error.js";
@@ -12,6 +13,23 @@ const REDDIT_API   = "https://oauth.reddit.com";
 // .trim(): a stray leading/trailing space (easy to introduce in a Railway env value)
 // makes the header malformed and Reddit's edge 403s it.
 const USER_AGENT   = (process.env.REDDIT_USER_AGENT ?? "web:vantage:1.0.0 (by /u/vantage-app)").trim();
+
+// Reddit hard-blocks datacenter IPs (e.g. Railway/GCP) at its edge → 403 Forbidden.
+// If REDDIT_PROXY_URL is set, route every Reddit call through that proxy (a
+// clean/residential IP). Uses undici's fetch+ProxyAgent together so the dispatcher
+// always matches the fetch implementation. When unset, behaviour is unchanged.
+let proxyAgent: ProxyAgent | undefined;
+function getProxyAgent(): ProxyAgent | undefined {
+  const url = process.env.REDDIT_PROXY_URL?.trim();
+  if (!url) return undefined;
+  if (!proxyAgent) proxyAgent = new ProxyAgent(url);
+  return proxyAgent;
+}
+
+function redditFetch(url: string, init: UndiciRequestInit) {
+  const dispatcher = getProxyAgent();
+  return undiciFetch(url, dispatcher ? { ...init, dispatcher } : init);
+}
 
 type RedditAuthState = {
   pending_oauth?: { state: string; created_at: string };
@@ -60,7 +78,7 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
 
   const body = new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirect });
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-  const res = await fetch(REDDIT_TOKEN, {
+  const res = await redditFetch(REDDIT_TOKEN, {
     method: "POST",
     headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT },
     body,
@@ -108,7 +126,7 @@ async function refreshAccessToken(workspaceId: string, refreshToken: string): Pr
   const { clientId, clientSecret } = requireEnv();
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refreshToken });
-  const res = await fetch(REDDIT_TOKEN, {
+  const res = await redditFetch(REDDIT_TOKEN, {
     method: "POST",
     headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT },
     body,
@@ -145,7 +163,7 @@ export async function postToSubreddit(workspaceId: string, params: {
     resubmit:  "true",
     nsfw:      "false",
   });
-  const res = await fetch(`${REDDIT_API}/api/submit`, {
+  const res = await redditFetch(`${REDDIT_API}/api/submit`, {
     method: "POST",
     headers: { Authorization: `bearer ${token}`, "Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT },
     body: formBody,
