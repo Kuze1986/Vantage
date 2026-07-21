@@ -64,7 +64,18 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
     body,
   });
   const json = (await res.json()) as Record<string, unknown>;
-  if (!res.ok) throw new Error(`Reddit token exchange failed: ${JSON.stringify(json)}`);
+  if (!res.ok) {
+    // Diagnostic: surfaces whether the UA change is live and whether Reddit's edge
+    // (Fastly) is blocking — distinguishes a bad User-Agent from a datacenter-IP block.
+    const diag = [
+      `status=${res.status}`,
+      `ua=${JSON.stringify(USER_AGENT)}`,
+      `via=${res.headers.get("via") ?? ""}`,
+      `x-served-by=${res.headers.get("x-served-by") ?? ""}`,
+      `retry-after=${res.headers.get("retry-after") ?? ""}`,
+    ].join("; ");
+    throw new Error(`Reddit token exchange failed: ${JSON.stringify(json)} [${diag}]`);
+  }
 
   const access_token  = typeof json.access_token  === "string" ? json.access_token  : null;
   const refresh_token = typeof json.refresh_token === "string" ? json.refresh_token : undefined;
