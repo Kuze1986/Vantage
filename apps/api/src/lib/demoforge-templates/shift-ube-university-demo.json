@@ -1,0 +1,144 @@
+{
+  "id": "shift-ube-university-demo",
+  "name": "The Shift — UBE University Demo",
+  "tagline": "Gamified bar prep for law schools — full exam-day simulation without another dry LMS.",
+  "audience": "Law school deans · clinical professors · academic technology · bar prep partnerships",
+  "format": "linkedin",
+  "estimatedSec": 210,
+  "estimatedSecNote": "Actual duration is driven by ElevenLabs per-line synthesis in DemoForge",
+  "baseUrlPlaceholder": "{BASE}",
+  "defaultBaseUrl": "http://localhost:5175",
+  "presenterNotes": [
+    "Frame: students already use Anki and games — bar prep should feel like training, not homework.",
+    "Emphasize: placeholder MBE copy is intentional; mechanics and exam-day flow are the demo.",
+    "Close: pilot with one 1L skills section — we measure engagement, not pass rates, in semester one."
+  ],
+  "steps": [
+    {
+      "action": "eval",
+      "selector": "localStorage.setItem('shift_content_pack','ube');",
+      "ms": 0,
+      "narration": ""
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Home",
+      "ms": 3200,
+      "narration": "This is The Shift configured for the Uniform Bar Exam — built for a law school pilot, not a consumer launch. Same gamification engine as our healthcare verticals, tuned for issue-spotting under pressure."
+    },
+    {
+      "action": "scroll",
+      "selector": "",
+      "ms": 2200,
+      "narration": "Students see a mission dashboard — bar exam countdown, rolling accuracy, and one-click deploy into the modes they'll actually use during bar season."
+    },
+    {
+      "action": "click",
+      "selector": "button:has-text('EXAM DAY SIM')",
+      "ms": 800,
+      "narration": ""
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/ube-exam-day",
+      "ms": 3500,
+      "narration": "Exam Day is the headline for your faculty demo — a full UBE mission chain: morning MBE, lunch lockout, essays, and MPT file work. Each block routes to a working mode, not a slide deck."
+    },
+    {
+      "action": "scroll",
+      "selector": "",
+      "ms": 2000,
+      "narration": "The progress rail mirrors real bar day pacing. You can walk through the chain live or jump straight into any block for a deep dive."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/StudyHub",
+      "ms": 3000,
+      "narration": "Study Hub maps mastery across all seven MBE subjects — civil procedure through torts — so instructors can see where a cohort is weak before grades slip."
+    },
+    {
+      "action": "scroll",
+      "selector": "",
+      "ms": 1800,
+      "narration": "Every domain links into Category Deep Dive, timed exams, and the War Room arsenal. One vertical switch; no separate product to maintain."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/WarRoom",
+      "ms": 3200,
+      "narration": "War Room is where the gamification lives — Clinic Shift scenarios at the core, MBE simulations on the dial, and bar-prep modes surfaced for the UBE pack."
+    },
+    {
+      "action": "scroll",
+      "selector": "",
+      "ms": 2000,
+      "narration": "Faculty can queue a training plan — issue spotter, essay forge, file room, exam day — or double-tap any node to deploy solo. Students feel like they're running missions, not checking boxes."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/essay-practice",
+      "ms": 2800,
+      "narration": "Essay Forge is timed MEE practice — prompt on screen, countdown running, student drafts in-browser, then self-grade against a model outline. Content is placeholder today; the session mechanics are production-ready."
+    },
+    {
+      "action": "click",
+      "selector": "button:has-text('Start timed session')",
+      "ms": 2500,
+      "narration": "One click drops them into a thirty-minute essay block — the same rhythm they'll need on exam day."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/mpt-practice",
+      "ms": 2800,
+      "narration": "File Room is the MPT — task memo, library files, and statute tabs on the left; objective memorandum editor on the right, with a grading checklist when they submit."
+    },
+    {
+      "action": "click",
+      "selector": "button:has-text('Enter file room')",
+      "ms": 2200,
+      "narration": "Split-pane layout matches how bar takers actually work — read the file, write the memo, no context switching."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/issue-spotter",
+      "ms": 3000,
+      "narration": "Issue Spotter is the arcade layer — short fact patterns, tag every live doctrine, score streaks for correct tags minus false alarms. It trains the skill bar examiners actually test."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/PracticeExamSelector",
+      "ms": 2800,
+      "narration": "MBE blocks use blueprint-driven exams — quick drill, half session, or full two-hundred-question simulation with section breaks and flag-for-review, just like the real thing."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/RealWorldScenarios",
+      "ms": 2500,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playDossierRound()",
+      "ms": 2800,
+      "narration": "Clinic Shift is our field-work mode — client intake, ethics calls, discovery deadlines — scored like a shift simulation, not a multiple-choice quiz."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/BossFight",
+      "ms": 600,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playBossRound()",
+      "ms": 3000,
+      "narration": "Circuit Split is the boss fight — phased MBE encounters with an HP bar. Miss a question and the boss hits back. Students remember the pain of losing a phase."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Home",
+      "ms": 3500,
+      "narration": "For your university meeting: every mode you saw is functional on placeholder content today. Scale the question bank with your faculty later — the engagement architecture is already here. Let's talk about a one-section pilot."
+    }
+  ]
+}

@@ -137,8 +137,26 @@ export const vantageApi = {
       id: string; status: string; channel_slug: string; format: string;
       content_payload: Record<string, unknown>; audit_notes: string | null;
       audit_iterations: number; created_at: string;
+      image_url?: string | null;
+      video_url?: string | null;
+      media_status?: string | null;
       retry_count?: number; retry_after?: string | null;
+      variant_group_id?: string | null;
     }[] }>,
+
+  patchQueuePiece: (id: string, body: {
+    image_url?: string | null;
+    video_url?: string | null;
+    media_status?: "none" | "pending" | "ready" | "failed";
+    content_payload_patch?: Record<string, unknown>;
+  }) =>
+    vantageFetch(`/v1/queue/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }) as Promise<{ piece: {
+      id: string; image_url: string | null; video_url: string | null;
+      media_status: string; content_payload: Record<string, unknown>;
+    } }>,
 
   // 3A-6: Retry a permanently-failed piece
   retryPiece: (id: string) =>
@@ -329,6 +347,32 @@ export const vantageApi = {
       body: JSON.stringify(params),
     }) as Promise<{ captions: string[] }>,
 
+  // ── Brand Kits (Phase 1: DemoForge creative studio) ──────────────────────
+  listBrandKits: () =>
+    vantageFetch("/v1/brand-kits") as Promise<{
+      kits: { id: string; name: string; logo_url: string | null; logo_storage_path: string | null; primary_color: string; secondary_color: string; accent_color: string; font_heading: string; font_body: string }[]
+    }>,
+
+  createBrandKit: (body: { name: string; logo_url?: string; logo_storage_path?: string; primary_color?: string; secondary_color?: string; accent_color?: string; font_heading?: string; font_body?: string }) =>
+    vantageFetch("/v1/brand-kits", { method: "POST", body: JSON.stringify(body) }) as Promise<{ ok: boolean; kit: { id: string; name: string } }>,
+
+  updateBrandKit: (id: string, body: { name?: string; logo_url?: string; logo_storage_path?: string; primary_color?: string; secondary_color?: string; accent_color?: string; font_heading?: string; font_body?: string }) =>
+    vantageFetch(`/v1/brand-kits/${id}`, { method: "PATCH", body: JSON.stringify(body) }) as Promise<{ ok: boolean; kit: { id: string; name: string } }>,
+
+  deleteBrandKit: (id: string) =>
+    vantageFetch(`/v1/brand-kits/${id}`, { method: "DELETE" }) as Promise<{ ok: boolean }>,
+
+  // ── Intro / Outro Clips (Phase 4: DemoForge sequences) ───────────────────
+  listIntroOutroClips: (params?: { format?: string; type?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.format) qs.set("format", params.format);
+    if (params?.type)   qs.set("type",   params.type);
+    const q = qs.toString();
+    return vantageFetch(`/v1/intro-outro-clips${q ? `?${q}` : ""}`) as Promise<{
+      clips: { id: string; type: string; name: string; duration_ms: number; storage_path: string; target_format: string; brand_kit_id: string | null; preview_url: string | null }[]
+    }>;
+  },
+
   // ── DemoForge ─────────────────────────────────────────────────────────────
   createDemoForgeJob: (body: {
     content_piece_id?: string;
@@ -339,6 +383,61 @@ export const vantageApi = {
     narration_volume?: number;
     music_volume?: number;
     master_volume?: number;
+    // Phase 1: video overlays
+    overlays?: Array<{
+      type: "text" | "image";
+      content?: string;
+      font_size?: number;
+      font_color?: string;
+      font_family?: "mono" | "sans" | "display";
+      box_color?: string;
+      brand_kit_id?: string;
+      width?: number;
+      x: "left" | "center" | "right" | number;
+      y: "top" | "center" | "bottom" | number;
+      x_offset?: number;
+      y_offset?: number;
+      start_sec?: number;
+      end_sec?: number;
+    }>;
+    brand_kit_id?: string;
+    // Phase 2: auto-captions
+    caption_config?: {
+      enabled: boolean;
+      font_size?: number;
+      font_family?: "mono" | "sans";
+      primary_color?: string;
+      outline_color?: string;
+      background?: boolean;
+      position?: "top" | "center" | "bottom";
+      word_highlight?: boolean;
+      highlight_color?: string;
+      max_words_per_line?: number;
+    };
+    // Phase 3: color grading
+    color_grade?: {
+      preset?: "clean" | "warm" | "cinematic" | "vibrant" | "muted" | "cool" | "dark";
+      custom?: {
+        brightness?: number;
+        contrast?: number;
+        saturation?: number;
+        red_gain?: number;
+        green_gain?: number;
+        blue_gain?: number;
+        gamma?: number;
+      };
+    };
+    // Phase 4: intro/outro
+    intro_clip_id?: string;
+    outro_clip_id?: string;
+    // Phase 5: timeline
+    timeline_config?: {
+      target_duration_sec?: number;
+      trim_start_sec?: number;
+      trim_end_sec?: number;
+      global_speed_multiplier?: number;
+      per_step_speed?: boolean;
+    };
   }) =>
     vantageFetch("/v1/demoforge/jobs", { method: "POST", body: JSON.stringify(body) }) as Promise<{ job_id: string; status: string }>,
 
@@ -351,6 +450,23 @@ export const vantageApi = {
     vantageFetch("/v1/demoforge/jobs") as Promise<{
       jobs: { id: string; content_piece_id: string | null; status: string; target_format: string; output_url: string | null; error_message: string | null; created_at: string }[]
     }>,
+
+  listDemoForgeTemplates: () =>
+    vantageFetch("/v1/demoforge/templates") as Promise<{
+      templates: { id: string; name: string; format: string; default_base_url: string | null; step_count: number }[];
+      defaults_by_channel: Record<string, string>;
+    }>,
+
+  createDemoForgeJobFromTemplate: (body: {
+    content_piece_id: string;
+    template_id?: string;
+    channel?: string;
+    base_url?: string;
+  }) =>
+    vantageFetch("/v1/demoforge/jobs/from-template", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }) as Promise<{ job_id: string; status: string; template_id: string }>,
 
   // ── Campaigns ─────────────────────────────────────────────────────────────
   listCampaigns: () =>
@@ -389,7 +505,10 @@ export const vantageApi = {
       body: JSON.stringify(dayNumbers ? { day_numbers: dayNumbers } : {}),
     }) as Promise<{
       launched: number; failed: number;
-      pieces: { content_piece_id: string; channel: string; day_number: number }[];
+      pieces: {
+        content_piece_id: string; channel: string; day_number: number;
+        media_status: string; demoforge_job_id?: string;
+      }[];
       failures: { day_number: number; error: string }[];
     }>,
 

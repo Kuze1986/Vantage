@@ -4,6 +4,8 @@ import { Panel, Badge, DataTable } from '../ds'
 import { PreviewModal } from '../ds/PreviewModal'
 import { QuoteCardStudio } from '../creative/QuoteCard'
 import { OgCardStudio } from '../creative/OgCard'
+import { BRANDS } from '../creative'
+import type { BrandId } from '../creative'
 import type { BadgeVariant } from '../ds'
 import type { ReactNode } from 'react'
 
@@ -17,9 +19,26 @@ export type Piece = {
   audit_iterations: number
   created_at: string
   image_url?: string | null
+  video_url?: string | null
+  media_status?: string | null
   variant_group_id?: string | null
   retry_count?: number
   retry_after?: string | null
+}
+
+function pieceBrandId(p: Piece): BrandId {
+  const id = p.content_payload?.brand_id
+  if (typeof id === 'string' && id in BRANDS) return id as BrandId
+  return 'shift'
+}
+
+function mediaBadgeVariant(status: string | null | undefined): BadgeVariant {
+  switch (status) {
+    case 'ready': return 'active'
+    case 'pending': return 'pending'
+    case 'failed': return 'critical'
+    default: return 'default'
+  }
 }
 
 const MANUAL_CHANNELS = new Set(['tiktok', 'instagram', 'facebook'])
@@ -203,8 +222,30 @@ export function QueuePage() {
             Ilita: {p.audit_notes.slice(0, 80)}{p.audit_notes.length > 80 ? '…' : ''}
           </div>
         )}
-        {/* Image preview */}
+        {/* Media status + previews */}
+        {p.media_status && p.media_status !== 'none' && (
+          <div style={{ marginTop: 4 }}>
+            <Badge label={`media: ${p.media_status}`} variant={mediaBadgeVariant(p.media_status)} />
+          </div>
+        )}
         {p.image_url && <ImagePreview url={p.image_url} />}
+        {(p.video_url || (typeof p.content_payload?.video_url === 'string' && p.content_payload.video_url)) && (
+          <div style={{ marginTop: 6 }}>
+            <video
+              src={String(p.video_url ?? p.content_payload.video_url)}
+              controls
+              style={{ width: '100%', maxWidth: 220, borderRadius: 4, border: '1px solid var(--nx-border)' }}
+            />
+            <a
+              href={String(p.video_url ?? p.content_payload.video_url)}
+              target="_blank"
+              rel="noreferrer"
+              style={{ display: 'block', marginTop: 4, fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-cyan)' }}
+            >
+              Open video
+            </a>
+          </div>
+        )}
         {/* Video script expand */}
         {VIDEO_FORMATS.has(p.format) && (
           <>
@@ -263,6 +304,35 @@ export function QueuePage() {
         >
           ◫ Share card
         </button>
+        {(p.media_status === 'pending' || p.media_status === 'failed' || Boolean(p.content_payload?.needs_social_kit)) && (
+          <button
+            type="button"
+            className="nx-btn nx-btn--ghost nx-btn--sm"
+            onClick={() => {
+              if (Boolean(p.content_payload?.needs_social_kit) || p.content_payload?.visual_type === 'social_graphic') {
+                setOgPiece(p)
+              } else {
+                setBusy(p.id)
+                void action(
+                  () => vantageApi.createDemoForgeJobFromTemplate({
+                    content_piece_id: p.id,
+                    template_id: typeof p.content_payload?.demoforge_template_id === 'string'
+                      ? p.content_payload.demoforge_template_id
+                      : undefined,
+                    channel: p.channel_slug,
+                  }),
+                  'DemoForge job queued',
+                ).finally(() => setBusy(null))
+              }
+            }}
+            disabled={busy === p.id}
+            title={p.content_payload?.needs_social_kit ? 'Open Social Kit / share card' : 'Retry DemoForge render'}
+          >
+            {Boolean(p.content_payload?.needs_social_kit) || p.content_payload?.visual_type === 'social_graphic'
+              ? 'Social Kit'
+              : busy === p.id ? '…' : '↺ DemoForge'}
+          </button>
+        )}
         {p.status === 'auditing' && (
           <button
             type="button"
@@ -374,7 +444,16 @@ export function QueuePage() {
               initialHeadline={String(ogPiece.content_payload?.headline ?? ogPiece.content_payload?.title ?? ogPiece.content_payload?.body ?? '').slice(0, 100)}
               initialSub={String(ogPiece.content_payload?.body ?? ogPiece.content_payload?.text ?? '').slice(0, 160)}
               channel={ogPiece.channel_slug}
-              brandId="vantage"
+              brandId={pieceBrandId(ogPiece)}
+              onAttached={async (url) => {
+                await vantageApi.patchQueuePiece(ogPiece.id, {
+                  image_url: url,
+                  media_status: 'ready',
+                  content_payload_patch: { needs_social_kit: false, image_url: url },
+                })
+                setMsg('Share card attached to piece')
+                await load()
+              }}
             />
           </div>
         </div>
@@ -388,8 +467,18 @@ export function QueuePage() {
               <button type="button" onClick={() => setQuotifyPiece(null)} style={{ background: 'none', border: '1px solid var(--nx-border)', borderRadius: 4, padding: '4px 10px', cursor: 'pointer', fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-text-3)' }}>✕ Close</button>
             </div>
             <QuoteCardStudio
+              pieceId={quotifyPiece.id}
               initialQuote={String(quotifyPiece.content_payload?.body ?? quotifyPiece.content_payload?.text ?? quotifyPiece.content_payload?.hook ?? '').split(/[.!?]\s+/)[0] ?? ''}
-              initialBrandId="vantage"
+              initialBrandId={pieceBrandId(quotifyPiece)}
+              onAttached={async (url) => {
+                await vantageApi.patchQueuePiece(quotifyPiece.id, {
+                  image_url: url,
+                  media_status: 'ready',
+                  content_payload_patch: { needs_social_kit: false, image_url: url },
+                })
+                setMsg('Quote card attached to piece')
+                await load()
+              }}
             />
           </div>
         </div>

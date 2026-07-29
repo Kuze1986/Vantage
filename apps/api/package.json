@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node -e \"const fs=require('fs');const p=require('path');const s='src/lib/demoforge-templates';const d='dist/lib/demoforge-templates';fs.mkdirSync(d,{recursive:true});for(const f of fs.readdirSync(s).filter(x=>x.endsWith('.json')))fs.copyFileSync(p.join(s,f),p.join(d,f));\"",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@bioloop/llm": "file:../../../bioloop-llm",
     "@hono/node-server": "^1.13.7",
     "@supabase/supabase-js": "^2.49.1",
     "@vantage/prompts": "workspace:*",

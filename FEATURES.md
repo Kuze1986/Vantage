@@ -159,7 +159,7 @@ respective Postgres schemas to be accessible from the same Supabase instance.
 **What it does:**
 Kuze is the AI copywriter. It takes a topic, the brand voice, and (optionally) BioLoop
 performance weights, and returns a channel-formatted JSON content payload via the workspace's
-configured LLM provider (Claude, GPT-4o, or Grok — see [Pluggable LLM Providers](#4-8--pluggable-llm-providers)).
+configured LLM provider (Claude, GPT-4o, Gemini, Grok, or Kimi — see [Pluggable LLM Providers](#4-8--pluggable-llm-providers)).
 
 **Supported formats and output schemas:**
 
@@ -591,6 +591,15 @@ all applied in post-processing by FFmpeg before upload.
 7. **Keyframe extraction** — 5 frames are extracted at evenly-spaced timestamps and uploaded
    to storage as PNG previews (`demoforge/frames/<job_id>/frame-N.png`).
 8. **Upload** — final MP4 uploaded to `vantage-media` at `demoforge/<format>/<job_id>.mp4`.
+9. **Content-piece write-back** — when the job has a `content_piece_id`, completion sets
+   `content_pieces.video_url`, copies the first keyframe to `image_url` /
+   `content_payload.image_url`, and sets `media_status` to `ready` (or `failed` on error).
+
+**Template registry (`apps/api/src/lib/demoforge-templates.ts`):**
+JSON script templates under `apps/api/src/lib/demoforge-templates/`. Seeded with Shift
+portfolio demos (`shift-queue-modes`, `shift-ube-university-demo`, `shift-queue-reel`) as
+**defaults** — other products can add templates. Exposed via `GET /v1/demoforge/templates`
+and `POST /v1/demoforge/jobs/from-template`.
 
 **Job lifecycle:** `pending → recording → synthesizing → mixing → done / failed`.
 Processing is sequential (one job at a time) to avoid overloading the Railway worker.
@@ -859,7 +868,7 @@ pipeline tick — no restart required.
 | `scripta_enabled` | boolean | true | When false, `refreshTopicsFromScripta()` returns immediately without querying the scripta schema. |
 | `bioloop_enabled` | boolean | true | When false, the daily BioLoop scheduler tick logs "skipped" and exits without running. |
 | `active_verticals` | string[] | [] (all) | When non-empty, Shift topics whose `vertical` field is not in this list are skipped during pull. Pulse topics are not filtered. |
-| `llm_provider_generate` | string | "" (inherit) | Provider for content generation (Kuze): `anthropic` \| `openai` \| `grok`, or "" to inherit the `LLM_PROVIDER_GENERATE`/`LLM_PROVIDER` env default. |
+| `llm_provider_generate` | string | "" (inherit) | Provider for content generation (Kuze): `anthropic` \| `openai` \| `gemini` \| `grok` \| `kimi`, or "" to inherit the `LLM_PROVIDER_GENERATE`/`LLM_PROVIDER` env default. |
 | `llm_provider_audit` | string | "" (inherit) | Provider for compliance audit (Ilita): same values, chosen independently of generation. |
 
 The Settings page renders an **AI Providers** panel with a per-task dropdown for each; a provider
@@ -1097,12 +1106,22 @@ marketing goals (messaging pillars, channel mix, posting cadence) with daily con
 - `messaging_pillars` — array of (title, description, guidelines) that shape all generated content
 - `channel_mix` — JSONB specifying which channels participate and their relative volume
 - `kpi_targets` — goals for engagement, reach, conversion, sentiment
+- `default_brand_id` — Social Kit brand default for launched pieces (app default: `shift`)
+- `default_demoforge_template_id` — DemoForge template default when a day omits one
 
 **Campaign timeline** stores one row per day:
 - `campaign_id`, `date`
-- `content_ideas` — JSONB with AI-suggested content hooks for that day
-- `published_pieces` — array of `content_piece_id`s published on that day
-- Links to the daily publish count, estimated reach, and performance
+- `content_ideas` — JSONB with AI-suggested content hooks for that day, including optional
+  `visual_type` (`demo_video` | `product_still` | `social_graphic` | `none`),
+  `demoforge_template_id`, and `brand_id` (Shift templates/brand are defaults, overridable)
+- `published_pieces` — array of `content_piece_id`s published on that day (plus media status)
+
+**Visual launch pipeline:** `POST /v1/campaigns/:id/launch` generates Kuze text, then:
+- `demo_video` / `product_still` — enqueues DemoForge with resolved template + `content_piece_id`
+  (`media_status=pending` until write-back)
+- `social_graphic` — flags `needs_social_kit` for Queue OG/quote attach
+- `none` — text only
+Pieces land as approved drafts on the Queue for review with media badges / video preview.
 
 **Campaign KPI tracking** aggregates daily metrics:
 - Engagement events, reach, conversions per day
@@ -1126,6 +1145,8 @@ marketing goals (messaging pillars, channel mix, posting cadence) with daily con
 - `POST /v1/campaigns/:id/timeline` — create timeline entries for a date range
 - `GET /v1/campaigns/:id/timeline` — fetch timeline with suggested content and published pieces
 - `GET /v1/campaigns/:id/kpi` — daily + cumulative KPI metrics and progress toward goals
+- `POST /v1/campaigns/:id/timeline/generate` — AI timeline with visual_type + template suggestions
+- `POST /v1/campaigns/:id/launch` — generate text pieces and enqueue visuals (async DemoForge)
 
 **UI (`apps/web/src/pages/CampaignBuilderPage.tsx`):**
 Three-view interface:
@@ -1134,18 +1155,18 @@ Three-view interface:
   channel selection, cadence config, and KPI target inputs
 - **Details view** — dashboard showing:
   - **Messaging pillars panel** — visual breakdown of each pillar and its content distribution
-  - **Timeline panel** — calendar view showing suggested content hooks, published pieces, and
-    daily performance metrics
+  - **Timeline panel** — per-day editors for channel, idea brief, visual type, DemoForge template,
+    and Social Kit brand; generate/launch actions
   - **KPI dashboard** — progress cards toward each goal, with trend sparklines
-  - **Action panel** — "Generate timeline", "Update KPIs", "Archive campaign" buttons
+  - **Action panel** — "Generate timeline", "Launch / generate content", "Archive campaign" buttons
 
-**Database (`supabase/migrations/20260626000000_campaign_builder.sql`):**
-- `vantage.campaigns` — campaign metadata
-- `vantage.campaign_timeline` — daily timeline entries
-- `vantage.campaign_kpi_tracking` — daily KPI aggregates
-- Workspace-scoped with `workspace_id` foreign key
+**Database:**
+- `supabase/migrations/20260626000000_campaign_builder.sql` — campaigns, timeline, KPI tables
+- `supabase/migrations/20260729000000_content_piece_media.sql` — `content_pieces.video_url` /
+  `media_status`; campaign `default_brand_id` / `default_demoforge_template_id`
 
-**Configuration:** Requires `ANTHROPIC_API_KEY` for LLM calls (uses pluggable LLM provider system).
+**Configuration:** Requires LLM keys for generation; `DEMOFORGE_URL` (+ optional `SHIFT_BASE_URL`)
+for visual enqueue. Uses pluggable LLM provider system.
 
 ---
 
@@ -2103,28 +2124,30 @@ model, tier boundaries, what to meter). Tracked separately; not yet started.
 **Status:** ✅ Shipped
 
 The AI services no longer hard-depend on Anthropic. Kuze (generation) and Ilita (audit) route
-through a provider registry (`lib/llm-providers/`) with **Anthropic**, **OpenAI**, and **Grok**
-implementations behind one interface. Selection is **per task** and **per workspace**:
+through a provider registry (`lib/llm-providers/`) backed by shared [`@bioloop/llm`](../bioloop-llm/)
+with **Anthropic**, **OpenAI**, **Gemini**, **Grok (xAI)**, and **Kimi (Moonshot K2/K3)** behind one
+interface. Selection is **per task** and **per workspace**:
 `resolveProvider(task, workspaceId)` picks the provider by precedence —
 per-workspace setting (`llm_provider_generate` / `llm_provider_audit`) →
 `LLM_PROVIDER_GENERATE`/`LLM_PROVIDER_AUDIT` env → `LLM_PROVIDER` env → first provider with a
-configured key. A missing/invalid choice never hard-fails while any provider is configured. The
-Settings page adds an **AI Providers** panel (per-task dropdowns, unconfigured providers greyed
-out); `GET /v1/settings/llm-providers` reports availability. The registry's `generateStructured`
-is intentionally not used — the services keep their tuned `@vantage/prompts` schemas and existing
-JSON extraction via `generateCompletion`. Anthropic's default model is aligned to
-`claude-sonnet-4-6` so behaviour is unchanged when `ANTHROPIC_MODEL` is unset.
+configured key (order: anthropic → openai → gemini → grok → kimi). A missing/invalid choice never
+hard-fails while any provider is configured. The Settings page adds an **AI Providers** panel
+(per-task dropdowns, unconfigured providers greyed out); `GET /v1/settings/llm-providers` reports
+availability. The registry's `generateStructured` is intentionally not used — the services keep
+their tuned `@vantage/prompts` schemas and existing JSON extraction via `generateCompletion`.
 
-> Model choice is per-provider via env (`ANTHROPIC_MODEL`, `OPENAI_MODEL`; Grok pinned in
-> `grok.ts`) — the UI selects the provider, not a specific model.
+> Model choice is per-provider via env (`ANTHROPIC_MODEL`, `OPENAI_MODEL`, `GEMINI_MODEL`,
+> `XAI_MODEL` / Grok, `KIMI_MODEL` — defaults include kimi-k3) — the UI selects the provider, not a
+> specific model.
 
-**Files:** `apps/api/src/lib/llm.ts`, `apps/api/src/lib/llm-providers/{index,types,anthropic,openai,grok}.ts`,
+**Files:** `apps/api/src/lib/llm.ts`, `apps/api/src/lib/llm-providers/{index,types,bioloop}.ts`,
 `apps/api/src/services/{kuze,ilita}.ts`, `apps/api/src/routes/settings.ts`,
 `apps/api/src/lib/settings.ts`, `apps/web/src/pages/SettingsPage.tsx`,
 `apps/api/src/routes/{audit,campaigns}.ts`, `apps/api/src/services/scheduler.ts`.
 
-**Configuration:** any subset of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GROK_API_KEY`, with
-optional `ANTHROPIC_MODEL` / `OPENAI_MODEL` and the `LLM_PROVIDER*` defaults.
+**Configuration:** any subset of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` /
+`XAI_API_KEY` (or `GROK_API_KEY`) / `KIMI_API_KEY` (or `MOONSHOT_API_KEY`), with optional model envs
+and the `LLM_PROVIDER*` defaults.
 
 ---
 

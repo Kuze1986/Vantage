@@ -61,7 +61,7 @@ export function OgCardStudio({
   initialHeadline = '',
   initialSub = '',
   channel = '',
-  brandId = 'vantage',
+  brandId = 'shift',
   exportScale = 2,
   onAttached,
 }: {
@@ -71,7 +71,7 @@ export function OgCardStudio({
   channel?: string
   brandId?: BrandId
   exportScale?: number
-  onAttached?: (url: string) => void
+  onAttached?: (url: string) => void | Promise<void>
 }) {
   const [headline, setHeadline] = useState(initialHeadline || 'PUT YOUR HEADLINE HERE')
   const [sub, setSub]           = useState(initialSub || 'A short description that appears in link previews.')

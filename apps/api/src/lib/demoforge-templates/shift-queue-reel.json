@@ -1,0 +1,67 @@
+{
+  "id": "shift-queue-reel",
+  "name": "The Shift — Adaptive Queue Reel",
+  "tagline": "One session mixing MCQ, mini-games, and a boss fight — zero manual setup.",
+  "audience": "PTCB students · pharmacy educators · social media · product demos",
+  "format": "tiktok",
+  "estimatedSec": 150,
+  "estimatedSecNote": "Actual duration is driven by ElevenLabs per-line synthesis in DemoForge",
+  "baseUrlPlaceholder": "{BASE}",
+  "defaultBaseUrl": "http://localhost:5175",
+  "steps": [
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Queue",
+      "ms": 2800,
+      "narration": "The Shift Queue is an adaptive study session — it reads your mastery, picks the right mode at the right moment, and runs the whole thing for you."
+    },
+    {
+      "action": "scroll",
+      "selector": "",
+      "ms": 1800,
+      "narration": "Eight game modes staged in one run. Blueprints, Drop, Minefield, Field Work, Boss fights — mixed automatically."
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.deployQueue()",
+      "ms": 3500,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playQueueMission()",
+      "ms": 2000,
+      "narration": "Deploy — and the first mission is straight recall. Quick hit, baseline check."
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playQueueMission()",
+      "ms": 2200,
+      "narration": "Next slot switches to Blueprints — a full procedure builder, inline, no loading a separate screen."
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playQueueMission()",
+      "ms": 2000,
+      "narration": "The Drop — same queue, different mechanic. React before the term fades."
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playQueueMission()",
+      "ms": 2200,
+      "narration": "Boss Fight — the full phased encounter. Radar, HP bars, intercept or clear under pressure."
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playQueueMission()",
+      "ms": 2400,
+      "narration": "The Minefield drops in — breach the grid, defuse one cell at a time."
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playQueueMission()",
+      "ms": 2800,
+      "narration": "Field Work closes the run — classified dossier, real decision, tribunal ruling. Eight modes, one session, zero setup. That's why the Queue works."
+    }
+  ]
+}

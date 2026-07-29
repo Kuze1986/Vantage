@@ -1,13 +1,15 @@
 // QuoteCard.tsx — branded pull-quote canvases (1080² square + 1080×1920 story).
+// Optional piece attach uploads the square PNG and calls onAttached.
 // Used from the Social Kit "Quote" tab and the Queue "Quotify" action.
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { BRANDS, BRAND_ORDER } from './index'
 import type { Brand, BrandId } from './index'
 import { CanvasMark } from '../pages/socialkit/CanvasMark'
-import { EditableText } from '../pages/socialkit/primitives'
+import { EditableText, exportCanvasNode } from '../pages/socialkit/primitives'
 import { CanvasBG, CanvasCorners } from './canvasFurniture'
 import { ExportCard } from './ExportCard'
+import { uploadDataUrl } from '../lib/storage'
 import '../pages/socialkit/socialkit.css'
 
 // ─────────────────────────────────────────────────────────────────────
@@ -87,18 +89,49 @@ function QuoteStoryCanvas({ brand, quote, attribution }: { brand: Brand; quote: 
 // ─────────────────────────────────────────────────────────────────────
 export function QuoteCardStudio({
   initialQuote = '',
-  initialBrandId = 'vantage',
+  initialBrandId = 'shift',
   exportScale = 2,
+  pieceId,
+  onAttached,
 }: {
   initialQuote?: string
   initialBrandId?: BrandId
   exportScale?: number
+  pieceId?: string
+  onAttached?: (url: string) => void | Promise<void>
 }) {
   const [activeBrand, setActiveBrand] = useState<BrandId>(initialBrandId)
   const [quote, setQuote]             = useState(initialQuote || 'The best channel is the one you haven\'t tried yet.')
-  const [attribution, setAttribution] = useState('— VANTAGE')
+  const [attribution, setAttribution] = useState('— THE SHIFT')
+  const [attaching, setAttaching]     = useState(false)
+  const [attached, setAttached]       = useState<string | null>(null)
+  const [err, setErr]                 = useState<string | null>(null)
+  const squareRef = useRef<HTMLDivElement>(null)
 
   const brand = BRANDS[activeBrand]
+
+  const doAttachSquare = async () => {
+    if (!squareRef.current || !pieceId) return
+    setAttaching(true); setErr(null)
+    try {
+      squareRef.current.classList.add('kit-exporting')
+      await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
+      const { toPng } = await import('html-to-image')
+      const dataUrl = await toPng(squareRef.current, {
+        width: 1080, height: 1080, pixelRatio: exportScale, backgroundColor: '#050C14',
+        style: { transform: 'none', transformOrigin: 'top left', margin: '0' },
+      })
+      squareRef.current.classList.remove('kit-exporting')
+      const url = await uploadDataUrl(`quotes/${pieceId}.png`, dataUrl)
+      setAttached(url)
+      await onAttached?.(url)
+    } catch (e) {
+      squareRef.current?.classList.remove('kit-exporting')
+      setErr(String((e as Error).message))
+    } finally {
+      setAttaching(false)
+    }
+  }
 
   return (
     <div className={`vg-socialkit ${brand.theme}`}>
@@ -142,15 +175,42 @@ export function QuoteCardStudio({
         </div>
       </div>
 
+      {err && <div className="vg-error" style={{ marginBottom: 12 }}>{err}</div>}
+      {attached && <div className="vg-success" style={{ marginBottom: 12, fontFamily: 'var(--nx-mono)', fontSize: 10 }}>✓ Attached: {attached}</div>}
+
       {/* Canvas cards */}
       <div className="kit-gallery">
         <ExportCard label="INSTAGRAM · SQUARE" w={1080} h={1080} displayW={380} accent={brand.accent} exportScale={exportScale} filename={`${brand.id}-quote-square.png`}>
-          <QuoteSquareCanvas brand={brand} quote={quote} attribution={attribution} />
+          <div ref={squareRef} style={{ width: 1080, height: 1080, position: 'relative' }}>
+            <QuoteSquareCanvas brand={brand} quote={quote} attribution={attribution} />
+          </div>
         </ExportCard>
         <ExportCard label="STORY · REEL" w={1080} h={1920} displayW={250} accent={brand.accent2} exportScale={exportScale} filename={`${brand.id}-quote-story.png`}>
           <QuoteStoryCanvas brand={brand} quote={quote} attribution={attribution} />
         </ExportCard>
       </div>
+
+      {pieceId && (
+        <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => void doAttachSquare()}
+            disabled={attaching}
+            className="nx-btn nx-btn--primary"
+            style={{ flex: 1, justifyContent: 'center', padding: '9px', fontSize: 10, letterSpacing: '0.16em', opacity: attaching ? 0.6 : 1 }}
+          >
+            {attaching ? 'UPLOADING…' : attached ? '✓ RE-ATTACH SQUARE' : '☁ ATTACH SQUARE TO PIECE'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void exportCanvasNode(squareRef.current, 1080, 1080, `${brand.id}-quote-square.png`, exportScale)}
+            className="nx-btn"
+            style={{ padding: '9px 16px', fontSize: 10, letterSpacing: '0.16em' }}
+          >
+            ↓ EXPORT
+          </button>
+        </div>
+      )}
     </div>
   )
 }

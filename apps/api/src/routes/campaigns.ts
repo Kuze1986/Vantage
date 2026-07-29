@@ -25,8 +25,14 @@ import { logActivity } from '../lib/activity.js';
 import { getPreferredLLMProvider } from '../lib/llm-providers/index.js';
 import { generateContent } from '../services/kuze.js';
 import { auditContent } from '../services/ilita.js';
-import { channelFormatMap } from '@vantage/prompts';
 import type { ChannelSlug } from '@vantage/prompts';
+import {
+  buildDemoForgePayload,
+  DEFAULT_BRAND_ID,
+  listDemoForgeTemplates,
+  resolveBrandId,
+  resolveTemplateId,
+} from '../lib/demoforge-templates.js';
 
 export const campaignRoutes = new Hono();
 
@@ -69,6 +75,8 @@ const kpiTargetsSchema = z.object({
   viralityScore: z.number().nonnegative().optional(),
 });
 
+const VISUAL_TYPES = ['demo_video', 'product_still', 'social_graphic', 'none'] as const;
+
 const createCampaignSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
@@ -78,6 +86,8 @@ const createCampaignSchema = z.object({
   messaging_pillars: z.array(messagingPillarSchema),
   channel_mix: channelMixSchema,
   kpi_targets: kpiTargetsSchema,
+  default_brand_id: z.string().min(1).nullable().optional(),
+  default_demoforge_template_id: z.string().min(1).nullable().optional(),
 });
 
 const updateCampaignSchema = createCampaignSchema.partial().omit({
@@ -91,6 +101,9 @@ const contentIdeaSchema = z.object({
   outline: z.string(),
   demoforgeScript: z.string().optional(),
   notes: z.string().optional(),
+  visual_type: z.enum(VISUAL_TYPES).optional(),
+  demoforge_template_id: z.string().optional(),
+  brand_id: z.string().optional(),
 });
 
 const timelineDaySchema = z.object({
@@ -465,7 +478,13 @@ const generatedDaySchema = z.object({
   content_type: z.enum(CONTENT_TYPES).optional().catch(undefined),
   primary_channel: z.enum(CHANNELS).optional().catch(undefined),
   secondary_channels: z.array(z.enum(CHANNELS)).optional().catch(undefined),
-  content_idea: z.object({ title: z.string(), outline: z.string() }),
+  content_idea: z.object({
+    title: z.string(),
+    outline: z.string(),
+    visual_type: z.enum(VISUAL_TYPES).optional().catch(undefined),
+    demoforge_template_id: z.string().optional().nullable(),
+    brand_id: z.string().optional().nullable(),
+  }),
 });
 
 const generatedTimelineSchema = z.object({ days: z.array(generatedDaySchema) });
@@ -514,6 +533,11 @@ campaignRoutes.post('/:id/timeline/generate', async (c) => {
     typeof campaign.llm_provider === 'string' ? campaign.llm_provider : undefined,
   );
 
+  const templates = listDemoForgeTemplates();
+  const templateList = templates.length
+    ? templates.map((t) => `${t.id} (${t.format}${t.name ? ` — ${t.name}` : ''})`).join('; ')
+    : 'shift-queue-modes (tiktok), shift-ube-university-demo (linkedin), shift-queue-reel (tiktok)';
+
   const prompt = `You are a senior social-media campaign strategist. Design a ${total}-day content plan for this campaign.
 
 Campaign: ${campaign.name}
@@ -525,8 +549,13 @@ ${pillars.length ? pillars.map((p) => `- ${p.id}: ${p.name}${p.tone ? ` (tone: $
 
 Available channels: ${channels.join(', ')}
 Content types: ${CONTENT_TYPES.join(', ')}
+Visual types: ${VISUAL_TYPES.join(', ')}
+DemoForge templates (prefer product visuals; Shift templates are defaults, others allowed): ${templateList}
+Default Social Kit brand when omitted: ${DEFAULT_BRAND_ID}
 
-Return JSON: {"days":[{ "messaging_pillar_id": <one of the pillar ids or omit>, "content_type": <one of the content types>, "primary_channel": <one of the available channels>, "secondary_channels": [<other channels>], "content_idea": { "title": <short post idea>, "outline": <2-3 sentence brief of the post> } }]}
+For promotional/educational days prefer visual_type demo_video or product_still. Use social_graphic for quote/OG-style stills. Use none only for pure text engagement posts.
+
+Return JSON: {"days":[{ "messaging_pillar_id": <one of the pillar ids or omit>, "content_type": <one of the content types>, "primary_channel": <one of the available channels>, "secondary_channels": [<other channels>], "content_idea": { "title": <short post idea>, "outline": <2-3 sentence brief of the post>, "visual_type": <visual type>, "demoforge_template_id": <template id or omit>, "brand_id": <brand id or omit> } }]}
 
 Produce exactly ${total} day objects, sequenced as a coherent narrative arc (awareness → consideration → conversion). Vary channels and pillars sensibly. Respond with ONLY the JSON object.`;
 
@@ -556,7 +585,16 @@ Produce exactly ${total} day objects, sequenced as a coherent narrative arc (awa
     content_type: d.content_type ?? 'mixed',
     primary_channel: d.primary_channel && channels.includes(d.primary_channel) ? d.primary_channel : channels[0],
     secondary_channels: (d.secondary_channels ?? []).filter((ch) => channels.includes(ch) && ch !== d.primary_channel),
-    content_ideas: [{ id: crypto.randomUUID(), title: d.content_idea.title, outline: d.content_idea.outline }],
+    content_ideas: [{
+      id: crypto.randomUUID(),
+      title: d.content_idea.title,
+      outline: d.content_idea.outline,
+      visual_type: d.content_idea.visual_type ?? (
+        d.content_type === 'engagement' ? 'none' : 'demo_video'
+      ),
+      demoforge_template_id: d.content_idea.demoforge_template_id ?? undefined,
+      brand_id: d.content_idea.brand_id ?? undefined,
+    }],
     published_pieces: [],
   }));
 
@@ -640,16 +678,53 @@ campaignRoutes.post('/:id/launch', async (c) => {
       })
     : '{}';
 
-  const created: { content_piece_id: string; channel: string; day_number: number }[] = [];
+  type Idea = {
+    title?: string;
+    outline?: string;
+    visual_type?: string;
+    demoforge_template_id?: string;
+    brand_id?: string;
+    demoforgeScript?: string;
+  };
+
+  const created: {
+    content_piece_id: string;
+    channel: string;
+    day_number: number;
+    media_status: string;
+    demoforge_job_id?: string;
+  }[] = [];
   const failures: { day_number: number; error: string }[] = [];
 
+  const campaignDefaultBrand =
+    typeof campaign.default_brand_id === 'string' ? campaign.default_brand_id : null;
+  const campaignDefaultTemplate =
+    typeof campaign.default_demoforge_template_id === 'string'
+      ? campaign.default_demoforge_template_id
+      : null;
+
   for (const day of timeline) {
-    const idea = (day.content_ideas as { title?: string; outline?: string }[] | null)?.[0];
+    const idea = (day.content_ideas as Idea[] | null)?.[0];
     if (!idea?.title) {
       failures.push({ day_number: day.day_number, error: 'No content idea on this day' });
       continue;
     }
     const channel = day.primary_channel as ChannelSlug;
+    const visualType = (VISUAL_TYPES as readonly string[]).includes(idea.visual_type ?? '')
+      ? (idea.visual_type as (typeof VISUAL_TYPES)[number])
+      : day.content_type === 'engagement'
+        ? 'none'
+        : 'demo_video';
+    const brandId = resolveBrandId({
+      ideaBrandId: idea.brand_id,
+      campaignDefaultBrandId: campaignDefaultBrand,
+    });
+    const templateId = resolveTemplateId({
+      ideaTemplateId: idea.demoforge_template_id,
+      campaignDefaultTemplateId: campaignDefaultTemplate,
+      channel,
+    });
+
     try {
       // Each idea becomes a topic so the existing content pipeline can own the piece.
       const { data: topic, error: topicErr } = await sb
@@ -660,7 +735,13 @@ campaignRoutes.post('/:id/launch', async (c) => {
           source_ref: campaignId,
           vertical: null,
           topic_text: `${idea.title}\n\n${idea.outline ?? ''}`.trim(),
-          context_payload: { campaign_id: campaignId, day_number: day.day_number },
+          context_payload: {
+            campaign_id: campaignId,
+            day_number: day.day_number,
+            visual_type: visualType,
+            demoforge_template_id: templateId,
+            brand_id: brandId,
+          },
         })
         .select('id')
         .single();
@@ -687,6 +768,18 @@ campaignRoutes.post('/:id/launch', async (c) => {
         // Audit is best-effort; the piece is still produced for review.
       }
 
+      const payload: Record<string, unknown> = {
+        ...gen.content_payload,
+        brand_id: brandId,
+        visual_type: visualType,
+        demoforge_template_id: templateId,
+      };
+      if (visualType === 'social_graphic') {
+        payload.needs_social_kit = true;
+      }
+
+      let mediaStatus: 'none' | 'pending' | 'failed' = visualType === 'none' ? 'none' : 'pending';
+
       const scheduledFor = `${day.date_scheduled}T09:00:00Z`;
       const { data: piece, error: pieceErr } = await sb
         .from('content_pieces')
@@ -695,25 +788,99 @@ campaignRoutes.post('/:id/launch', async (c) => {
           topic_id: topic.id,
           channel_slug: channel,
           format: gen.format,
-          content_payload: gen.content_payload,
+          content_payload: payload,
           status: 'approved', // approved drafts: user reviews + schedules from the Queue
           audit_notes: auditNotes,
           audit_iterations: 0,
           scheduled_for: scheduledFor,
+          media_status: mediaStatus,
         })
         .select('id')
         .single();
       if (pieceErr || !piece) throw new Error(pieceErr?.message ?? 'Failed to create content piece');
 
+      let demoforgeJobId: string | undefined;
+
+      // Enqueue DemoForge for video / product stills (async — does not block launch).
+      if (visualType === 'demo_video' || visualType === 'product_still') {
+        try {
+          const dfPayload = buildDemoForgePayload(templateId, undefined, {
+            captions: true,
+            colorPreset: 'cinematic',
+          });
+          const base = process.env.DEMOFORGE_URL?.trim();
+          if (!base) throw new Error('DEMOFORGE_URL is not configured');
+          let dfUrl = base;
+          if (!dfUrl.startsWith('http://') && !dfUrl.startsWith('https://')) dfUrl = `https://${dfUrl}`;
+          dfUrl = dfUrl.replace(/\/$/, '');
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          const secret = process.env.DEMOFORGE_SECRET?.trim();
+          if (secret) headers['x-demoforge-secret'] = secret;
+          const res = await fetch(`${dfUrl}/jobs`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              ...dfPayload,
+              workspace_id: workspaceId,
+              content_piece_id: piece.id,
+            }),
+          });
+          const text = await res.text();
+          let body: unknown = null;
+          try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+          if (!res.ok) {
+            const msg =
+              typeof body === 'object' && body && 'error' in body
+                ? String((body as { error: string }).error)
+                : text || `demoforge ${res.status}`;
+            throw new Error(msg);
+          }
+          demoforgeJobId =
+            typeof body === 'object' && body && 'job_id' in body
+              ? String((body as { job_id: string }).job_id)
+              : undefined;
+          payload.demoforge_job_id = demoforgeJobId;
+          await sb
+            .from('content_pieces')
+            .update({ content_payload: payload, updated_at: new Date().toISOString() })
+            .eq('id', piece.id);
+        } catch (mediaErr) {
+          mediaStatus = 'failed';
+          const msg = mediaErr instanceof Error ? mediaErr.message : 'DemoForge enqueue failed';
+          payload.media_error = msg.slice(0, 500);
+          await sb
+            .from('content_pieces')
+            .update({
+              media_status: 'failed',
+              content_payload: payload,
+              audit_notes: [auditNotes, `[media] ${msg}`].filter(Boolean).join('\n').slice(0, 1000),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', piece.id);
+        }
+      }
+
       // Link the generated piece back onto the timeline day.
       const published = Array.isArray(day.published_pieces) ? day.published_pieces : [];
-      published.push({ content_piece_id: piece.id, channel, status: 'approved' });
+      published.push({
+        content_piece_id: piece.id,
+        channel,
+        status: 'approved',
+        media_status: mediaStatus,
+        demoforge_job_id: demoforgeJobId,
+      });
       await sb
         .from('campaign_timeline')
         .update({ published_pieces: published, updated_at: new Date().toISOString() })
         .eq('id', day.id);
 
-      created.push({ content_piece_id: piece.id, channel, day_number: day.day_number });
+      created.push({
+        content_piece_id: piece.id,
+        channel,
+        day_number: day.day_number,
+        media_status: mediaStatus,
+        demoforge_job_id: demoforgeJobId,
+      });
     } catch (e) {
       failures.push({ day_number: day.day_number, error: e instanceof Error ? e.message : 'unknown error' });
     }

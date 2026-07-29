@@ -1,0 +1,79 @@
+{
+  "id": "shift-queue-modes",
+  "name": "The Shift — Queue Mode Reel",
+  "tagline": "Four structural game modes inside a single adaptive study session.",
+  "audience": "PTCB students · pharmacy educators · social media · product demos",
+  "format": "tiktok",
+  "estimatedSec": 120,
+  "estimatedSecNote": "Actual duration is driven by ElevenLabs per-line synthesis in DemoForge",
+  "baseUrlPlaceholder": "{BASE}",
+  "defaultBaseUrl": "http://localhost:5175",
+  "steps": [
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Queue",
+      "ms": 2500,
+      "narration": "The Shift doesn't just quiz you. It mixes eight game modes into one adaptive session — and four of them are full-on mini-games."
+    },
+    {
+      "action": "scroll",
+      "selector": "",
+      "ms": 2000,
+      "narration": "The queue reads your mastery level and picks the right mode at the right moment. Let's enter each one and play a round."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Blueprints",
+      "ms": 600,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playBlueprintsStep()",
+      "ms": 1500,
+      "narration": "Blueprints — a real pharmacy workflow, scrambled into steps. Rebuild it in the correct order. One wrong pick drains stability — lose it all and the procedure collapses."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Drop",
+      "ms": 600,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playDropRound()",
+      "ms": 1500,
+      "narration": "The Drop — a drug name falls from the top. Match it to the right category lane before it crosses the capture threshold. Hesitate and your stress meter climbs."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Minefield",
+      "ms": 800,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playMineRound()",
+      "ms": 2000,
+      "narration": "The Minefield — a five-by-five grid of clinical hazards. Every cell hides a question. Pick wrong and the mine detonates — navigate clean or the breach fails."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/RealWorldScenarios",
+      "ms": 800,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playDossierRound()",
+      "ms": 2500,
+      "narration": "Field Work — real pharmacy scenarios as classified dossiers. Read the incident report, choose your call, and commit. This is where the textbook meets the dispensing counter."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Queue",
+      "ms": 2500,
+      "narration": "The Queue sequences all of it — automatically. One session. Eight modes. Zero manual setup. The Shift adapts to you."
+    }
+  ]
+}

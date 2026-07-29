@@ -13,9 +13,20 @@ interface Campaign {
   messaging_pillars: any[]
   channel_mix: Record<string, any>
   kpi_targets: Record<string, number>
+  default_brand_id?: string | null
+  default_demoforge_template_id?: string | null
   created_at: string
   updated_at: string
 }
+
+interface DemoForgeTemplateMeta {
+  id: string
+  name: string
+  format: string
+}
+
+const VISUAL_TYPES = ['demo_video', 'product_still', 'social_graphic', 'none'] as const
+const BRAND_OPTIONS = ['shift', 'keystone', 'scripta', 'demoforge', 'crucible', 'vantage'] as const
 
 interface TimelineDay {
   id: string
@@ -79,15 +90,31 @@ export default function CampaignBuilderPage() {
 
   const [busy, setBusy] = useState<string | null>(null)
   const [editingCampaign, setEditingCampaign] = useState(false)
-  const [editData, setEditData] = useState<{ name: string; description: string; messaging_pillars: any[] }>({
+  const [editData, setEditData] = useState<{
+    name: string
+    description: string
+    messaging_pillars: any[]
+    default_brand_id: string
+    default_demoforge_template_id: string
+  }>({
     name: '',
     description: '',
     messaging_pillars: [],
+    default_brand_id: 'shift',
+    default_demoforge_template_id: '',
   })
   const [launchInfo, setLaunchInfo] = useState<string | null>(null)
+  const [templates, setTemplates] = useState<DemoForgeTemplateMeta[]>([])
 
   useEffect(() => {
     fetchCampaigns()
+    void vantageApi.listDemoForgeTemplates()
+      .then((res) => setTemplates(res.templates || []))
+      .catch(() => setTemplates([
+        { id: 'shift-queue-modes', name: 'The Shift — Queue Mode Reel', format: 'tiktok' },
+        { id: 'shift-ube-university-demo', name: 'The Shift — UBE University Demo', format: 'linkedin' },
+        { id: 'shift-queue-reel', name: 'The Shift — Adaptive Queue Reel', format: 'tiktok' },
+      ]))
   }, [])
 
   const fetchCampaigns = async () => {
@@ -286,6 +313,8 @@ export default function CampaignBuilderPage() {
       name: selectedCampaign.name,
       description: selectedCampaign.description || '',
       messaging_pillars: JSON.parse(JSON.stringify(selectedCampaign.messaging_pillars || [])),
+      default_brand_id: selectedCampaign.default_brand_id || 'shift',
+      default_demoforge_template_id: selectedCampaign.default_demoforge_template_id || '',
     })
     setEditingCampaign(true)
   }
@@ -298,6 +327,8 @@ export default function CampaignBuilderPage() {
         name: editData.name,
         description: editData.description,
         messaging_pillars: editData.messaging_pillars,
+        default_brand_id: editData.default_brand_id || 'shift',
+        default_demoforge_template_id: editData.default_demoforge_template_id || null,
       })
       setSelectedCampaign(updated)
       setEditingCampaign(false)
@@ -605,6 +636,34 @@ export default function CampaignBuilderPage() {
                 />
               </div>
 
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                <div>
+                  <label style={labelStyle}>Default brand</label>
+                  <select
+                    style={inputStyle}
+                    value={editData.default_brand_id}
+                    onChange={(e) => setEditData({ ...editData, default_brand_id: e.target.value })}
+                  >
+                    {BRAND_OPTIONS.map((b) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>Default DemoForge template</label>
+                  <select
+                    style={inputStyle}
+                    value={editData.default_demoforge_template_id}
+                    onChange={(e) => setEditData({ ...editData, default_demoforge_template_id: e.target.value })}
+                  >
+                    <option value="">— channel default (Shift) —</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name} ({t.format})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                   <label style={{ ...labelStyle, marginBottom: 0 }}>Messaging Pillars</label>
@@ -759,9 +818,57 @@ export default function CampaignBuilderPage() {
                         value={idea.outline ?? ''}
                         onChange={(e) => updateDayLocal(day.day_number, { content_ideas: [{ ...idea, outline: e.target.value }] })}
                       />
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                        <div>
+                          <label style={labelStyle}>Visual</label>
+                          <select
+                            style={inputStyle}
+                            value={idea.visual_type ?? 'demo_video'}
+                            onChange={(e) => updateDayLocal(day.day_number, {
+                              content_ideas: [{ ...idea, visual_type: e.target.value }],
+                            })}
+                          >
+                            {VISUAL_TYPES.map((v) => (
+                              <option key={v} value={v}>{v.replace(/_/g, ' ')}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={labelStyle}>Template</label>
+                          <select
+                            style={inputStyle}
+                            value={idea.demoforge_template_id ?? ''}
+                            onChange={(e) => updateDayLocal(day.day_number, {
+                              content_ideas: [{ ...idea, demoforge_template_id: e.target.value || undefined }],
+                            })}
+                            disabled={idea.visual_type === 'none' || idea.visual_type === 'social_graphic'}
+                          >
+                            <option value="">— channel default —</option>
+                            {templates.map((t) => (
+                              <option key={t.id} value={t.id}>{t.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={labelStyle}>Brand</label>
+                          <select
+                            style={inputStyle}
+                            value={idea.brand_id ?? selectedCampaign?.default_brand_id ?? 'shift'}
+                            onChange={(e) => updateDayLocal(day.day_number, {
+                              content_ideas: [{ ...idea, brand_id: e.target.value }],
+                            })}
+                          >
+                            {BRAND_OPTIONS.map((b) => (
+                              <option key={b} value={b}>{b}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                         <span style={{ fontSize: '0.8rem', color: 'var(--nx-text-4)' }}>
-                          {publishedCount > 0 ? `${publishedCount} piece(s) generated` : 'No content generated yet'}
+                          {publishedCount > 0
+                            ? `${publishedCount} piece(s) generated${day.published_pieces?.[0]?.media_status ? ` · media: ${day.published_pieces[0].media_status}` : ''}`
+                            : 'No content generated yet'}
                         </span>
                         <div style={{ display: 'flex', gap: '0.5rem' }}>
                           <Button

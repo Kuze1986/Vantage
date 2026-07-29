@@ -20,12 +20,17 @@ export interface MessagingPillar {
   targetAudience: string;
 }
 
+export type VisualType = 'demo_video' | 'product_still' | 'social_graphic' | 'none';
+
 export interface ContentIdea {
   id: string;
   title: string;
   outline: string;
   demoforgeScript?: string;
   notes?: string;
+  visual_type?: VisualType;
+  demoforge_template_id?: string;
+  brand_id?: string;
 }
 
 export interface CampaignTimelineDay {
@@ -56,6 +61,9 @@ const contentIdeaSchema = z.object({
   outline: z.string(),
   demoforgeScript: z.string().optional(),
   notes: z.string().optional(),
+  visual_type: z.enum(['demo_video', 'product_still', 'social_graphic', 'none']).optional(),
+  demoforge_template_id: z.string().optional(),
+  brand_id: z.string().optional(),
 });
 
 const contentIdeasOutputSchema = z.object({
@@ -95,10 +103,12 @@ ${
 Generate 3 diverse content ideas. For each, provide:
 1. A catchy title (5-10 words)
 2. An outline of the content structure and key talking points
-3. Optional: DemoForge script (if it's a video idea, describe the screens/actions)
-4. Optional: Implementation notes
+3. visual_type: demo_video | product_still | social_graphic | none (prefer product visuals for promotional/educational)
+4. Optional demoforge_template_id (registry id; omit to use channel default)
+5. Optional brand_id (Social Kit brand; omit for default)
+6. Optional: DemoForge script notes / implementation notes
 
-Return valid JSON with structure: { ideas: [{ id, title, outline, demoforgeScript?, notes? }] }
+Return valid JSON with structure: { ideas: [{ id, title, outline, visual_type?, demoforge_template_id?, brand_id?, demoforgeScript?, notes? }] }
 Use UUIDs for ids.
 `;
 
