@@ -264,11 +264,17 @@ The `scheduled_for` field controls when the cadence tick will attempt publishing
 set either by the manual schedule endpoint or automatically by the auto-approve pipeline
 based on the channel's `posting_hours` config.
 
+**Media-ready gate:** Schedule and publish reject with `409` when a piece still needs media
+(`media_status` in `pending|failed`, or visual types `demo_video|product_still|social_graphic`
+without ready media / URLs). Pass `force: true` to override (logged in Queue as Force Queue /
+Force Publish). Cadence tick skips gated pieces. Helper: `apps/api/src/lib/media-gate.ts`.
+
 **Files:**
 - `apps/api/src/routes/schedule.ts` — `POST /v1/schedule`
 - `apps/api/src/routes/audit.ts` — `POST /v1/audit` (transitions auditing → approved/rejected)
 - `apps/api/src/routes/publish.ts` — `POST /v1/publish/:channel`
 - `apps/api/src/routes/queue.ts` — `GET /v1/queue`
+- `apps/api/src/lib/media-gate.ts`
 
 ---
 
@@ -592,8 +598,13 @@ all applied in post-processing by FFmpeg before upload.
    to storage as PNG previews (`demoforge/frames/<job_id>/frame-N.png`).
 8. **Upload** — final MP4 uploaded to `vantage-media` at `demoforge/<format>/<job_id>.mp4`.
 9. **Content-piece write-back** — when the job has a `content_piece_id`, completion sets
-   `content_pieces.video_url`, copies the first keyframe to `image_url` /
+   `content_pieces.video_url`, picks a mid-sequence keyframe (~40% index of `extracted_frames`,
+   fallback first) into `demoforge_jobs.thumbnail_url` + piece `image_url` /
    `content_payload.image_url`, and sets `media_status` to `ready` (or `failed` on error).
+   A/B siblings sharing `demoforge_job_id` get per-piece `thumbnail_frame_index` frames.
+   Operators can override via `POST /v1/demoforge/jobs/:id/set-thumbnail` `{ frame_index }`.
+   Job failure with a linked piece triggers Slack/email alerts (`ALERT_SLACK_WEBHOOK` /
+   `ALERT_EMAIL` + Resend) when configured.
 
 **Template registry (`apps/api/src/lib/demoforge-templates.ts`):**
 JSON script templates under `apps/api/src/lib/demoforge-templates/`. Seeded with Shift
@@ -625,13 +636,28 @@ Text and logo/image overlays burned into the video at configurable positions and
 - `type: "text"` — content, font (mono/sans/display), size, color, optional semi-transparent box; position by anchor (left/center/right × top/center/bottom) + pixel offset; optional start/end seconds.
 - `type: "image"` — references a Brand Kit by `brand_kit_id`; logo is downloaded from Supabase Storage and scaled to `width`; same position + timing controls.
 
-**Brand Kits** (`vantage.brand_kits`, `GET/POST/PATCH/DELETE /v1/brand-kits`): workspace-scoped logo, primary/secondary/accent colors, heading/body font preferences. Used by image overlays and as a workspace default.
+**Brand Kits** (`vantage.brand_kits`): workspace-scoped logo, primary/secondary/accent colors,
+heading/body font preferences. Used by DemoForge image overlays and as
+`default_brand_kit_id` on the workspace product profile.
 
-**Frontend:** `OverlayEditor.tsx` — collapsible panel, per-overlay row, count badge.
+**API** (`apps/api/src/routes/brand-kits.ts`):
+- `GET/POST/PATCH/DELETE /v1/brand-kits` — full CRUD; create/patch return the full kit row
+- `POST /v1/brand-kits` accepts optional `data_url` (base64 image) to upload on create
+- `POST /v1/brand-kits/:id/logo` — `{ data_url }` → Storage `brand-kits/<workspace>/<id>.(png|jpg|…)`
+  and sets `logo_storage_path` + public `logo_url` (required for FFmpeg logo burns)
+
+**Frontend:**
+- `BrandKitsPanel` on Settings — list / create / edit / delete + logo file picker
+- Product profile **Default brand kit** dropdown (wired to kit ids)
+- `OverlayEditor.tsx` — image overlay picks a kit; empty state links to Settings
+
+**Render:** DemoForge downloads `logo_storage_path` from `vantage-media` (falls back to
+fetching `logo_url` when storage path is missing).
 
 **Files:**
 - `apps/demoforge/src/jobs/processor.ts` — `buildTextOverlayFilter()`, `buildImageOverlayFilter()`, logo download, complexFilter chain
-- `apps/api/src/routes/brand-kits.ts` — brand kit CRUD
+- `apps/api/src/routes/brand-kits.ts` — brand kit CRUD + logo upload
+- `apps/web/src/pages/BrandKitsPanel.tsx`, `SettingsPage.tsx`
 - `apps/web/src/creative/OverlayEditor.tsx`
 - `supabase/migrations/20260715000000_brand_kits.sql`
 
@@ -757,11 +783,12 @@ Target duration, trim, and global speed multiplier applied across the full video
 - `POST /v1/demoforge/jobs`
 - `GET /v1/demoforge/jobs/:id`
 - `GET /v1/demoforge/jobs` (lists recent jobs from DB)
-- `GET/POST/PATCH/DELETE /v1/brand-kits`
+- `GET/POST/PATCH/DELETE /v1/brand-kits` + `POST /v1/brand-kits/:id/logo`
 - `GET/POST/PATCH/DELETE /v1/intro-outro-clips`
 
 The DemoForge job submission UI lives at `/demoforge` in the web app (`DemoForgePage.tsx`).
 Creative studio panels render in order: Overlays → Captions → Color Grade → Intro/Outro → Timeline → Audio Mixer.
+Brand kit CRUD + logo upload lives on **Settings → Brand Kits**.
 
 **Core files:**
 - `apps/demoforge/src/index.ts` — Hono server + job schema validation
@@ -769,9 +796,10 @@ Creative studio panels render in order: Overlays → Captions → Color Grade �
 - `apps/demoforge/src/jobs/processor.ts` — full pipeline orchestration + FFmpeg filter chain
 - `apps/demoforge/Dockerfile`
 - `apps/api/src/routes/demoforge.ts` — vantage-api proxy
-- `apps/api/src/routes/brand-kits.ts` — brand kit CRUD
+- `apps/api/src/routes/brand-kits.ts` — brand kit CRUD + logo upload
 - `apps/api/src/routes/intro-outro-clips.ts` — clip library CRUD
 - `apps/web/src/pages/DemoForgePage.tsx` — main UI
+- `apps/web/src/pages/BrandKitsPanel.tsx` — Settings Brand Kits manager
 - `apps/web/src/creative/OverlayEditor.tsx`, `CaptionStyler.tsx`, `ColorGrader.tsx`, `SequencePicker.tsx`, `TimelineEditor.tsx`
 - `supabase/migrations/20260715000000_brand_kits.sql`
 - `supabase/migrations/20260720000000_intro_outro_clips.sql`
@@ -830,26 +858,28 @@ The primary operator view. Loads on login and auto-updates via Supabase realtime
 Lists all content pieces with filter tabs by status. Operators review, audit, and
 dispatch pieces from this page.
 
-**Filter tabs:** all / auditing / approved / queued / published / rejected / failed
+**Filter tabs:** all / auditing / approved / queued / published / rejected / failed / media ready
 
 **Per-piece actions:**
 - **Audit** — runs Ilita review; transitions auditing → approved or rejected
-- **Queue** — schedules an approved piece for cadence dispatch (calls `/v1/schedule`)
-- **Publish** — immediately publishes an approved/queued piece for API channels
-- **Manual channels** — shows a URL input to paste the post link after manual upload;
-  clicking "Mark Published" calls `/v1/publish/:channel` with the URL
+- **Queue / Force Queue** — schedules an approved piece (`force` when media-gated)
+- **Publish / Force Publish** — immediate publish for API channels (same media gate)
+- **Publish Pack** — TikTok / Instagram / Facebook with `video_url`: caption, download link,
+  thumbnail, Copy caption / Copy all (`GET /v1/queue/:id/publish-pack`)
+- **Manual channels** — paste post URL → mark published after manual upload
+- **Bulk** — multi-select → schedule / force schedule / audit selected
 
 **Per-piece display:**
 - Content preview (body / text / hook / title / caption depending on format)
 - Ilita audit notes
 - A/B variant badge (if `variant_group_id` is set)
-- Image thumbnail (if `image_url` is set — DALL-E 3 generated)
+- Image / video preview and media_status badges
 - **Video script panel** (TikTok / Instagram / Facebook only): expandable section showing
   hook, script, on-screen text, hashtags, and upload instructions. One-click copy-to-clipboard.
 
 **Files:**
 - `apps/web/src/pages/QueuePage.tsx`
-- `apps/api/src/routes/queue.ts` — `GET /v1/queue`
+- `apps/api/src/routes/queue.ts` — `GET /v1/queue`, publish-pack, bulk-schedule, calendar filter
 
 ---
 
@@ -871,6 +901,16 @@ pipeline tick — no restart required.
 | `llm_provider_generate` | string | "" (inherit) | Provider for content generation (Kuze): `anthropic` \| `openai` \| `gemini` \| `grok` \| `kimi`, or "" to inherit the `LLM_PROVIDER_GENERATE`/`LLM_PROVIDER` env default. |
 | `llm_provider_audit` | string | "" (inherit) | Provider for compliance audit (Ilita): same values, chosen independently of generation. |
 
+**Product profile** (separate panel; same `vantage.settings` key/value store):
+`default_product_id` (default `shift`), `product_base_url`, `default_brand_id`,
+`default_demoforge_template_id`, `default_brand_kit_id` (dropdown of Brand Kits).
+Resolved on campaign launch / DemoForge payload build: idea → campaign →
+**workspace product profile** → channel Shift seed.
+APIs: `GET/PATCH /v1/settings/product-profile` (`apps/api/src/lib/product-profile.ts`).
+
+**Brand Kits panel** (Settings): create/edit/delete kits and upload logos via
+`POST /v1/brand-kits/:id/logo` (see [14-P1 Video Overlays](#14-p1--video-overlays--shipped)).
+
 The Settings page renders an **AI Providers** panel with a per-task dropdown for each; a provider
 is only selectable when its API key is configured server-side (surfaced via
 `GET /v1/settings/llm-providers`). See [Pluggable LLM Providers](#4-8--pluggable-llm-providers).
@@ -879,12 +919,17 @@ is only selectable when its API key is configured server-side (surfaced via
 - Auto-approve toggle — per-channel in CadenceForm
 - Posting cadence (posts_per_day, posting_hours) — per-channel in CadenceForm
 
+**Ops alerts (env on API / DemoForge):** `ALERT_SLACK_WEBHOOK`, `ALERT_EMAIL` (+ Resend) for
+publish permanent fails, DemoForge job fails, and campaign media enqueue failures.
+
 **Files:**
 - `apps/web/src/pages/SettingsPage.tsx`
 - `apps/api/src/routes/settings.ts`
 - `apps/api/src/lib/settings.ts`
+- `apps/api/src/lib/product-profile.ts`
 - `apps/api/src/lib/llm.ts` + `apps/api/src/lib/llm-providers/*`
 - `supabase/migrations/20260605000000_settings.sql`
+- `supabase/migrations/20260729120000_demoforge_thumbnail_and_product_profile.sql`
 
 ---
 
@@ -1104,7 +1149,9 @@ marketing goals (messaging pillars, channel mix, posting cadence) with daily con
 - `status` — draft / active / paused / archived
 - `cadence_config` — JSONB with `posts_per_day`, `posting_hours`, `auto_approve`
 - `messaging_pillars` — array of (title, description, guidelines) that shape all generated content
-- `channel_mix` — JSONB specifying which channels participate and their relative volume
+- `channel_mix` — JSONB specifying which social channels participate and daily volume.
+  Supported: `x`, `linkedin`, `reddit`, `threads`, `bluesky`, `tiktok`, `instagram`, `facebook`
+  (all social platforms; email is out of scope for campaign mix)
 - `kpi_targets` — goals for engagement, reach, conversion, sentiment
 - `default_brand_id` — Social Kit brand default for launched pieces (app default: `shift`)
 - `default_demoforge_template_id` — DemoForge template default when a day omits one
@@ -1117,11 +1164,19 @@ marketing goals (messaging pillars, channel mix, posting cadence) with daily con
 - `published_pieces` — array of `content_piece_id`s published on that day (plus media status)
 
 **Visual launch pipeline:** `POST /v1/campaigns/:id/launch` generates Kuze text, then:
-- `demo_video` / `product_still` — enqueues DemoForge with resolved template + `content_piece_id`
+- `demo_video` / `product_still` — creates **2 A/B pieces** sharing `variant_group_id` (different
+  Kuze hooks; same DemoForge job; `thumbnail_frame_index` 0 vs 2), enqueues DemoForge once
   (`media_status=pending` until write-back)
 - `social_graphic` — flags `needs_social_kit` for Queue OG/quote attach
 - `none` — text only
 Pieces land as approved drafts on the Queue for review with media badges / video preview.
+
+**Shift content packs:** curated seeds in `apps/api/src/lib/shift-packs.ts`
+(`GET /v1/campaigns/meta/shift-packs`, `POST /v1/campaigns/:id/add-pack`, plus
+`GET/POST /v1/source/shift-packs`). **Evergreen refill:**
+`POST /v1/campaigns/:id/refill-evergreen` appends due recycle topics as timeline days
+with `visual_type=demo_video`. Details UI: open calendar (`/calendar?campaign_id=`),
+pending-media count, pack picker, refill button.
 
 **Campaign KPI tracking** aggregates daily metrics:
 - Engagement events, reach, conversions per day
@@ -1146,7 +1201,10 @@ Pieces land as approved drafts on the Queue for review with media badges / video
 - `GET /v1/campaigns/:id/timeline` — fetch timeline with suggested content and published pieces
 - `GET /v1/campaigns/:id/kpi` — daily + cumulative KPI metrics and progress toward goals
 - `POST /v1/campaigns/:id/timeline/generate` — AI timeline with visual_type + template suggestions
-- `POST /v1/campaigns/:id/launch` — generate text pieces and enqueue visuals (async DemoForge)
+- `POST /v1/campaigns/:id/launch` — generate text + enqueue visuals (A/B for demo_video/product_still)
+- `GET /v1/campaigns/meta/shift-packs` — list Shift content packs
+- `POST /v1/campaigns/:id/add-pack` — append pack items as timeline days
+- `POST /v1/campaigns/:id/refill-evergreen` — append evergreen Shift topics as days
 
 **UI (`apps/web/src/pages/CampaignBuilderPage.tsx`):**
 Three-view interface:
@@ -1157,6 +1215,8 @@ Three-view interface:
   - **Messaging pillars panel** — visual breakdown of each pillar and its content distribution
   - **Timeline panel** — per-day editors for channel, idea brief, visual type, DemoForge template,
     and Social Kit brand; generate/launch actions
+  - **Shift packs / evergreen / calendar** — add pack days, refill evergreen, open filtered calendar,
+    pending-media count
   - **KPI dashboard** — progress cards toward each goal, with trend sparklines
   - **Action panel** — "Generate timeline", "Launch / generate content", "Archive campaign" buttons
 
@@ -1164,9 +1224,10 @@ Three-view interface:
 - `supabase/migrations/20260626000000_campaign_builder.sql` — campaigns, timeline, KPI tables
 - `supabase/migrations/20260729000000_content_piece_media.sql` — `content_pieces.video_url` /
   `media_status`; campaign `default_brand_id` / `default_demoforge_template_id`
+- `supabase/migrations/20260729120000_demoforge_thumbnail_and_product_profile.sql` — job `thumbnail_url`
 
-**Configuration:** Requires LLM keys for generation; `DEMOFORGE_URL` (+ optional `SHIFT_BASE_URL`)
-for visual enqueue. Uses pluggable LLM provider system.
+**Configuration:** Requires LLM keys for generation; `DEMOFORGE_URL` + workspace product profile
+(or `SHIFT_BASE_URL`) for visual enqueue. Uses pluggable LLM provider system.
 
 ---
 
@@ -1222,12 +1283,14 @@ optimization.
 - `GET /v1/intelligence/trends` — list trends with optional status filtering
 - `POST /v1/intelligence/trends/detect` — trigger AI trend detection from recent posts
 - `GET /v1/intelligence/insights` — retrieve insights by campaign/type/status with confidence scores
+- `POST /v1/intelligence/insights/:id/apply` — append a campaign timeline day (`visual_type=social_graphic`)
+  from insight title/description (`{ campaign_id }`)
 - `GET /v1/intelligence/benchmarks` — fetch latest benchmark snapshot and gap analysis
 
 **UI (`apps/web/src/pages/IntelligencePage.tsx`):**
 Four-tab interface:
 - **Insights tab** — strategic recommendations displayed as cards with type badge, confidence meter,
-  description, supporting evidence links, and an "Apply to campaign" action
+  description, supporting evidence links, and **Add to campaign** (campaign dropdown → apply)
 - **Trends tab** — detected trends with status indicator (emerging/peak/declining), key messaging,
   sentiment breakdown, and links to exemplifying posts
 - **Posts tab** — competitive post list with extracted themes, engagement metrics, and virality indicators
@@ -1658,16 +1721,14 @@ posts before they're noticed.
 posts over time — clustering, gaps, or channel conflicts are invisible.
 
 **Implementation:**
-- New `apps/web/src/pages/CalendarPage.tsx`
-- Fetches pieces with `status IN ('queued', 'published')` and `scheduled_for` set, from the
-  existing `/v1/queue` endpoint (or a new `/v1/calendar?from=<iso>&to=<iso>` endpoint)
-- Renders a 7-day week grid: rows = channels, columns = days, cells show piece count with color coding
+- `apps/web/src/pages/CalendarPage.tsx`
+- `GET /v1/queue/calendar?from=&to=&campaign_id=` — optional campaign filter (topic
+  `context_payload.campaign_id` / published_pieces linkage)
+- Renders a 7-day week grid: rows = channels (incl. threads/bluesky), columns = days
 - Clicking a cell expands to list the pieces scheduled in that slot
-- Navigation: previous/next week
-- Add to app router and sidebar
+- Navigation: previous/next week; Campaign Builder links with `?campaign_id=`
 
-**Files to create/change:** `apps/web/src/pages/CalendarPage.tsx` (new),
-`apps/api/src/routes/queue.ts` (add date range filter), app router + sidebar
+**Files:** `apps/web/src/pages/CalendarPage.tsx`, `apps/api/src/routes/queue.ts`
 
 ---
 

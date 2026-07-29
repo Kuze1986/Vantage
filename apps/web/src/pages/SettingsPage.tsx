@@ -1,6 +1,7 @@
 import React from 'react'
-import { vantageApi } from '../api/vantage'
+import { vantageApi, type BrandKitRecord } from '../api/vantage'
 import { Panel, Badge, Button } from '../ds'
+import { BrandKitsPanel } from './BrandKitsPanel'
 
 const ALL_VERTICALS = [
   'pharmacy-tech', 'healthcare', 'biotech', 'fintech', 'edtech',
@@ -30,23 +31,43 @@ type Settings = {
 
 type LLMProviderInfo = { name: string; displayName: string; available: boolean }
 
+type ProductProfile = {
+  default_product_id: string
+  product_base_url: string
+  default_brand_id: string
+  default_demoforge_template_id: string
+  default_brand_kit_id: string
+}
+
 export function SettingsPage() {
   const [settings, setSettings]   = React.useState<Settings | null>(null)
   const [draft, setDraft]         = React.useState<Settings | null>(null)
   const [providers, setProviders] = React.useState<LLMProviderInfo[]>([])
+  const [profile, setProfile]     = React.useState<ProductProfile | null>(null)
+  const [profileDraft, setProfileDraft] = React.useState<ProductProfile | null>(null)
   const [saving, setSaving]       = React.useState(false)
+  const [savingProfile, setSavingProfile] = React.useState(false)
   const [saved, setSaved]         = React.useState(false)
+  const [profileSaved, setProfileSaved] = React.useState(false)
+  const [brandKits, setBrandKits] = React.useState<BrandKitRecord[]>([])
   const [err, setErr]             = React.useState<string | null>(null)
 
   const load = React.useCallback(async () => {
     try {
-      const [r, p] = await Promise.all([
+      const [r, p, pp, kits] = await Promise.all([
         vantageApi.getSettings(),
         vantageApi.listLLMProviders().catch(() => ({ providers: [] as LLMProviderInfo[] })),
+        vantageApi.getProductProfile().catch(() => null),
+        vantageApi.listBrandKits().catch(() => ({ kits: [] as BrandKitRecord[] })),
       ])
       setSettings(r.settings)
       setDraft(r.settings)
       setProviders(p.providers)
+      setBrandKits(kits.kits)
+      if (pp?.profile) {
+        setProfile(pp.profile as ProductProfile)
+        setProfileDraft(pp.profile as ProductProfile)
+      }
     } catch (e) {
       setErr(String((e as Error).message))
     }
@@ -81,6 +102,23 @@ export function SettingsPage() {
   }
 
   const isDirty = JSON.stringify(draft) !== JSON.stringify(settings)
+  const profileDirty = JSON.stringify(profileDraft) !== JSON.stringify(profile)
+
+  const saveProductProfile = async () => {
+    if (!profileDraft) return
+    setSavingProfile(true); setErr(null)
+    try {
+      const r = await vantageApi.patchProductProfile(profileDraft)
+      setProfile(r.profile as ProductProfile)
+      setProfileDraft(r.profile as ProductProfile)
+      setProfileSaved(true)
+      setTimeout(() => setProfileSaved(false), 2500)
+    } catch (e) {
+      setErr(String((e as Error).message))
+    } finally {
+      setSavingProfile(false)
+    }
+  }
 
   return (
     <>
@@ -92,6 +130,67 @@ export function SettingsPage() {
       {err && <div className="vg-error" style={{ marginBottom: 16 }}>{err}</div>}
 
       <div className="vg-stack">
+
+        <BrandKitsPanel onKitsChange={setBrandKits} />
+
+        {/* ── Product profile (Shift defaults) ───────────────────────────── */}
+        <Panel title="Product Profile" titleAccent="amber">
+          {!profileDraft ? (
+            <p className="vg-empty">Loading…</p>
+          ) : (
+            <div style={{ display: 'grid', gap: 14 }}>
+              <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', margin: 0, lineHeight: 1.6 }}>
+                Workspace defaults for campaign launch and DemoForge (idea → campaign → product profile → channel seed).
+              </p>
+              {([
+                { key: 'default_product_id' as const, label: 'Default product id', hint: 'e.g. shift' },
+                { key: 'product_base_url' as const, label: 'Product base URL', hint: 'DemoForge recording URL' },
+                { key: 'default_brand_id' as const, label: 'Default brand id', hint: 'Social Kit brand' },
+                { key: 'default_demoforge_template_id' as const, label: 'Default DemoForge template', hint: 'Optional template id' },
+              ]).map(({ key, label, hint }) => (
+                <div key={key}>
+                  <label className="vg-label" style={{ display: 'block', marginBottom: 6 }}>{label}</label>
+                  <input
+                    className="vg-input"
+                    value={profileDraft[key]}
+                    onChange={(e) => setProfileDraft((prev) => prev ? { ...prev, [key]: e.target.value } : prev)}
+                    style={{ width: '100%', maxWidth: 420 }}
+                  />
+                  <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginTop: 4 }}>{hint}</div>
+                </div>
+              ))}
+              <div>
+                <label className="vg-label" style={{ display: 'block', marginBottom: 6 }}>Default brand kit</label>
+                <select
+                  className="vg-input"
+                  value={profileDraft.default_brand_kit_id}
+                  onChange={(e) => setProfileDraft((prev) => prev ? { ...prev, default_brand_kit_id: e.target.value } : prev)}
+                  style={{ width: '100%', maxWidth: 420 }}
+                >
+                  <option value="">— none —</option>
+                  {brandKits.map((k) => (
+                    <option key={k.id} value={k.id}>{k.name}{k.logo_storage_path ? '' : ' (no logo)'}</option>
+                  ))}
+                </select>
+                <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginTop: 4 }}>
+                  Used when DemoForge / campaign launch needs a workspace logo kit
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <Button
+                  label={savingProfile ? 'Saving…' : profileSaved ? 'Saved ✓' : 'Save product profile'}
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void saveProductProfile()}
+                  disabled={savingProfile || !profileDirty}
+                />
+                {profileDirty && !savingProfile && (
+                  <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-amber)' }}>Unsaved changes</span>
+                )}
+              </div>
+            </div>
+          )}
+        </Panel>
 
         {/* ── Pipeline configuration ─────────────────────────────────────── */}
         <Panel title="Pipeline Configuration" titleAccent="amber">

@@ -3,6 +3,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { loadSettings, patchSettings } from "../lib/settings.js";
 import { listLLMProviders } from "../lib/llm-providers/index.js";
+import { loadProductProfile, patchProductProfile } from "../lib/product-profile.js";
 
 export const settingsRoutes = new Hono();
 
@@ -10,6 +11,28 @@ export const settingsRoutes = new Hono();
 settingsRoutes.get("/", async (c) => {
   const settings = await loadSettings(c.get("workspaceId"));
   return c.json({ settings });
+});
+
+// GET /v1/settings/product-profile — workspace default product (Shift-first)
+settingsRoutes.get("/product-profile", async (c) => {
+  const profile = await loadProductProfile(c.get("workspaceId"));
+  return c.json({ profile });
+});
+
+const productProfileSchema = z.object({
+  default_product_id: z.string().min(1).optional(),
+  product_base_url: z.string().url().optional(),
+  default_brand_id: z.string().min(1).optional(),
+  default_demoforge_template_id: z.string().optional(),
+  default_brand_kit_id: z.string().optional(),
+});
+
+settingsRoutes.patch("/product-profile", async (c) => {
+  const json = await c.req.json().catch(() => ({}));
+  const parsed = productProfileSchema.safeParse(json);
+  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+  const profile = await patchProductProfile(c.get("workspaceId"), parsed.data);
+  return c.json({ ok: true, profile });
 });
 
 // GET /v1/settings/llm-providers — list providers and whether each is configured
@@ -23,7 +46,7 @@ settingsRoutes.get("/llm-providers", (c) => {
 });
 
 // "" is allowed and means "inherit the env default".
-const providerChoice = z.enum(["anthropic", "openai", "grok", ""]);
+const providerChoice = z.enum(["anthropic", "openai", "gemini", "grok", "kimi", ""]);
 
 const patchSchema = z.object({
   dedup_days:            z.number().int().min(1).max(365).optional(),

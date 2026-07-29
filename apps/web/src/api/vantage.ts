@@ -33,6 +33,20 @@ export async function vantageFetch(path: string, init: RequestInit = {}) {
   return body;
 }
 
+export type BrandKitRecord = {
+  id: string;
+  name: string;
+  logo_url: string | null;
+  logo_storage_path: string | null;
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  font_heading: string;
+  font_body: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 export type ChannelStatus = {
   slug: string;
   enabled: boolean;
@@ -118,18 +132,37 @@ export const vantageApi = {
     }) as Promise<{ verdict: string; status: string; feedback?: string }>,
 
   // ── Publish ───────────────────────────────────────────────────────────────
-  publish: (channel: string, content_piece_id: string, external_post_url?: string) =>
+  publish: (channel: string, content_piece_id: string, external_post_url?: string, force?: boolean) =>
     vantageFetch(`/v1/publish/${channel}`, {
       method: "POST",
-      body: JSON.stringify({ content_piece_id, external_post_url }),
+      body: JSON.stringify({ content_piece_id, external_post_url, force }),
     }) as Promise<{ ok: boolean; external_post_id: string; manual?: boolean }>,
 
   // ── Schedule ──────────────────────────────────────────────────────────────
-  schedule: (content_piece_id: string, scheduled_for?: string) =>
+  schedule: (content_piece_id: string, scheduled_for?: string, force?: boolean) =>
     vantageFetch("/v1/schedule", {
       method: "POST",
-      body: JSON.stringify({ content_piece_id, scheduled_for }),
+      body: JSON.stringify({ content_piece_id, scheduled_for, force }),
     }),
+
+  bulkSchedule: (content_piece_ids: string[], force?: boolean) =>
+    vantageFetch("/v1/queue/bulk-schedule", {
+      method: "POST",
+      body: JSON.stringify({ content_piece_ids, force }),
+    }) as Promise<{ scheduled: number; skipped: { id: string; reason: string }[]; ids: string[] }>,
+
+  getPublishPack: (id: string) =>
+    vantageFetch(`/v1/queue/${id}/publish-pack`) as Promise<{
+      content_piece_id: string;
+      channel: string;
+      caption: string;
+      hashtags: string;
+      video_url: string | null;
+      thumbnail_url: string | null;
+      copy_all: string;
+      media_ready: boolean;
+      instructions: string;
+    }>,
 
   // ── Queue ─────────────────────────────────────────────────────────────────
   getQueue: (limit = 100) =>
@@ -249,13 +282,64 @@ export const vantageApi = {
 
   // ── Calendar ──────────────────────────────────────────────────────────────
   // 3B-2: pieces with scheduled_for in a date range
-  getCalendar: (from: string, to: string) =>
-    vantageFetch(`/v1/queue/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`) as Promise<{
+  getCalendar: (from: string, to: string, campaignId?: string) => {
+    const q = new URLSearchParams({ from, to });
+    if (campaignId) q.set("campaign_id", campaignId);
+    return vantageFetch(`/v1/queue/calendar?${q}`) as Promise<{
       pieces: {
         id: string; status: string; channel_slug: string; format: string;
         content_payload: Record<string, unknown>; scheduled_for: string | null; published_at: string | null;
       }[]
+    }>;
+  },
+
+  getProductProfile: () =>
+    vantageFetch("/v1/settings/product-profile") as Promise<{
+      profile: {
+        default_product_id: string;
+        product_base_url: string;
+        default_brand_id: string;
+        default_demoforge_template_id: string;
+        default_brand_kit_id: string;
+      }
     }>,
+
+  patchProductProfile: (patch: Record<string, string>) =>
+    vantageFetch("/v1/settings/product-profile", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }) as Promise<{ ok: boolean; profile: Record<string, string> }>,
+
+  listShiftPacks: () =>
+    vantageFetch("/v1/campaigns/meta/shift-packs") as Promise<{
+      packs: {
+        id: string; name: string; description: string;
+        items: { id: string; title: string; outline: string; visual_type: string; demoforge_template_id?: string }[];
+      }[]
+    }>,
+
+  addCampaignPack: (campaignId: string, pack_id: string, item_ids?: string[]) =>
+    vantageFetch(`/v1/campaigns/${campaignId}/add-pack`, {
+      method: "POST",
+      body: JSON.stringify({ pack_id, item_ids }),
+    }) as Promise<{ added: number; timeline: unknown[] }>,
+
+  refillCampaignEvergreen: (campaignId: string) =>
+    vantageFetch(`/v1/campaigns/${campaignId}/refill-evergreen`, { method: "POST" }) as Promise<{
+      added: number; message?: string; timeline?: unknown[];
+    }>,
+
+  applyInsightToCampaign: (insightId: string, campaign_id: string) =>
+    vantageFetch(`/v1/intelligence/insights/${insightId}/apply`, {
+      method: "POST",
+      body: JSON.stringify({ campaign_id }),
+    }) as Promise<{ day: unknown }>,
+
+  setDemoForgeThumbnail: (jobId: string, frame_index: number, content_piece_id?: string) =>
+    vantageFetch(`/v1/demoforge/jobs/${jobId}/set-thumbnail`, {
+      method: "POST",
+      body: JSON.stringify({ frame_index, content_piece_id }),
+    }) as Promise<{ thumbnail_url: string; frame_index: number }>,
 
   // ── Analytics ─────────────────────────────────────────────────────────────
   // 3B-3: engagement trend data
@@ -350,14 +434,39 @@ export const vantageApi = {
   // ── Brand Kits (Phase 1: DemoForge creative studio) ──────────────────────
   listBrandKits: () =>
     vantageFetch("/v1/brand-kits") as Promise<{
-      kits: { id: string; name: string; logo_url: string | null; logo_storage_path: string | null; primary_color: string; secondary_color: string; accent_color: string; font_heading: string; font_body: string }[]
+      kits: BrandKitRecord[]
     }>,
 
-  createBrandKit: (body: { name: string; logo_url?: string; logo_storage_path?: string; primary_color?: string; secondary_color?: string; accent_color?: string; font_heading?: string; font_body?: string }) =>
-    vantageFetch("/v1/brand-kits", { method: "POST", body: JSON.stringify(body) }) as Promise<{ ok: boolean; kit: { id: string; name: string } }>,
+  createBrandKit: (body: {
+    name: string;
+    logo_url?: string;
+    logo_storage_path?: string;
+    primary_color?: string;
+    secondary_color?: string;
+    accent_color?: string;
+    font_heading?: string;
+    font_body?: string;
+    data_url?: string;
+  }) =>
+    vantageFetch("/v1/brand-kits", { method: "POST", body: JSON.stringify(body) }) as Promise<{ ok: boolean; kit: BrandKitRecord }>,
 
-  updateBrandKit: (id: string, body: { name?: string; logo_url?: string; logo_storage_path?: string; primary_color?: string; secondary_color?: string; accent_color?: string; font_heading?: string; font_body?: string }) =>
-    vantageFetch(`/v1/brand-kits/${id}`, { method: "PATCH", body: JSON.stringify(body) }) as Promise<{ ok: boolean; kit: { id: string; name: string } }>,
+  updateBrandKit: (id: string, body: {
+    name?: string;
+    logo_url?: string;
+    logo_storage_path?: string;
+    primary_color?: string;
+    secondary_color?: string;
+    accent_color?: string;
+    font_heading?: string;
+    font_body?: string;
+  }) =>
+    vantageFetch(`/v1/brand-kits/${id}`, { method: "PATCH", body: JSON.stringify(body) }) as Promise<{ ok: boolean; kit: BrandKitRecord }>,
+
+  uploadBrandKitLogo: (id: string, data_url: string) =>
+    vantageFetch(`/v1/brand-kits/${id}/logo`, {
+      method: "POST",
+      body: JSON.stringify({ data_url }),
+    }) as Promise<{ ok: boolean; kit: BrandKitRecord }>,
 
   deleteBrandKit: (id: string) =>
     vantageFetch(`/v1/brand-kits/${id}`, { method: "DELETE" }) as Promise<{ ok: boolean }>,
@@ -443,12 +552,19 @@ export const vantageApi = {
 
   getDemoForgeJob: (jobId: string) =>
     vantageFetch(`/v1/demoforge/jobs/${jobId}`) as Promise<{
-      id: string; status: string; target_format: string; output_url: string | null; error_message: string | null; updated_at: string
+      id: string; status: string; target_format: string; output_url: string | null;
+      thumbnail_url?: string | null; extracted_frames?: Array<{ url?: string }> | null;
+      content_piece_id?: string | null; error_message: string | null; updated_at: string
     }>,
 
   listDemoForgeJobs: () =>
     vantageFetch("/v1/demoforge/jobs") as Promise<{
-      jobs: { id: string; content_piece_id: string | null; status: string; target_format: string; output_url: string | null; error_message: string | null; created_at: string }[]
+      jobs: {
+        id: string; content_piece_id: string | null; status: string; target_format: string;
+        output_url: string | null; thumbnail_url?: string | null;
+        extracted_frames?: Array<{ url?: string }> | null;
+        error_message: string | null; created_at: string; updated_at?: string
+      }[]
     }>,
 
   listDemoForgeTemplates: () =>

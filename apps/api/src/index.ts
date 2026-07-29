@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./lib/load-env.js";
 // Node.js < 22 has no native WebSocket — polyfill before supabase-js loads.
 import { WebSocket as _WS } from "ws";
 if (!("WebSocket" in globalThis)) (globalThis as Record<string, unknown>).WebSocket = _WS;
@@ -30,6 +30,8 @@ import { campaignRoutes } from "./routes/campaigns.js";
 import { workspaceRoutes } from "./routes/workspaces.js";
 import { intelligenceRoutes } from "./routes/intelligence.js";
 import { audienceRoutes } from "./routes/audience.js";
+import { brandKitsRoutes } from "./routes/brand-kits.js";
+import { introOutroClipsRoutes } from "./routes/intro-outro-clips.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
 import { startCadenceEngine } from "./services/scheduler.js";
 
@@ -78,6 +80,8 @@ authedV1.route("/settings", settingsRoutes);
 authedV1.route("/analytics", analyticsRoutes);
 authedV1.route("/captions", captionsRoutes);
 authedV1.route("/email-templates", emailTemplatesRoutes);
+authedV1.route("/brand-kits", brandKitsRoutes);
+authedV1.route("/intro-outro-clips", introOutroClipsRoutes);
 
 app.route("/v1", authedV1);
 
