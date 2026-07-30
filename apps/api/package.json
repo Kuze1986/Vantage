@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "@bioloop/llm": "file:../../../bioloop-llm",
     "@hono/node-server": "^1.13.7",
     "@supabase/supabase-js": "^2.49.1",
     "@vantage/prompts": "workspace:*",
