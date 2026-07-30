@@ -61,7 +61,7 @@ const scriptStepSchema = z.object({
   action:    z.enum(["navigate", "click", "fill", "wait", "scroll", "narrate", "eval", "run"]),
   selector:  z.string().optional(),
   text:      z.string().optional(),
-  ms:        z.number().int().positive().optional(),
+  ms:        z.number().int().nonnegative().optional(),
   narration: z.string().default(""),
   soundEffect: soundEffectSchema.optional(),
 });
