@@ -1,0 +1,60 @@
+/* Vantage marketing landing — ported from BioLoop Nexus Design */
+
+.vg-landing {
+  min-height: 100vh;
+  background: var(--nx-bg);
+  color: var(--nx-text);
+  font-family: var(--nx-body);
+  overflow-x: hidden;
+}
+
+.vg-landing ::selection {
+  background: var(--nx-accent);
+  color: #000;
+}
+
+.vg-landing a {
+  transition: color 120ms ease;
+}
+
+.vg-landing .nx-btn--primary:hover {
+  box-shadow: 0 0 22px -4px var(--nx-accent);
+}
+
+.vg-landing .v-card {
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+
+.vg-landing .v-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--nx-border-strong);
+}
+
+@keyframes vg-landing-log {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (max-width: 920px) {
+  .vg-landing .v-hero-grid,
+  .vg-landing .v-reactor-grid,
+  .vg-landing .v-loop-grid,
+  .vg-landing .v-sub-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .vg-landing .v-proof-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  .vg-landing .v-nav a:not(.nx-btn) {
+    display: none;
+  }
+  .vg-landing .v-reactor-grid > div {
+    border-right: none !important;
+  }
+}
+
+@media (max-width: 560px) {
+  .vg-landing .v-proof-grid {
+    grid-template-columns: 1fr !important;
+  }
+}

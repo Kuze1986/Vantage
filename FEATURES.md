@@ -8,6 +8,7 @@
 
 ## Table of Contents
 
+0. [Marketing Landing](#0-marketing-landing)
 1. [Authentication & Access](#1-authentication--access)
 2. [Brand Voice](#2-brand-voice)
 3. [Source Pipeline](#3-source-pipeline)
@@ -44,6 +45,32 @@
 
 ---
 
+### 0. Marketing Landing
+
+**What it does:**
+Public marketing site for Vantage, ported from BioLoop Nexus Design (`Vantage Landing.html`
++ `vantage-landing-top.jsx` / `vantage-landing-bottom.jsx`). Positions Vantage as an
+**autonomous signal reactor** — cyan/amber theme, interactive Signal Reactor demo,
+subsystems, continuous loop, proof telemetry, manual-vs-autopilot comparison, and CTA.
+
+**Routing:**
+- `/` and `/landing` — public landing (no auth)
+- Authenticated console starts at `/dashboard` (legacy `/` dashboard path moved)
+- Landing CTAs → `/login` (Nexus SSO), then operators land on `/dashboard`
+
+**Sections:** Nav · Hero (+ orbital reactor preview) · Signal Reactor (live allocation sim) ·
+Subsystems · The Loop · Proof · Comparison · CTA · Footer
+
+**Files:**
+- `apps/web/src/landing/LandingPage.tsx`
+- `apps/web/src/landing/primitives.tsx` — VantageMark, Chip, Sparkline, SectionHead, TelemetryStrip
+- `apps/web/src/landing/landing.css`
+- `apps/web/src/App.tsx` — public routes + `/dashboard` console entry
+
+**Design source:** `BioLoop Nexus Design/Vantage Landing.html`
+
+---
+
 ### 1. Authentication & Access
 
 **What it does:**
@@ -77,7 +104,7 @@ the anon/user key which is RLS-restricted.
 - `apps/api/src/routes/workspaces.ts` — `/v1/workspaces/me` + member management routes
 - `apps/web/src/lib/WorkspaceContext.tsx` — fetches/creates the workspace, sends `x-workspace-id`
 - `apps/web/src/lib/supabase.ts` — supabase-js singleton used by the web app
-- `apps/web/src/pages/LoginPage.tsx` — email/password login form
+- `apps/web/src/pages/LoginPage.tsx` — Nexus SSO redirect; post-auth → `/dashboard`
 
 **Configuration:** No env vars needed in the web app beyond `VITE_SUPABASE_URL` and
 `VITE_SUPABASE_ANON_KEY`. The API needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.

@@ -20,14 +20,14 @@ export function LoginPage() {
         return
       }
       setState('redirecting')
-      redirectToNexus(window.location.origin)
+      redirectToNexus(`${window.location.origin}/dashboard`)
     })
     return () => {
       mounted = false
     }
   }, [])
 
-  if (state === 'authed') return <Navigate to="/" replace />
+  if (state === 'authed') return <Navigate to="/dashboard" replace />
 
   return (
     <div className="vg-login-wrap nx-app">

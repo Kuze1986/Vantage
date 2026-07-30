@@ -17,9 +17,10 @@ import { EmailBuilderPage } from './pages/EmailBuilderPage'
 import CampaignBuilderPage from './pages/CampaignBuilderPage'
 import IntelligencePage from './pages/IntelligencePage'
 import AudiencePage from './pages/AudiencePage'
+import { LandingPage } from './landing/LandingPage'
 
 const NAV = [
-  { label: 'Dashboard', path: '/',          icon: '◈' },
+  { label: 'Dashboard', path: '/dashboard', icon: '◈' },
   { label: 'Queue',     path: '/queue',      icon: '≋' },
   { label: 'Calendar',  path: '/calendar',   icon: '▦' },
   { label: 'Analytics', path: '/analytics',  icon: '▲' },
@@ -57,8 +58,8 @@ function Sidebar() {
             label={item.label}
             icon={<span>{item.icon}</span>}
             active={
-              item.path === '/'
-                ? location.pathname === '/'
+              item.path === '/dashboard'
+                ? location.pathname === '/dashboard'
                 : location.pathname.startsWith(item.path)
             }
             onClick={() => navigate(item.path)}
@@ -121,6 +122,8 @@ export function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/landing" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route
           element={
@@ -129,7 +132,7 @@ export function App() {
             </RequireAuth>
           }
         >
-          <Route path="/"           element={<DashboardPage />} />
+          <Route path="/dashboard"  element={<DashboardPage />} />
           <Route path="/queue"      element={<QueuePage />} />
           <Route path="/calendar"   element={<CalendarPage />} />
           <Route path="/analytics"  element={<AnalyticsPage />} />
