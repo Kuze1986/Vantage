@@ -1,24 +1,17 @@
-// storage.ts — thin helper for uploading data-URLs to the vantage-media bucket.
-// Used by creative tools (OG cards, DemoForge thumbnails) that persist a PNG.
+// storage.ts — upload data-URLs via the vantage API (service-role Storage).
+// Used by creative tools (OG cards, quote cards) that persist a PNG.
 
-import { supabase } from './supabase'
+import { vantageFetch } from '../api/vantage'
 
 /**
- * Convert a data-URL to a Blob, upload to vantage-media at `path`,
- * and return the public URL.  Overwrites if the file already exists.
+ * Convert a data-URL to a Blob path upload through POST /v1/media/upload,
+ * and return the public URL. Overwrites if the file already exists.
  */
 export async function uploadDataUrl(path: string, dataUrl: string): Promise<string> {
-  const res   = await fetch(dataUrl)
-  const blob  = await res.blob()
-  const ext   = blob.type.includes('png') ? 'png' : 'jpg'
-  const full  = path.endsWith('.png') || path.endsWith('.jpg') ? path : `${path}.${ext}`
-
-  const { error } = await supabase.storage
-    .from('vantage-media')
-    .upload(full, blob, { contentType: blob.type, upsert: true })
-
-  if (error) throw new Error(`Storage upload failed: ${error.message}`)
-
-  const { data } = supabase.storage.from('vantage-media').getPublicUrl(full)
-  return data.publicUrl
+  const res = await vantageFetch('/v1/media/upload', {
+    method: 'POST',
+    body: JSON.stringify({ path, data_url: dataUrl }),
+  }) as { public_url: string; storage_path: string }
+  if (!res?.public_url) throw new Error('Storage upload failed: missing public_url')
+  return res.public_url
 }

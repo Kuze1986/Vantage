@@ -54,14 +54,24 @@ const scriptStepSchema = z.object({
   narration: z.string().default(""),
 });
 
+const captionConfigSchema = z.object({
+  enabled: z.boolean(),
+}).passthrough();
+
+const colorGradeSchema = z.object({
+  preset: z.enum(["clean", "warm", "cinematic", "vibrant", "muted", "cool", "dark"]).optional(),
+}).passthrough();
+
 const jobSchema = z.object({
   workspace_id:     z.string().uuid(),
   content_piece_id: z.string().uuid().optional(),
   target_format:    z.enum(["tiktok", "linkedin", "instagram"]),
   url:              z.string().url(),
-  script:           z.array(scriptStepSchema).min(1).max(30),
+  script:           z.array(scriptStepSchema).min(1).max(40),
   music_track_id:   z.string().uuid().optional(),
   voice_id:         z.string().optional(),
+  caption_config:   captionConfigSchema.optional(),
+  color_grade:      colorGradeSchema.optional(),
 });
 
 // ── POST /jobs — submit a new video job ───────────────────────────────────────
@@ -72,10 +82,22 @@ app.post("/jobs", async (c) => {
   const parsed = jobSchema.safeParse(json);
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
-  const { workspace_id, content_piece_id, target_format, url, script, music_track_id, voice_id } = parsed.data;
+  const {
+    workspace_id, content_piece_id, target_format, url, script,
+    music_track_id, voice_id, caption_config, color_grade,
+  } = parsed.data;
 
   const jobId = randomUUID();
   const sb    = getSupabase();
+
+  const input_payload = {
+    url,
+    script: script as ScriptStep[],
+    music_track_id,
+    voice_id,
+    ...(caption_config ? { caption_config } : {}),
+    ...(color_grade ? { color_grade } : {}),
+  };
 
   // Persist job record
   const { error } = await sb.from("demoforge_jobs").insert({
@@ -84,7 +106,7 @@ app.post("/jobs", async (c) => {
     content_piece_id: content_piece_id ?? null,
     status:           "pending",
     target_format,
-    input_payload:    { url, script, music_track_id, voice_id },
+    input_payload,
   });
 
   if (error) throw new HTTPException(500, { message: error.message });
@@ -93,12 +115,7 @@ app.post("/jobs", async (c) => {
     id:               jobId,
     content_piece_id,
     target_format,
-    input_payload: {
-      url,
-      script: script as ScriptStep[],
-      music_track_id,
-      voice_id,
-    },
+    input_payload,
   };
 
   // Enqueue for async processing

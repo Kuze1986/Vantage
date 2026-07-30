@@ -15,7 +15,7 @@ export interface ProductProfile {
 
 const DEFAULTS: ProductProfile = {
   default_product_id: "shift",
-  product_base_url: process.env.SHIFT_BASE_URL?.trim() || "http://localhost:5175",
+  product_base_url: process.env.SHIFT_BASE_URL?.trim() || "https://theshift.bioloopnexus.com",
   default_brand_id: DEFAULT_BRAND_ID,
   default_demoforge_template_id: "",
   default_brand_kit_id: "",

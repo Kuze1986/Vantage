@@ -7,7 +7,7 @@
   "estimatedSec": 120,
   "estimatedSecNote": "Actual duration is driven by ElevenLabs per-line synthesis in DemoForge",
   "baseUrlPlaceholder": "{BASE}",
-  "defaultBaseUrl": "http://localhost:5175",
+  "defaultBaseUrl": "https://theshift.bioloopnexus.com",
   "steps": [
     {
       "action": "navigate",

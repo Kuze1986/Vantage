@@ -32,6 +32,7 @@ import { intelligenceRoutes } from "./routes/intelligence.js";
 import { audienceRoutes } from "./routes/audience.js";
 import { brandKitsRoutes } from "./routes/brand-kits.js";
 import { introOutroClipsRoutes } from "./routes/intro-outro-clips.js";
+import { mediaRoutes } from "./routes/media.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
 import { startCadenceEngine } from "./services/scheduler.js";
 
@@ -82,6 +83,7 @@ authedV1.route("/captions", captionsRoutes);
 authedV1.route("/email-templates", emailTemplatesRoutes);
 authedV1.route("/brand-kits", brandKitsRoutes);
 authedV1.route("/intro-outro-clips", introOutroClipsRoutes);
+authedV1.route("/media", mediaRoutes);
 
 app.route("/v1", authedV1);
 
