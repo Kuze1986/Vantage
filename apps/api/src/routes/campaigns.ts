@@ -33,6 +33,7 @@ import {
   resolveBrandId,
   resolveTemplateId,
 } from '../lib/demoforge-templates.js';
+import { loadProductProfile } from '../lib/product-profile.js';
 
 export const campaignRoutes = new Hono();
 
@@ -703,6 +704,9 @@ campaignRoutes.post('/:id/launch', async (c) => {
       ? campaign.default_demoforge_template_id
       : null;
 
+  const productProfile = await loadProductProfile(workspaceId);
+  const demoBaseUrl = productProfile.product_base_url || undefined;
+
   for (const day of timeline) {
     const idea = (day.content_ideas as Idea[] | null)?.[0];
     if (!idea?.title) {
@@ -804,7 +808,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
       // Enqueue DemoForge for video / product stills (async — does not block launch).
       if (visualType === 'demo_video' || visualType === 'product_still') {
         try {
-          const dfPayload = buildDemoForgePayload(templateId, undefined, {
+          const dfPayload = buildDemoForgePayload(templateId, demoBaseUrl, {
             captions: true,
             colorPreset: 'cinematic',
           });

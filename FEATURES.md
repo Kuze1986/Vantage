@@ -1021,6 +1021,9 @@ table including defaults and FK constraints.
 **Migrations:**
 - `20260601000000_vantage_schema.sql` — base schema
 - `20260601000100_vantage_storage.sql` — Supabase Storage bucket
+- `20260608000000_public_media_bucket.sql` — public read on `vantage-media`
+- `20260730110539_vantage_media_authenticated_upsert.sql` — authenticated INSERT/SELECT/UPDATE
+  (required for browser Storage upserts)
 - `20260602000000_vantage_public_views.sql` — public views for original tables
 - `20260603000000_newsletter_subscribers.sql` — subscriber table
 - `20260604000000_phase2.sql` — variant_group_id, image_url, music_tracks, demoforge_jobs
@@ -1255,7 +1258,9 @@ Three-view interface:
 - `supabase/migrations/20260729120000_demoforge_thumbnail_and_product_profile.sql` — job `thumbnail_url`
 
 **Configuration:** Requires LLM keys for generation; `DEMOFORGE_URL` + workspace product profile
-(or `SHIFT_BASE_URL`) for visual enqueue. Uses pluggable LLM provider system.
+`product_base_url` (or `SHIFT_BASE_URL`, default `https://theshift.bioloopnexus.com`) for visual
+enqueue. Launch records DemoForge job failures on the piece (`media_status=failed`, `media_error`).
+Uses pluggable LLM provider system.
 
 ---
 
@@ -2008,17 +2013,19 @@ the platform scrapes — usually nothing branded. There is no tool to produce a 
 - Entry point: a **"Share card"** action on each Queue row that opens the OG editor in a modal
   (same modal pattern as `PreviewModal`).
 - **Two outputs:** (a) **Export PNG** locally via `exportCanvasNode()`; (b) **Attach to piece**
-  — `uploadDataUrl('vantage-media', 'og/<piece_id>.png', dataUrl)` then `PATCH` the piece to set
-  `content_payload.og_image_url`. The publishing adapters already attach images
-  (X/LinkedIn image passthrough — see 3A-3), so an attached card ships with the post.
+  — `uploadDataUrl('og/<piece_id>.png', dataUrl)` → `POST /v1/media/upload` (service-role
+  Storage under `workspaces/<ws>/…`) then `PATCH` the piece to set `content_payload.og_image_url`.
+  The publishing adapters already attach images (X/LinkedIn image passthrough — see 3A-3).
 - New `apps/api/src/routes/queue.ts` patch endpoint (or reuse an existing update path) to set
   `og_image_url` on the piece.
+- `POST /v1/media/upload` — authenticated image data-URL upload for creative tools (`og/`,
+  `quotes/`, `thumbnails/`, `creative/` prefixes). Complements Storage RLS policies for
+  direct browser upserts (`20260730110539_vantage_media_authenticated_upsert.sql`).
 
-**Files to create/change:** `apps/web/src/pages/creative/OgCard.tsx` (new),
-`apps/web/src/pages/QueuePage.tsx` (action + modal), `apps/api/src/routes/queue.ts`
-(set `og_image_url`), `apps/web/src/lib/storage.ts` (from 3C-0).
+**Files:** `apps/web/src/creative/OgCard.tsx`, `apps/web/src/pages/QueuePage.tsx`,
+`apps/api/src/routes/media.ts`, `apps/web/src/lib/storage.ts`.
 
-**Configuration:** Supabase Storage (`vantage-media` bucket, already provisioned).
+**Configuration:** Supabase Storage (`vantage-media` bucket) + API service role.
 
 ---
 

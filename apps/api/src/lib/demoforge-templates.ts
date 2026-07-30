@@ -141,7 +141,7 @@ export function defaultBaseUrlForTemplate(tpl: DemoForgeTemplate): string {
   return (
     process.env.SHIFT_BASE_URL?.trim() ||
     tpl.defaultBaseUrl ||
-    "http://localhost:5175"
+    "https://theshift.bioloopnexus.com"
   ).replace(/\/$/, "");
 }
 

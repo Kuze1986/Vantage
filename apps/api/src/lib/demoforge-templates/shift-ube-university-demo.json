@@ -7,7 +7,7 @@
   "estimatedSec": 210,
   "estimatedSecNote": "Actual duration is driven by ElevenLabs per-line synthesis in DemoForge",
   "baseUrlPlaceholder": "{BASE}",
-  "defaultBaseUrl": "http://localhost:5175",
+  "defaultBaseUrl": "https://theshift.bioloopnexus.com",
   "presenterNotes": [
     "Frame: students already use Anki and games — bar prep should feel like training, not homework.",
     "Emphasize: placeholder MBE copy is intentional; mechanics and exam-day flow are the demo.",
