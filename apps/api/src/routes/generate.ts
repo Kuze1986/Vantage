@@ -8,12 +8,16 @@ import { generateContent } from "../services/kuze.js";
 import { generateImage } from "../services/imageGen.js";
 import { tagUrls } from "../lib/utm.js";
 import type { ChannelSlug } from "../services/kuze.js";
+import { brandVoiceToPromptString, loadBrandVoice } from "../lib/brand-voice.js";
+import { loadProductProfile } from "../lib/product-profile.js";
+import { parseProductSlug } from "../lib/products.js";
 
 const bodySchema = z.object({
   topic_id:       z.string().uuid(),
   subreddit:      z.string().optional(),
   generate_image: z.boolean().optional(),
   variants:       z.number().int().min(1).max(3).optional(), // A/B variant count
+  product_slug:   z.enum(["shift", "keystone", "scripta", "demoforge", "crucible", "vantage"]).optional(),
 });
 
 export const generateRoutes = new Hono();
@@ -34,21 +38,26 @@ generateRoutes.post("/:channel", async (c) => {
 
   const { data: topic, error: tErr } = await sb
     .from("topics")
-    .select("id, topic_text, vertical, used_at")
+    .select("id, topic_text, vertical, used_at, target_product")
     .eq("workspace_id", ws)
     .eq("id", topic_id).single();
   if (tErr || !topic) throw new HTTPException(404, { message: "Topic not found" });
 
-  const { data: voices } = await sb.from("brand_voice").select("*").eq("workspace_id", ws).limit(1);
-  const voice = voices?.[0];
-  if (!voice) throw new HTTPException(400, { message: "Configure brand voice first" });
+  const profile = await loadProductProfile(ws);
+  const productSlug = parseProductSlug(
+    parsed.data.product_slug
+      ?? topic.target_product
+      ?? profile.default_brand_id
+      ?? profile.default_product_id,
+  );
 
-  const brandVoiceStr = JSON.stringify({
-    name: voice.name,
-    description: voice.description,
-    per_channel_tone: voice.per_channel_tone,
-    off_topics: voice.off_topics,
-  });
+  let voice;
+  try {
+    voice = await loadBrandVoice(ws, productSlug);
+  } catch (e) {
+    throw new HTTPException(400, { message: e instanceof Error ? e.message : "Configure brand voice first" });
+  }
+  const brandVoiceStr = brandVoiceToPromptString(voice);
 
   // For A/B variants, all pieces in this batch share a variant_group_id
   const variantGroupId = variants > 1 ? randomUUID() : null;
@@ -87,9 +96,10 @@ generateRoutes.post("/:channel", async (c) => {
         topic_id,
         channel_slug:     channel,
         format:           gen.format,
-        content_payload:  gen.content_payload,
+        content_payload:  { ...gen.content_payload, brand_id: productSlug },
         status:           "auditing",
         audit_iterations: 0,
+        product_slug:     productSlug,
         ...(variantGroupId ? { variant_group_id: variantGroupId } : {}),
       })
       .select("id").single();
@@ -107,7 +117,7 @@ generateRoutes.post("/:channel", async (c) => {
     }
 
     // Apply UTM tags now that we have piece.id
-    const taggedPayload = { ...gen.content_payload };
+    const taggedPayload: Record<string, unknown> = { ...gen.content_payload, brand_id: productSlug };
     for (const [k, v] of Object.entries(taggedPayload)) {
       if (typeof v === "string") taggedPayload[k] = tagUrls(v, channel, piece.id);
     }
@@ -120,7 +130,7 @@ generateRoutes.post("/:channel", async (c) => {
           topic_text: topic.topic_text as string,
           vertical:   (topic.vertical as string | null) ?? null,
           channel,
-          brand_name: (voice.name as string | undefined) ?? "NEXUS",
+          brand_name: voice.name || "NEXUS",
         });
         taggedPayload.image_url = imageUrl;
       } catch (imgErr) {

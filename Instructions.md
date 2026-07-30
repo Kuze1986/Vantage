@@ -30,6 +30,7 @@
 21. [Handle Failed Posts](#21-handle-failed-posts)
 22. [Set Up Failure Alerts](#22-set-up-failure-alerts)
 23. [Connect Platform Webhooks](#23-connect-platform-webhooks)
+24. [Market the Full Portfolio](#24-market-the-full-portfolio)
 
 ---
 
@@ -47,21 +48,21 @@ On successful login you land on the **Dashboard**.
 
 ## 2. Set Your Brand Voice
 
-Before generating any content, define who you are. Every piece Kuze writes is shaped by your brand voice.
+Before generating any content, define who you are — **per product**. Vantage markets the full Social Kit portfolio: Shift, Keystone, Scripta, DemoForge, Crucible, and Vantage. Each product has its own brand voice and landing pack.
 
 1. Click **Voice** in the left sidebar.
-2. Fill in the **Brand Name** field (e.g. `NEXUS`).
-3. Write a **Description** — one paragraph that defines your brand's identity, mission, and personality. Be specific. This text is injected into every generation prompt.
-4. Set **Per-Channel Tone** for each platform you plan to use:
+2. Select a **product tab** (e.g. `DEMOFORGE` or `CRUCIBLE`). New workspaces are pre-seeded with Social Kit defaults for all six.
+3. Review/edit the **Voice name** and **Description** for that product. This text is injected into every generation prompt for that product.
+4. Set **Per-Channel Tone** for each platform you plan to use for this product:
    - **X** — punchy, direct, conversational
    - **LinkedIn** — professional, insight-driven, thought leadership
    - **Reddit** — community-native, genuine, no hard sell
    - **Email** — warm, informative, value-first
-   - **TikTok / Instagram / Facebook** — platform-appropriate voice guidance
-5. Add **Off-Topics** — subjects Kuze must never write about (competitors, sensitive issues, anything off-brand). Add one per line.
-6. Click **Save**.
+   - **TikTok / Instagram / Facebook / Threads / Bluesky** — platform-appropriate voice guidance
+5. Add **Off-Topics** — subjects Kuze must never write about for this product. Add one per line.
+6. Click **Save** for that product, then repeat for each product you plan to market.
 
-> Your brand voice is now active. It will be used on every generation call going forward.
+> The active product voice is used on every generation call tagged with that product. Sibling apps (DemoForge, Crucible) can pull the same packs via the marketing API.
 
 ---
 
@@ -203,21 +204,22 @@ Pulse Reactor supplements your Shift/Scripta topics with real-time trending sign
 
 ## 9. Generate Content
 
-Now that you have topics, generate your first pieces of content.
+Now that you have topics, generate your first pieces of content — tagged to a portfolio product.
 
 ### Single piece
 
-1. On the **Dashboard**, in the Source Pipeline panel, select your target channel using the **GEN FOR** channel selector (e.g. click `𝕏` for X).
-2. Optionally check **+ Image** if you want DALL-E 3 to generate an image alongside the text.
-3. Find a topic in the list and click **Gen 𝕏** (or whichever channel you selected).
-4. Kuze generates the content, Ilita immediately reviews it, and it moves to the Queue.
-5. A success message confirms the draft was created.
+1. On the **Dashboard**, in the Source Pipeline panel, select the **PRODUCT** (Shift, Keystone, Scripta, DemoForge, Crucible, or Vantage).
+2. Select your target channel using the channel selector (e.g. click `𝕏` for X).
+3. Optionally check **+ Image** if you want DALL-E 3 to generate an image alongside the text.
+4. Find a topic in the list and click **Gen 𝕏** (or whichever channel you selected).
+5. Kuze generates using that product's brand voice; the piece is stamped with `product_slug` and appears in the Queue under that product filter.
+6. A success message confirms the draft was created.
 
 ### A/B Variants
 
 To generate multiple versions of the same topic for testing:
 
-1. Select the channel.
+1. Select the product and channel.
 2. Click **A/B ×2** or **A/B ×3** instead of the single generate button.
 3. Kuze produces 2 or 3 independent pieces from the same topic. Each goes through the audit pipeline independently.
 4. All variants share a `variant_group_id` — they are grouped in the Queue with a variant badge.
@@ -632,11 +634,52 @@ Reddit has no native webhook API. Vantage polls engagement data directly:
 
 ---
 
+## 24. Market the Full Portfolio
+
+Vantage is the marketing engine for the entire Social Kit: **Shift, Keystone, Scripta, DemoForge, Crucible, and Vantage**. Generate and approve content per product inside Vantage; sibling apps consume the same resources for their landings.
+
+### Operator workflow
+
+1. Configure each product under **Voice** (section 2).
+2. On the **Dashboard**, pick the **PRODUCT** before generating.
+3. In the **Queue**, filter by product to audit/schedule/publish only that product's pieces.
+4. Use **Social Kit** (`/social-kit`) for on-brand graphics per module. Save exports to the marketing asset library when you want landings to reuse them (`POST /v1/marketing/assets`).
+
+### Consumer apps (DemoForge / Crucible)
+
+Sibling products pull approved packs over HTTP:
+
+```http
+GET /v1/marketing/demoforge
+x-vantage-key: <VANTAGE_SERVICE_KEY>
+```
+
+Or list all products:
+
+```http
+GET /v1/marketing
+x-vantage-key: <VANTAGE_SERVICE_KEY>
+```
+
+Optional: `x-workspace-id` or set `VANTAGE_DEFAULT_WORKSPACE_ID` on the API. Operators can call the same routes with a normal JWT instead of the service key.
+
+### API env (vantage-api)
+
+| Variable | Purpose |
+|---|---|
+| `VANTAGE_SERVICE_KEY` | Shared secret for DemoForge / Crucible / other consumers |
+| `VANTAGE_DEFAULT_WORKSPACE_ID` | Workspace used when service callers omit `x-workspace-id` |
+| `CORS_ORIGIN` | Include consumer origins (comma-separated) |
+
+DemoForge and Crucible read `VANTAGE_API_URL` + `VANTAGE_SERVICE_KEY` and fall back to local landing copy if Vantage is unreachable.
+
+---
+
 ## You're Live
 
 At this point your campaign pipeline is fully operational:
 
-- ✅ Brand voice defined — Kuze writes in your voice
+- ✅ Brand voice defined per portfolio product
 - ✅ Channels connected — posts go to real platforms
 - ✅ Cadence set — posts go out at the right times
 - ✅ Topics flowing — Shift, Scripta, and Pulse feed the queue
@@ -645,5 +688,6 @@ At this point your campaign pipeline is fully operational:
 - ✅ Evergreen recycling — top topics get a second life
 - ✅ Alerts configured — you'll know if something breaks
 - ✅ Webhooks connected — engagement data closes the loop
+- ✅ Marketing API ready — DemoForge / Crucible (and the full kit) can consume approved packs
 
 Check the **Dashboard** daily for the activity feed and stat cards. Review **Analytics** weekly to spot trends and adjust your vertical focus and posting hours. Let BioLoop and the cadence engine handle the rest.

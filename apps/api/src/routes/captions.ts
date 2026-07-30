@@ -5,15 +5,18 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
-import { getSupabaseAdmin } from "../lib/supabase.js";
 import { generateCaptions } from "../services/kuze.js";
 import type { ChannelSlug } from "../services/kuze.js";
+import { brandVoiceToPromptString, loadBrandVoice } from "../lib/brand-voice.js";
+import { loadProductProfile } from "../lib/product-profile.js";
+import { parseProductSlug } from "../lib/products.js";
 
 const bodySchema = z.object({
   prompt:  z.string().min(1).max(500),
   channel: z.string().min(1),
   count:   z.number().int().min(1).max(6).optional(),
   tone:    z.string().optional(),
+  product_slug: z.enum(["shift", "keystone", "scripta", "demoforge", "crucible", "vantage"]).optional(),
 });
 
 export const captionsRoutes = new Hono();
@@ -25,18 +28,18 @@ captionsRoutes.post("/", async (c) => {
 
   const { prompt, channel, count = 3, tone } = parsed.data;
   const ws = c.get("workspaceId");
-  const sb = getSupabaseAdmin();
+  const profile = await loadProductProfile(ws);
+  const productSlug = parseProductSlug(
+    parsed.data.product_slug ?? profile.default_brand_id ?? profile.default_product_id,
+  );
 
-  const { data: voices } = await sb.from("brand_voice").select("*").eq("workspace_id", ws).limit(1);
-  const voice = voices?.[0];
-  if (!voice) throw new HTTPException(400, { message: "Configure brand voice first" });
-
-  const brand_voice = JSON.stringify({
-    name:             voice.name,
-    description:      voice.description,
-    per_channel_tone: voice.per_channel_tone,
-    off_topics:       voice.off_topics,
-  });
+  let voice;
+  try {
+    voice = await loadBrandVoice(ws, productSlug);
+  } catch (e) {
+    throw new HTTPException(400, { message: e instanceof Error ? e.message : "Configure brand voice first" });
+  }
+  const brand_voice = brandVoiceToPromptString(voice);
 
   const captions = await generateCaptions({
     workspace_id: ws,

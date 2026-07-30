@@ -32,7 +32,9 @@ import { intelligenceRoutes } from "./routes/intelligence.js";
 import { audienceRoutes } from "./routes/audience.js";
 import { brandKitsRoutes } from "./routes/brand-kits.js";
 import { introOutroClipsRoutes } from "./routes/intro-outro-clips.js";
+import { marketingRoutes } from "./routes/marketing.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
+import { marketingAuth } from "./lib/marketing-auth.js";
 import { startCadenceEngine } from "./services/scheduler.js";
 
 const app = new Hono();
@@ -45,7 +47,7 @@ app.use(
   "*",
   cors({
     origin: (origin) => (corsOrigins.includes(origin) ? origin : corsOrigins[0]),
-    allowHeaders: ["Content-Type", "Authorization", "x-workspace-id"],
+    allowHeaders: ["Content-Type", "Authorization", "x-workspace-id", "x-vantage-key"],
     allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
   }),
@@ -55,6 +57,12 @@ app.get("/health", (c) => c.json({ ok: true }));
 
 app.route("/v1/webhooks", webhooksRoutes);
 app.get("/v1/channels/:slug/auth/callback", (c) => oauthCallbackGet(c));
+
+// Portfolio marketing feed — service key (DemoForge/Crucible) OR operator JWT
+const marketingV1 = new Hono();
+marketingV1.use("*", marketingAuth);
+marketingV1.route("/", marketingRoutes);
+app.route("/v1/marketing", marketingV1);
 
 const authedV1 = new Hono();
 authedV1.use("*", authMiddleware);

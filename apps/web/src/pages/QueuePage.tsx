@@ -6,6 +6,7 @@ import { QuoteCardStudio } from '../creative/QuoteCard'
 import { OgCardStudio } from '../creative/OgCard'
 import { BRANDS } from '../creative'
 import type { BrandId } from '../creative'
+import { BRAND_ORDER } from './socialkit/brands'
 import type { BadgeVariant } from '../ds'
 import type { ReactNode } from 'react'
 
@@ -24,10 +25,11 @@ export type Piece = {
   variant_group_id?: string | null
   retry_count?: number
   retry_after?: string | null
+  product_slug?: string | null
 }
 
 function pieceBrandId(p: Piece): BrandId {
-  const id = p.content_payload?.brand_id
+  const id = p.product_slug ?? p.content_payload?.brand_id
   if (typeof id === 'string' && id in BRANDS) return id as BrandId
   return 'shift'
 }
@@ -147,6 +149,7 @@ function ImagePreview({ url }: { url: string }) {
 export function QueuePage() {
   const [pieces, setPieces] = React.useState<Piece[]>([])
   const [filter, setFilter] = React.useState<typeof STATUS_FILTERS[number]>('all')
+  const [productFilter, setProductFilter] = React.useState<'all' | BrandId>('all')
   const [err, setErr] = React.useState<string | null>(null)
   const [msg, setMsg] = React.useState<string | null>(null)
   const [busy, setBusy]           = React.useState<string | null>(null)
@@ -169,7 +172,11 @@ export function QueuePage() {
 
   React.useEffect(() => { void load() }, [load])
 
-  const visible = filter === 'all' ? pieces : pieces.filter((p) => p.status === filter)
+  const visible = pieces.filter((p) => {
+    if (filter !== 'all' && p.status !== filter) return false
+    if (productFilter !== 'all' && pieceBrandId(p) !== productFilter) return false
+    return true
+  })
 
   const action = async (fn: () => Promise<unknown>, successMsg: string) => {
     setErr(null)
@@ -512,6 +519,26 @@ export function QueuePage() {
         >
           ↻ Refresh
         </button>
+      </div>
+
+      <div className="vg-filter-bar" style={{ marginTop: 8 }}>
+        <button
+          type="button"
+          className={`vg-filter-tab${productFilter === 'all' ? ' vg-filter-tab--active' : ''}`}
+          onClick={() => setProductFilter('all')}
+        >
+          all products
+        </button>
+        {BRAND_ORDER.map((slug) => (
+          <button
+            key={slug}
+            type="button"
+            className={`vg-filter-tab${productFilter === slug ? ' vg-filter-tab--active' : ''}`}
+            onClick={() => setProductFilter(slug)}
+          >
+            {BRANDS[slug].name}
+          </button>
+        ))}
       </div>
 
       {/* A/B variant groups notice */}

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "./supabase.js";
+import { seedBrandVoicesForWorkspace } from "./brand-voice.js";
 
 /**
  * Default channel rows seeded for every new workspace. Mirrors the original
@@ -90,5 +91,6 @@ export async function resolveOrCreateWorkspace(userId: string): Promise<string> 
 
   await sb.from("workspace_members").insert({ workspace_id: created.id, user_id: userId, role: "owner" });
   await seedDefaultChannels(sb, created.id as string);
+  await seedBrandVoicesForWorkspace(sb, created.id as string);
   return created.id as string;
 }
