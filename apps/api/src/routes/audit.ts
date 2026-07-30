@@ -7,6 +7,8 @@ import { auditContent } from "../services/ilita.js";
 import { generateContent } from "../services/kuze.js";
 import type { ChannelSlug } from "../services/kuze.js";
 import type { ContentFormat } from "@vantage/prompts";
+import { brandVoiceToPromptString, loadBrandVoice } from "../lib/brand-voice.js";
+import { parseProductSlug } from "../lib/products.js";
 
 const bodySchema = z.object({
   content_piece_id: z.string().uuid(),
@@ -25,7 +27,7 @@ auditRoutes.post("/", async (c) => {
 
   const { data: piece, error: pErr } = await sb
     .from("content_pieces")
-    .select("id, topic_id, channel_slug, format, content_payload, status, audit_iterations")
+    .select("id, topic_id, channel_slug, format, content_payload, status, audit_iterations, product_slug")
     .eq("workspace_id", ws)
     .eq("id", content_piece_id).single();
   if (pErr || !piece) throw new HTTPException(404, { message: "Content piece not found" });
@@ -38,15 +40,14 @@ auditRoutes.post("/", async (c) => {
   const content = String(payload.body ?? payload.text ?? payload.hook ?? payload.title ?? JSON.stringify(payload));
   if (!content) throw new HTTPException(400, { message: "Missing content in payload" });
 
-  const { data: voices } = await sb.from("brand_voice").select("*").eq("workspace_id", ws).limit(1);
-  const voice = voices?.[0];
-  if (!voice) throw new HTTPException(400, { message: "Configure brand voice first" });
-  const brandVoiceStr = JSON.stringify({
-    name: voice.name,
-    description: voice.description,
-    per_channel_tone: voice.per_channel_tone,
-    off_topics: voice.off_topics,
-  });
+  const productSlug = parseProductSlug(piece.product_slug ?? payload.brand_id);
+  let voice;
+  try {
+    voice = await loadBrandVoice(ws, productSlug);
+  } catch (e) {
+    throw new HTTPException(400, { message: e instanceof Error ? e.message : "Configure brand voice first" });
+  }
+  const brandVoiceStr = brandVoiceToPromptString(voice);
 
   let iterations = (piece.audit_iterations as number) ?? 0;
 

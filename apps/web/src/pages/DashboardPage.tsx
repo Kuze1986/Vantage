@@ -3,6 +3,7 @@ import { vantageApi } from '../api/vantage'
 import type { DashboardOverview } from '../api/vantage'
 import { supabase } from '../lib/supabase'
 import { StatCard, Panel, Badge } from '../ds'
+import { BRAND_ORDER, BRANDS, type BrandId } from './socialkit/brands'
 
 type Topic = { id: string; topic_text: string; vertical: string | null; source_product?: string; priority?: number; recycle_after?: string | null }
 type ActivityEvent = DashboardOverview['activityLast24h'][number]
@@ -25,6 +26,7 @@ export function DashboardPage() {
   const [pulsing, setPulsing]       = React.useState(false)
   const [biolooping, setBiolooping] = React.useState(false)
   const [genChannel, setGenChannel] = React.useState<ChannelSlug>('x')
+  const [genProduct, setGenProduct] = React.useState<BrandId>('shift')
   const [genImage, setGenImage]     = React.useState(false)
   const [genVariants, setGenVariants] = React.useState<1 | 2 | 3>(1)
 
@@ -93,19 +95,20 @@ export function DashboardPage() {
   }
 
   const handleGenerate = async (topicId: string) => {
-    const key = `${topicId}:${genChannel}:${genVariants}`
+    const key = `${topicId}:${genChannel}:${genVariants}:${genProduct}`
     setGenerating(key); setErr(null); setMsg(null)
+    const opts = { product_slug: genProduct }
     try {
       if (genVariants > 1) {
-        const r = await vantageApi.generateVariants(genChannel, topicId, genVariants as 2 | 3)
-        setMsg(`${genVariants} variants created for ${genChannel} — check Queue to audit`)
+        const r = await vantageApi.generateVariants(genChannel, topicId, genVariants as 2 | 3, opts)
+        setMsg(`${genVariants} variants for ${BRANDS[genProduct].name} / ${genChannel} — check Queue`)
         console.log('[generate] variant group:', r.variant_group_id)
       } else if (genImage) {
-        await vantageApi.generateWithImage(genChannel, topicId)
-        setMsg(`Draft + image created for ${genChannel} — check Queue to audit`)
+        await vantageApi.generateWithImage(genChannel, topicId, opts)
+        setMsg(`Draft + image for ${BRANDS[genProduct].name} / ${genChannel} — check Queue`)
       } else {
-        await vantageApi.generate(genChannel, topicId)
-        setMsg(`Draft created for ${genChannel} — check Queue to audit`)
+        await vantageApi.generate(genChannel, topicId, opts)
+        setMsg(`Draft for ${BRANDS[genProduct].name} / ${genChannel} — check Queue`)
       }
       await loadDash()
     } catch (e) { setErr(String((e as Error).message)) }
@@ -215,6 +218,27 @@ export function DashboardPage() {
             ))}
           </div>
 
+          <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)' }}>PRODUCT</span>
+            {BRAND_ORDER.map((slug) => (
+              <button
+                key={slug}
+                type="button"
+                onClick={() => setGenProduct(slug)}
+                style={{
+                  fontFamily: 'var(--nx-mono)', fontSize: 10, padding: '2px 8px',
+                  border: `1px solid ${genProduct === slug ? 'var(--nx-cyan)' : 'var(--nx-border)'}`,
+                  borderRadius: 4,
+                  background: genProduct === slug ? 'rgba(6,182,212,0.12)' : 'transparent',
+                  color: genProduct === slug ? 'var(--nx-cyan)' : 'var(--nx-text-3)',
+                  cursor: 'pointer',
+                }}
+              >
+                {BRANDS[slug].name}
+              </button>
+            ))}
+          </div>
+
           {/* Generation options: + Image toggle + A/B variant selector */}
           <div style={{ display: 'flex', gap: 10, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             {/* + Image checkbox */}
@@ -255,7 +279,7 @@ export function DashboardPage() {
           ) : (
             <div className="vg-topic-list">
               {topics.map((t) => {
-                const key = `${t.id}:${genChannel}:${genVariants}`
+                const key = `${t.id}:${genChannel}:${genVariants}:${genProduct}`
                 const genLabel = genVariants > 1
                   ? `A/B ×${genVariants} ${CHANNEL_LABEL[genChannel]}`
                   : genImage

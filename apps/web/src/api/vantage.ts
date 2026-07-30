@@ -118,7 +118,7 @@ export const vantageApi = {
     }>,
 
   // ── Generate ──────────────────────────────────────────────────────────────
-  generate: (channel: string, topic_id: string, opts?: { subreddit?: string }) =>
+  generate: (channel: string, topic_id: string, opts?: { subreddit?: string; product_slug?: string }) =>
     vantageFetch(`/v1/generate/${channel}`, {
       method: "POST",
       body: JSON.stringify({ topic_id, ...(opts ?? {}) }),
@@ -359,17 +359,46 @@ export const vantageApi = {
     }>,
 
   // ── Generate (Phase 2 additions) ─────────────────────────────────────────
-  generateWithImage: (channel: string, topic_id: string) =>
+  generateWithImage: (channel: string, topic_id: string, opts?: { product_slug?: string }) =>
     vantageFetch(`/v1/generate/${channel}`, {
       method: "POST",
-      body: JSON.stringify({ topic_id, generate_image: true }),
+      body: JSON.stringify({ topic_id, generate_image: true, ...(opts ?? {}) }),
     }) as Promise<{ content_piece_id: string; format: string; status: string }>,
 
-  generateVariants: (channel: string, topic_id: string, count: 2 | 3) =>
+  generateVariants: (channel: string, topic_id: string, count: 2 | 3, opts?: { product_slug?: string }) =>
     vantageFetch(`/v1/generate/${channel}`, {
       method: "POST",
-      body: JSON.stringify({ topic_id, variants: count }),
+      body: JSON.stringify({ topic_id, variants: count, ...(opts ?? {}) }),
     }) as Promise<{ variant_group_id: string; pieces: { content_piece_id: string; format: string; status: string }[] }>,
+
+  getMarketingPack: (product: string, opts?: { limit?: number; status?: string; channel?: string }) => {
+    const qs = new URLSearchParams()
+    if (opts?.limit) qs.set("limit", String(opts.limit))
+    if (opts?.status) qs.set("status", opts.status)
+    if (opts?.channel) qs.set("channel", opts.channel)
+    const q = qs.toString() ? `?${qs}` : ""
+    return vantageFetch(`/v1/marketing/${product}${q}`) as Promise<{
+      product: string
+      brand: Record<string, unknown>
+      pieces: unknown[]
+      assets: unknown[]
+    }>
+  },
+
+  listMarketingProducts: () =>
+    vantageFetch("/v1/marketing") as Promise<{ products: Array<{ product: string; name: string; essence: string; piece_count: number }> }>,
+
+  saveMarketingAsset: (body: {
+    product_slug: string
+    kind?: string
+    data_url: string
+    content_piece_id?: string
+    meta?: Record<string, unknown>
+  }) =>
+    vantageFetch("/v1/marketing/assets", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }) as Promise<{ asset: { id: string; public_url: string; kind: string } }>,
 
   // ── BioLoop ───────────────────────────────────────────────────────────────
   runBioLoop: () =>

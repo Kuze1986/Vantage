@@ -33,7 +33,7 @@ queueRoutes.get("/", async (c) => {
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
     .from("content_pieces")
-    .select("id, status, channel_slug, format, content_payload, audit_notes, audit_iterations, created_at, image_url, video_url, media_status, variant_group_id, retry_count, retry_after, topic_id")
+    .select("id, status, channel_slug, format, content_payload, audit_notes, audit_iterations, created_at, image_url, video_url, media_status, variant_group_id, retry_count, retry_after, topic_id, product_slug")
     .eq("workspace_id", ws)
     .order("created_at", { ascending: false })
     .limit(limit);

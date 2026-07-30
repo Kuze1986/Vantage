@@ -33,6 +33,8 @@ import {
   resolveBrandId,
   resolveTemplateId,
 } from '../lib/demoforge-templates.js';
+import { brandVoiceToPromptString, loadBrandVoice } from '../lib/brand-voice.js';
+import { parseProductSlug } from '../lib/products.js';
 
 export const campaignRoutes = new Hono();
 
@@ -666,18 +668,6 @@ campaignRoutes.post('/:id/launch', async (c) => {
     throw new HTTPException(400, { message: 'No matching timeline days to generate' });
   }
 
-  // Brand voice for generation (first row, like the cadence engine).
-  const { data: voices } = await sb.from('brand_voice').select('*').eq('workspace_id', workspaceId).limit(1);
-  const voice = voices?.[0];
-  const brandVoiceStr = voice
-    ? JSON.stringify({
-        name: voice.name,
-        description: voice.description,
-        per_channel_tone: voice.per_channel_tone,
-        off_topics: voice.off_topics,
-      })
-    : '{}';
-
   type Idea = {
     title?: string;
     outline?: string;
@@ -719,6 +709,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
       ideaBrandId: idea.brand_id,
       campaignDefaultBrandId: campaignDefaultBrand,
     });
+    const productSlug = parseProductSlug(brandId);
     const templateId = resolveTemplateId({
       ideaTemplateId: idea.demoforge_template_id,
       campaignDefaultTemplateId: campaignDefaultTemplate,
@@ -726,6 +717,14 @@ campaignRoutes.post('/:id/launch', async (c) => {
     });
 
     try {
+      let brandVoiceStr = '{}';
+      try {
+        const voice = await loadBrandVoice(workspaceId, productSlug);
+        brandVoiceStr = brandVoiceToPromptString(voice);
+      } catch {
+        // Voice optional for launch; Kuze still runs with empty voice.
+      }
+
       // Each idea becomes a topic so the existing content pipeline can own the piece.
       const { data: topic, error: topicErr } = await sb
         .from('topics')
@@ -734,6 +733,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
           source_product: 'campaign',
           source_ref: campaignId,
           vertical: null,
+          target_product: productSlug,
           topic_text: `${idea.title}\n\n${idea.outline ?? ''}`.trim(),
           context_payload: {
             campaign_id: campaignId,
@@ -794,6 +794,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
           audit_iterations: 0,
           scheduled_for: scheduledFor,
           media_status: mediaStatus,
+          product_slug: productSlug,
         })
         .select('id')
         .single();

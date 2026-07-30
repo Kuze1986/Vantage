@@ -9,6 +9,9 @@ import { loadSettings } from "../lib/settings.js";
 import { listAllWorkspaceIds } from "../lib/workspace.js";
 import { sendAlert } from "../lib/alert.js";
 import { RateLimitError } from "../lib/rate-limit-error.js";
+import { brandVoiceToPromptString, loadBrandVoice } from "../lib/brand-voice.js";
+import { loadProductProfile } from "../lib/product-profile.js";
+import { parseProductSlug } from "../lib/products.js";
 import { channelFormatMap } from "@vantage/prompts";
 import type { ChannelSlug } from "@vantage/prompts";
 
@@ -348,17 +351,6 @@ export async function autoGenerateTickForWorkspace(workspaceId: string): Promise
     const deficit        = postsPerDay - publishedToday;
     if (deficit <= 0) continue;
 
-    // Load brand voice
-    const { data: voices } = await sb.from("brand_voice").select("*").eq("workspace_id", workspaceId).limit(1);
-    const voice = voices?.[0];
-    if (!voice) continue;
-    const brandVoiceStr = JSON.stringify({
-      name: voice.name,
-      description: voice.description,
-      per_channel_tone: voice.per_channel_tone,
-      off_topics: voice.off_topics,
-    });
-
     // Generate one piece per deficit slot (up to a cap of 3 at a time)
     const slots = Math.min(deficit, 3);
     for (let i = 0; i < slots; i++) {
@@ -366,6 +358,19 @@ export async function autoGenerateTickForWorkspace(workspaceId: string): Promise
       if (!topic) break;
 
       try {
+        const profile = await loadProductProfile(workspaceId);
+        const productSlug = parseProductSlug(
+          (topic as { target_product?: string | null }).target_product
+            ?? profile.default_brand_id
+            ?? profile.default_product_id,
+        );
+        let brandVoiceStr: string;
+        try {
+          brandVoiceStr = brandVoiceToPromptString(await loadBrandVoice(workspaceId, productSlug));
+        } catch {
+          continue;
+        }
+
         // Generate
         const gen = await generateContent({
           workspace_id: workspaceId,
@@ -384,9 +389,10 @@ export async function autoGenerateTickForWorkspace(workspaceId: string): Promise
             topic_id:        topic.id,
             channel_slug:    ch.slug,
             format:          gen.format,
-            content_payload: gen.content_payload,
+            content_payload: { ...gen.content_payload, brand_id: productSlug },
             status:          "auditing",
             audit_iterations: 0,
+            product_slug:    productSlug,
           }).select("id").single();
 
         if (insErr || !inserted) continue;

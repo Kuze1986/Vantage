@@ -28,15 +28,16 @@
 18. [Activity Logging](#18-activity-logging)
 19. [Database Infrastructure](#19-database-infrastructure)
 20. [Social Kit](#20-social-kit)
-21. [Sound Effects + Audio Mixer](#21-sound-effects--audio-mixer)
-22. [Campaign Builder](#22-campaign-builder)
-23. [Strategic Intelligence](#23-strategic-intelligence)
-24. [Audience Model](#24-audience-model)
-25. [BioLoop Virality Signals](#25-bioloop-virality-signals)
-26. [Phase 3A — Gaps & Fixes](#phase-3a--gaps--fixes)
-27. [Phase 3B — New Capabilities](#phase-3b--new-capabilities)
-28. [Phase 3C — Creative Studio](#phase-3c--creative-studio)
-29. [Phase 4 — SaaS Readiness](#phase-4--saas-readiness)
+21. [Portfolio Marketing API](#21-portfolio-marketing-api)
+22. [Sound Effects + Audio Mixer](#22-sound-effects--audio-mixer)
+23. [Campaign Builder](#23-campaign-builder)
+24. [Strategic Intelligence](#24-strategic-intelligence)
+25. [Audience Model](#25-audience-model)
+26. [BioLoop Virality Signals](#26-bioloop-virality-signals)
+27. [Phase 3A — Gaps & Fixes](#phase-3a--gaps--fixes)
+28. [Phase 3B — New Capabilities](#phase-3b--new-capabilities)
+29. [Phase 3C — Creative Studio](#phase-3c--creative-studio)
+30. [Phase 4 — SaaS Readiness](#phase-4--saas-readiness)
 
 ---
 
@@ -87,24 +88,30 @@ the anon/user key which is RLS-restricted.
 ### 2. Brand Voice
 
 **What it does:**
-A single-row configuration that defines NEXUS's brand identity and is injected into every
-Kuze generation call. It shapes tone, topics to avoid, and per-channel style.
+Per-product brand identity for the full Social Kit portfolio (`shift`, `keystone`,
+`scripta`, `demoforge`, `crucible`, `vantage`). Each product has its own voice row that is
+injected into Kuze generation, Ilita audit, captions, campaigns, and the scheduler.
 
 Fields:
-- `name` — brand name (e.g. "NEXUS")
-- `description` — one-paragraph identity statement
+- `product_slug` — Social Kit product this voice markets
+- `name` — brand / product name
+- `description` — identity statement
 - `per_channel_tone` — JSONB object keyed by channel slug with tone instructions per platform
 - `off_topics` — array of subjects Kuze must never write about
+- `pack` — JSONB Social Kit pack (essence, palette, captions, launch, insight, …) used by
+  landings and the marketing API
 
-The configuration is saved to `vantage.brand_voice` and upserted on save (exactly one row
-**per workspace** — `brand_voice` carries a `workspace_id` with a unique index). On every
-generation call, the workspace's row is loaded and serialized to JSON, then passed to Kuze as
-part of the user prompt.
+Uniqueness is `(workspace_id, product_slug)`. New workspaces are seeded with all six packs
+from Social Kit defaults (`apps/api/src/lib/brand-packs-data/packs.json`). Generation stamps
+`content_pieces.product_slug` (and `content_payload.brand_id`) so Queue/Creative tools stay
+on-brand per product.
 
 **Files:**
-- `apps/web/src/pages/VoicePage.tsx` — form UI
-- `apps/api/src/routes/generate.ts` — loads brand_voice before calling Kuze
-- `supabase/migrations/20260601000000_vantage_schema.sql` — table definition
+- `apps/web/src/pages/VoicePage.tsx` — product-tabbed form UI
+- `apps/api/src/lib/brand-voice.ts` — loader + seed
+- `apps/api/src/lib/brand-packs.ts` — default packs
+- `apps/api/src/routes/generate.ts` — loads voice by `product_slug`
+- `supabase/migrations/20260730000000_portfolio_marketing.sql` — multi-product schema
 
 **Configuration:** None required beyond Supabase credentials.
 
@@ -1055,9 +1062,39 @@ selector. The active `theme-*` class is scoped to the page's wrapper `<div>` (ne
 
 ---
 
+### 21. Portfolio Marketing API
+
+**What it does:**
+Exposes approved marketing resources for every Social Kit product so sibling apps
+(DemoForge, Crucible, and future Shift/Keystone/Scripta landings) can hydrate copy,
+metrics, and creative assets from Vantage instead of hardcoding them.
+
+**Auth:** `x-vantage-key: <VANTAGE_SERVICE_KEY>` (or `Authorization: Bearer <key>`), **or**
+an operator Supabase JWT + `x-workspace-id`. Service calls resolve workspace from
+`x-workspace-id`, else `VANTAGE_DEFAULT_WORKSPACE_ID`, else the first workspace.
+
+**Endpoints:**
+- `GET /v1/marketing` — list all six products with pack summaries + approved piece counts
+- `GET /v1/marketing/:productSlug` — full brand pack + approved/queued/published pieces +
+  `marketing_assets` (query: `status`, `channel`, `limit`)
+- `POST /v1/marketing/assets` — upload a PNG/JPEG/WebP (data URL) into `vantage-media` and
+  record it in `vantage.marketing_assets` tagged by `product_slug`
+
+**Schema:** `20260730000000_portfolio_marketing.sql` adds `product_slug` / `pack` on
+`brand_voice`, `product_slug` on `content_pieces`, `target_product` on `topics`, and
+`marketing_assets`.
+
+**Files:**
+- `apps/api/src/routes/marketing.ts`
+- `apps/api/src/lib/marketing-auth.ts`
+- `apps/api/src/lib/brand-voice.ts` / `brand-packs.ts` / `products.ts`
+
+**Configuration:** `VANTAGE_SERVICE_KEY`, optional `VANTAGE_DEFAULT_WORKSPACE_ID`, CORS
+origins for consumer apps in `CORS_ORIGIN`.
+
 ---
 
-### 21. Sound Effects + Audio Mixer
+### 22. Sound Effects + Audio Mixer
 
 **What it does:**
 An extensible sound effects library and per-track audio mixer for DemoForge video generation.
@@ -1135,7 +1172,7 @@ Job submission includes optional `narration_volume`, `music_volume`, and `master
 
 ---
 
-### 22. Campaign Builder
+### 23. Campaign Builder
 
 **What it does:**
 Strategic campaign planning and execution engine that enables multi-channel, multi-week content campaigns
@@ -1231,7 +1268,7 @@ Three-view interface:
 
 ---
 
-### 23. Strategic Intelligence
+### 24. Strategic Intelligence
 
 **What it does:**
 Competitive landscape monitoring and AI-powered strategic insight generation. Tracks competitor posts,
@@ -1308,7 +1345,7 @@ Four-tab interface:
 
 ---
 
-### 24. Audience Model
+### 25. Audience Model
 
 **What it does:**
 Behavioral audience segmentation with ML-ready predictive scoring. Segments users by engagement
@@ -1409,7 +1446,7 @@ Three-tab interface:
 
 ---
 
-### 25. BioLoop Virality Signals
+### 26. BioLoop Virality Signals
 
 **What it does:**
 Multi-platform trend detection, viral pattern recognition, and segment-aware virality analysis.

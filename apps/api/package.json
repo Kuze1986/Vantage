@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.build.json && node -e \"const fs=require('fs');const p=require('path');const s='src/lib/demoforge-templates';const d='dist/lib/demoforge-templates';fs.mkdirSync(d,{recursive:true});for(const f of fs.readdirSync(s).filter(x=>x.endsWith('.json')))fs.copyFileSync(p.join(s,f),p.join(d,f));\"",
+    "build": "tsc -p tsconfig.build.json && node -e \"const fs=require('fs');const p=require('path');for (const [s,d] of [['src/lib/demoforge-templates','dist/lib/demoforge-templates'],['src/lib/brand-packs-data','dist/lib/brand-packs-data']]){fs.mkdirSync(d,{recursive:true});for(const f of fs.readdirSync(s).filter(x=>x.endsWith('.json')))fs.copyFileSync(p.join(s,f),p.join(d,f));}\"",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
