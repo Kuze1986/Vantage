@@ -46,10 +46,11 @@ function getSupabase() {
 
 // ── Job schema ────────────────────────────────────────────────────────────────
 const scriptStepSchema = z.object({
-  action:    z.enum(["navigate", "click", "fill", "wait", "scroll", "narrate"]),
+  action:    z.enum(["navigate", "click", "fill", "wait", "scroll", "narrate", "eval", "run"]),
   selector:  z.string().optional(),
   text:      z.string().optional(),
-  ms:        z.number().int().positive().optional(),
+  // Templates use ms: 0 for instant eval/setup steps; positive() rejected those.
+  ms:        z.number().int().nonnegative().optional(),
   narration: z.string().default(""),
 });
 

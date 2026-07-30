@@ -649,9 +649,10 @@ Processing is sequential (one job at a time) to avoid overloading the Railway wo
 - `wait` — pause N milliseconds (scalable via target duration)
 - `scroll` — scroll down 300px
 - `narrate` — pause for narration (audio-only, no browser action)
-- `eval` — run arbitrary JS via `addInitScript` (fires on every navigation)
+- `eval` — run arbitrary JS via `addInitScript` (fires on every navigation; used for Shift auth bypass / content-pack flags)
+- `run` — evaluate JS in the live page (used by Shift demo helpers like `__shiftDemoPlay`)
 
-Each step supports `speed_multiplier` (0.5–2×) when `timeline_config.per_step_speed` is enabled.
+`ms` may be `0` (instant setup steps). Each step supports `speed_multiplier` (0.5–2×) when `timeline_config.per_step_speed` is enabled.
 
 ---
 
