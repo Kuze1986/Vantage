@@ -213,17 +213,36 @@ async function writeBackMediaToPiece(
     let imageUrl: string | null = typeof piece.image_url === "string" ? piece.image_url : null;
     const { data: jobRow } = await sb
       .from("demoforge_jobs")
-      .select("extracted_frames")
+      .select("extracted_frames, thumbnail_url")
       .eq("id", opts.jobId)
       .maybeSingle();
-    const frames = jobRow?.extracted_frames as Array<{ url?: string }> | null;
-    const frameUrl = Array.isArray(frames) ? frames.find((f) => typeof f?.url === "string")?.url : undefined;
+    const frames = (jobRow?.extracted_frames as Array<{ url?: string }> | null) ?? [];
+    const usable = frames.filter((f) => typeof f?.url === "string");
+    // product_still → last keyframe (Sweep hero); otherwise honor thumbnail_frame_index or first frame.
+    const visualType = typeof payload.visual_type === "string" ? payload.visual_type : "";
+    const explicitIdx =
+      typeof payload.thumbnail_frame_index === "number" ? payload.thumbnail_frame_index : null;
+    let frameIdx = 0;
+    if (typeof explicitIdx === "number" && explicitIdx >= 0 && usable.length) {
+      frameIdx = Math.min(Math.floor(explicitIdx), usable.length - 1);
+    } else if (visualType === "product_still" && usable.length) {
+      frameIdx = usable.length - 1;
+    }
+    const frameUrl = usable[frameIdx]?.url;
     if (frameUrl) imageUrl = frameUrl;
 
     if (opts.videoUrl) payload.video_url = opts.videoUrl;
     if (imageUrl) payload.image_url = imageUrl;
     payload.demoforge_job_id = opts.jobId;
+    if (usable.length) payload.thumbnail_frame_index = frameIdx;
     delete payload.media_error;
+
+    if (frameUrl) {
+      await sb
+        .from("demoforge_jobs")
+        .update({ thumbnail_url: frameUrl, updated_at: new Date().toISOString() })
+        .eq("id", opts.jobId);
+    }
 
     await sb
       .from("content_pieces")

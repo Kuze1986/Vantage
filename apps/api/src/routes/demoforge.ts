@@ -157,6 +157,16 @@ demoforgeRoutes.get("/templates", async (c) => {
       tiktok: "shift-queue-reel",
       instagram: "shift-queue-reel",
     },
+    defaults_by_visual_type: {
+      product_still: "shift-product-stills",
+    },
+    product_still_mode_rotation: [
+      "minefield",
+      "polarity",
+      "matrix",
+      "blueprints",
+      "sweep",
+    ],
   });
 });
 

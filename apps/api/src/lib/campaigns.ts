@@ -104,7 +104,7 @@ Generate 3 diverse content ideas. For each, provide:
 1. A catchy title (5-10 words)
 2. An outline of the content structure and key talking points
 3. visual_type: demo_video | product_still | social_graphic | none (prefer product visuals for promotional/educational)
-4. Optional demoforge_template_id (registry id; omit to use channel default)
+4. Optional demoforge_template_id (registry id; omit for channel default, or for product_still to use shift-product-stills)
 5. Optional brand_id (Social Kit brand; omit for default)
 6. Optional: DemoForge script notes / implementation notes
 

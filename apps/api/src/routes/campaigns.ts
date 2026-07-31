@@ -555,6 +555,7 @@ DemoForge templates (prefer product visuals; Shift templates are defaults, other
 Default Social Kit brand when omitted: ${DEFAULT_BRAND_ID}
 
 For promotional/educational days prefer visual_type demo_video or product_still. Use social_graphic for quote/OG-style stills. Use none only for pure text engagement posts.
+When visual_type is product_still, omit demoforge_template_id (server defaults to shift-product-stills: Minefield→Polarity→Matrix→Blueprints→Sweep hero frame). For demo_video, prefer channel Shift templates or omit for channel default.
 
 Return JSON: {"days":[{ "messaging_pillar_id": <one of the pillar ids or omit>, "content_type": <one of the content types>, "primary_channel": <one of the available channels>, "secondary_channels": [<other channels>], "content_idea": { "title": <short post idea>, "outline": <2-3 sentence brief of the post>, "visual_type": <visual type>, "demoforge_template_id": <template id or omit>, "brand_id": <brand id or omit> } }]}
 
@@ -727,6 +728,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
       ideaTemplateId: idea.demoforge_template_id,
       campaignDefaultTemplateId: campaignDefaultTemplate,
       channel,
+      visualType,
     });
 
     try {
@@ -781,6 +783,11 @@ campaignRoutes.post('/:id/launch', async (c) => {
       if (visualType === 'social_graphic') {
         payload.needs_social_kit = true;
       }
+      // product_still: prefer final Sweep diagram keyframe as the attached image.
+      if (visualType === 'product_still') {
+        payload.product_still_modes = ['minefield', 'polarity', 'matrix', 'blueprints', 'sweep'];
+        payload.thumbnail_preference = 'last';
+      }
 
       let mediaStatus: 'none' | 'pending' | 'failed' = visualType === 'none' ? 'none' : 'pending';
 
@@ -809,8 +816,9 @@ campaignRoutes.post('/:id/launch', async (c) => {
       if (visualType === 'demo_video' || visualType === 'product_still') {
         try {
           const dfPayload = buildDemoForgePayload(templateId, demoBaseUrl, {
-            captions: true,
-            colorPreset: 'cinematic',
+            // Stills stay silent/clean; videos keep captions + grade.
+            captions: visualType !== 'product_still',
+            colorPreset: visualType === 'product_still' ? 'clean' : 'cinematic',
           });
           const base = process.env.DEMOFORGE_URL?.trim();
           if (!base) throw new Error('DEMOFORGE_URL is not configured');

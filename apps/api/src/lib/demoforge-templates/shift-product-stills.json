@@ -1,0 +1,79 @@
+{
+  "id": "shift-product-stills",
+  "name": "The Shift — Product Still Capture",
+  "tagline": "Mode rotation for campaign stills — Minefield, Polarity, Matrix, Blueprints — closing on The Sweep schematic as the hero frame.",
+  "audience": "Campaign product_still / LinkedIn + feed thumbnails",
+  "format": "linkedin",
+  "estimatedSec": 90,
+  "estimatedSecNote": "Silent capture; holds are sized for keyframe extraction (hero = final Sweep diagram)",
+  "baseUrlPlaceholder": "{BASE}",
+  "defaultBaseUrl": "https://theshift.bioloopnexus.com",
+  "steps": [
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Queue",
+      "ms": 1600,
+      "narration": ""
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Minefield",
+      "ms": 700,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playMineRound()",
+      "ms": 2800,
+      "narration": ""
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Polarity",
+      "ms": 700,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playPolarityRound()",
+      "ms": 2800,
+      "narration": ""
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Matrix",
+      "ms": 700,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playMatrixRound()",
+      "ms": 2800,
+      "narration": ""
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Blueprints",
+      "ms": 700,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playBlueprintsStep()",
+      "ms": 2400,
+      "narration": ""
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/PreTrip",
+      "ms": 900,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.showSweepDiagram()",
+      "ms": 4200,
+      "narration": ""
+    }
+  ]
+}
