@@ -162,6 +162,7 @@ export const vantageApi = {
       copy_all: string;
       media_ready: boolean;
       instructions: string;
+      fields?: Record<string, string>;
     }>,
 
   // ── Queue ─────────────────────────────────────────────────────────────────

@@ -144,6 +144,126 @@ function ImagePreview({ url }: { url: string }) {
   )
 }
 
+type PublishPack = Awaited<ReturnType<typeof vantageApi.getPublishPack>>
+
+function PublishPackModal({
+  pack,
+  onClose,
+}: {
+  pack: PublishPack
+  onClose: () => void
+}) {
+  const [copied, setCopied] = React.useState<string | null>(null)
+  const captionWithTags = [pack.caption, pack.hashtags].filter(Boolean).join('\n\n')
+
+  const copy = (key: string, text: string) => {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(key)
+      setTimeout(() => setCopied(null), 2000)
+    })
+  }
+
+  const monoLabel: React.CSSProperties = {
+    fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)',
+    letterSpacing: '0.12em', marginBottom: 4, textTransform: 'uppercase',
+  }
+  const body: React.CSSProperties = {
+    fontFamily: 'var(--nx-sans)', fontSize: 13, color: 'var(--nx-text-1)',
+    whiteSpace: 'pre-wrap', lineHeight: 1.45,
+  }
+  const ghostBtn: React.CSSProperties = {
+    fontFamily: 'var(--nx-mono)', fontSize: 10, padding: '4px 10px',
+    background: 'none', border: '1px solid var(--nx-border)', borderRadius: 4,
+    color: 'var(--nx-text-3)', cursor: 'pointer',
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.7)',
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+        padding: 24, overflowY: 'auto',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--nx-bg)', border: '1px solid var(--nx-border)',
+          borderRadius: 10, padding: 24, width: '100%', maxWidth: 560,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <span className="nx-mono" style={{ fontSize: 11, color: 'var(--nx-accent)', letterSpacing: '0.18em' }}>
+            ⎘ PUBLISH PACK · {pack.channel.toUpperCase()}
+          </span>
+          <button type="button" onClick={onClose} style={ghostBtn}>✕ Close</button>
+        </div>
+
+        {!pack.media_ready && (
+          <div className="vg-error" style={{ marginBottom: 12, fontSize: 12 }}>
+            Media not ready yet — attach a DemoForge video or image before uploading.
+          </div>
+        )}
+
+        <div style={{ marginBottom: 14 }}>
+          <div style={monoLabel}>Caption</div>
+          <div style={body}>{pack.caption || '—'}</div>
+          {pack.hashtags ? (
+            <div style={{ marginTop: 8, fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-cyan)' }}>
+              {pack.hashtags}
+            </div>
+          ) : null}
+          <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              style={{ ...ghostBtn, color: copied === 'caption' ? 'var(--nx-green, #22c55e)' : ghostBtn.color }}
+              onClick={() => copy('caption', captionWithTags)}
+            >
+              {copied === 'caption' ? '✓ Copied' : '⎘ Copy caption'}
+            </button>
+            <button
+              type="button"
+              style={{ ...ghostBtn, color: copied === 'all' ? 'var(--nx-green, #22c55e)' : ghostBtn.color }}
+              onClick={() => copy('all', pack.copy_all)}
+            >
+              {copied === 'all' ? '✓ Copied' : '⎘ Copy all'}
+            </button>
+          </div>
+        </div>
+
+        {pack.fields?.script && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={monoLabel}>Script</div>
+            <div style={{ ...body, fontSize: 12, color: 'var(--nx-text-2)' }}>{pack.fields.script}</div>
+          </div>
+        )}
+
+        {(pack.video_url || pack.thumbnail_url) && (
+          <div style={{ marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={monoLabel}>Media</div>
+            {pack.video_url && (
+              <a href={pack.video_url} target="_blank" rel="noreferrer" download style={{ fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-cyan)' }}>
+                ↓ Download video
+              </a>
+            )}
+            {pack.thumbnail_url && (
+              <a href={pack.thumbnail_url} target="_blank" rel="noreferrer" download style={{ fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-cyan)' }}>
+                ↓ Download thumbnail / still
+              </a>
+            )}
+          </div>
+        )}
+
+        <div style={{ borderTop: '1px solid var(--nx-border)', paddingTop: 12 }}>
+          <div style={monoLabel}>Instructions</div>
+          <div style={{ ...body, fontSize: 12, color: 'var(--nx-text-3)' }}>{pack.instructions}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function QueuePage() {
   const [pieces, setPieces] = React.useState<Piece[]>([])
   const [filter, setFilter] = React.useState<typeof STATUS_FILTERS[number]>('all')
@@ -155,6 +275,8 @@ export function QueuePage() {
   const [previewPiece, setPreviewPiece] = React.useState<Piece | null>(null)
   const [quotifyPiece, setQuotifyPiece] = React.useState<Piece | null>(null)
   const [ogPiece, setOgPiece]           = React.useState<Piece | null>(null)
+  const [publishPack, setPublishPack]   = React.useState<PublishPack | null>(null)
+  const [packBusy, setPackBusy]         = React.useState<string | null>(null)
 
   const load = React.useCallback(async () => {
     setErr(null)
@@ -359,6 +481,24 @@ export function QueuePage() {
             Queue
           </button>
         )}
+        {MANUAL_CHANNELS.has(p.channel_slug) && (
+          <button
+            type="button"
+            className="nx-btn nx-btn--secondary nx-btn--sm"
+            disabled={packBusy === p.id}
+            onClick={() => {
+              setPackBusy(p.id)
+              setErr(null)
+              void vantageApi.getPublishPack(p.id)
+                .then((pack) => setPublishPack(pack))
+                .catch((e) => setErr(String((e as Error).message)))
+                .finally(() => setPackBusy(null))
+            }}
+            title="Copy caption, hashtags, and media download links for manual upload"
+          >
+            {packBusy === p.id ? '…' : '⎘ Publish Pack'}
+          </button>
+        )}
         {(p.status === 'approved' || p.status === 'queued') && MANUAL_CHANNELS.has(p.channel_slug) && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 160 }}>
             <input
@@ -429,6 +569,9 @@ export function QueuePage() {
       {/* 3B-5: Preview modal */}
       {previewPiece && (
         <PreviewModal piece={previewPiece} onClose={() => setPreviewPiece(null)} />
+      )}
+      {publishPack && (
+        <PublishPackModal pack={publishPack} onClose={() => setPublishPack(null)} />
       )}
       {/* 3C-5: Quotify modal */}
       {/* 3C-3: OG share card modal */}
