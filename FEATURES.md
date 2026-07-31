@@ -833,8 +833,12 @@ Brand kit CRUD + logo upload lives on **Settings → Brand Kits**.
 - `supabase/migrations/20260720000000_intro_outro_clips.sql`
 
 **Configuration (DemoForge service):** `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
-`ELEVENLABS_API_KEY`, `DEMOFORGE_SECRET` (shared with vantage-api), `PORT`.
-**Configuration (vantage-api):** `DEMOFORGE_URL`, `DEMOFORGE_SECRET`.
+`ELEVENLABS_API_KEY` (required for narrated videos — set on the **DemoForge** Railway
+service, not only vantage-api), optional `DEMOFORGE_TTS_PROVIDER=voicebox` + Voicebox
+env, `DEMOFORGE_SECRET` (shared with vantage-api), `PORT`. Missing ElevenLabs key no
+longer fails the job: DemoForge logs a warning and renders a silent video instead.
+**Configuration (vantage-api):** `DEMOFORGE_URL`, `DEMOFORGE_SECRET`, optional
+`SHIFT_BASE_URL` for campaign template recording targets.
 
 ---
 
