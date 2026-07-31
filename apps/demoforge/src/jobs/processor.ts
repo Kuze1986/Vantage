@@ -474,6 +474,15 @@ async function synthesizeNarration(
   const hasLines = job.input_payload.script.some((s) => s.narration?.trim().length > 0);
   if (!hasLines) return null;
 
+  const choice = job.input_payload.tts_provider ?? process.env.DEMOFORGE_TTS_PROVIDER ?? "elevenlabs";
+  if (choice !== "voicebox" && !process.env.ELEVENLABS_API_KEY?.trim()) {
+    console.warn(
+      "[demoforge] ELEVENLABS_API_KEY missing on this service — producing silent video. " +
+        "Set ELEVENLABS_API_KEY (or DEMOFORGE_TTS_PROVIDER=voicebox) on the DemoForge Railway service.",
+    );
+    return null;
+  }
+
   try {
     const provider = getTtsProvider(job);
     return await prepareScriptWithSyncedNarration(job.input_payload.script, workDir, provider);
@@ -482,6 +491,10 @@ async function synthesizeNarration(
     // ElevenLabs out of credits → produce a silent video rather than failing the job.
     if (msg.includes("402") || msg.toLowerCase().includes("payment")) {
       console.warn("[demoforge] ElevenLabs 402 — out of credits, producing silent video");
+      return null;
+    }
+    if (msg.includes("ELEVENLABS_API_KEY") || msg.includes("Missing ELEVENLABS")) {
+      console.warn(`[demoforge] ElevenLabs not configured — producing silent video: ${msg}`);
       return null;
     }
     // Voicebox unreachable / model not loaded → same graceful degradation.
@@ -1227,11 +1240,9 @@ export async function processJob(
     let narrationPath: string | null = null;
     let wordTimings: WordTiming[] = [];
 
-    // 1. Synthesize narration FIRST — sets per-step ms to match each spoken line
-    if (hasNarration && !process.env.ELEVENLABS_API_KEY) {
-      throw new Error("ELEVENLABS_API_KEY is not configured — cannot synthesize narration audio");
-    }
-    if (hasNarration && process.env.ELEVENLABS_API_KEY) {
+    // 1. Synthesize narration FIRST — sets per-step ms to match each spoken line.
+    // Missing TTS credentials degrade to a silent (but otherwise complete) video.
+    if (hasNarration) {
       await onStatus("synthesizing");
       const narrationResult = await synthesizeNarration(job, workDir);
       if (narrationResult) {
