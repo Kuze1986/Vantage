@@ -1202,7 +1202,8 @@ marketing goals (messaging pillars, channel mix, posting cadence) with daily con
 - `messaging_pillars` — array of (title, description, guidelines) that shape all generated content
 - `channel_mix` — JSONB specifying which social channels participate and daily volume.
   Supported: `x`, `linkedin`, `reddit`, `threads`, `bluesky`, `tiktok`, `instagram`, `facebook`
-  (all social platforms; email is out of scope for campaign mix)
+  (all social platforms; email is out of scope for campaign mix). Timeline day Channel
+  dropdown and Zod schemas use the same set (not just the original x/linkedin/reddit trio).
 - `kpi_targets` — goals for engagement, reach, conversion, sentiment
 - `default_brand_id` — Social Kit brand default for launched pieces (app default: `shift`)
 - `default_demoforge_template_id` — DemoForge template default when a day omits one

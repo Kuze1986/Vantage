@@ -27,6 +27,17 @@ interface DemoForgeTemplateMeta {
 
 const VISUAL_TYPES = ['demo_video', 'product_still', 'social_graphic', 'none'] as const
 const BRAND_OPTIONS = ['shift', 'keystone', 'scripta', 'demoforge', 'crucible', 'vantage'] as const
+/** Matches campaign API CAMPAIGN_CHANNELS (email excluded). */
+const CAMPAIGN_CHANNELS = [
+  { id: 'x', label: 'X' },
+  { id: 'linkedin', label: 'LinkedIn' },
+  { id: 'reddit', label: 'Reddit' },
+  { id: 'threads', label: 'Threads' },
+  { id: 'bluesky', label: 'Bluesky' },
+  { id: 'tiktok', label: 'TikTok' },
+  { id: 'instagram', label: 'Instagram' },
+  { id: 'facebook', label: 'Facebook' },
+] as const
 
 interface TimelineDay {
   id: string
@@ -760,7 +771,10 @@ export default function CampaignBuilderPage() {
                     key={day.id || day.day_number}
                     title={`Day ${day.day_number + 1} — ${day.date_scheduled}`}
                     titleAccent={
-                      day.primary_channel === 'x' ? 'cyan' : day.primary_channel === 'linkedin' ? 'green' : 'amber'
+                      day.primary_channel === 'x' ? 'cyan'
+                        : day.primary_channel === 'linkedin' ? 'green'
+                          : day.primary_channel === 'tiktok' || day.primary_channel === 'instagram' ? 'violet'
+                            : 'amber'
                     }
                   >
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -772,9 +786,9 @@ export default function CampaignBuilderPage() {
                             value={day.primary_channel}
                             onChange={(e) => updateDayLocal(day.day_number, { primary_channel: e.target.value })}
                           >
-                            <option value="x">X</option>
-                            <option value="linkedin">LinkedIn</option>
-                            <option value="reddit">Reddit</option>
+                            {CAMPAIGN_CHANNELS.map((ch) => (
+                              <option key={ch.id} value={ch.id}>{ch.label}</option>
+                            ))}
                           </select>
                         </div>
                         <div>
