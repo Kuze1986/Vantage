@@ -639,6 +639,11 @@ portfolio demos (`shift-queue-modes`, `shift-ube-university-demo`, `shift-queue-
 **defaults** — other products can add templates. Exposed via `GET /v1/demoforge/templates`
 and `POST /v1/demoforge/jobs/from-template`.
 
+**`shift-queue-reel` (adaptive):** deploys the Queue with a fixed mix —
+MCQ → Streak → Blueprints → Matrix → Minefield → Polarity → Drop — then navigates to
+`/PreTrip` and calls `showSweepDiagram()` for The Sweep main-schematic teaser.
+Field Dossier / Callback are intentionally omitted.
+
 **Job lifecycle:** `pending → recording → synthesizing → mixing → done / failed`.
 Processing is sequential (one job at a time) to avoid overloading the Railway worker.
 

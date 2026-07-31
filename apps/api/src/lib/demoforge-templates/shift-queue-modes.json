@@ -1,10 +1,10 @@
 {
   "id": "shift-queue-modes",
   "name": "The Shift — Queue Mode Reel",
-  "tagline": "Four structural game modes inside a single adaptive study session.",
+  "tagline": "Every current Queue mode as a standalone hit — closing on The Sweep schematic.",
   "audience": "PTCB students · pharmacy educators · social media · product demos",
   "format": "tiktok",
-  "estimatedSec": 120,
+  "estimatedSec": 150,
   "estimatedSecNote": "Actual duration is driven by ElevenLabs per-line synthesis in DemoForge",
   "baseUrlPlaceholder": "{BASE}",
   "defaultBaseUrl": "https://theshift.bioloopnexus.com",
@@ -13,13 +13,13 @@
       "action": "navigate",
       "selector": "{BASE}/Queue",
       "ms": 2500,
-      "narration": "The Shift doesn't just quiz you. It mixes eight game modes into one adaptive session — and four of them are full-on mini-games."
+      "narration": "The Shift doesn't just quiz you. It mixes live game modes into one adaptive session — let's walk each one."
     },
     {
       "action": "scroll",
       "selector": "",
-      "ms": 2000,
-      "narration": "The queue reads your mastery level and picks the right mode at the right moment. Let's enter each one and play a round."
+      "ms": 1800,
+      "narration": "MCQ and Streak for recall. Blueprints, Matrix, Minefield, Polarity, Drop for the mechanics. The Sweep for the prestige close."
     },
     {
       "action": "navigate",
@@ -31,19 +31,19 @@
       "action": "run",
       "selector": "window.__shiftDemoPlay.playBlueprintsStep()",
       "ms": 1500,
-      "narration": "Blueprints — a real pharmacy workflow, scrambled into steps. Rebuild it in the correct order. One wrong pick drains stability — lose it all and the procedure collapses."
+      "narration": "Blueprints — a real workflow, scrambled into steps. Rebuild it in the correct order."
     },
     {
       "action": "navigate",
-      "selector": "{BASE}/Drop",
+      "selector": "{BASE}/Matrix",
       "ms": 600,
       "narration": ""
     },
     {
       "action": "run",
-      "selector": "window.__shiftDemoPlay.playDropRound()",
-      "ms": 1500,
-      "narration": "The Drop — a drug name falls from the top. Match it to the right category lane before it crosses the capture threshold. Hesitate and your stress meter climbs."
+      "selector": "window.__shiftDemoPlay.playMatrixRound()",
+      "ms": 2000,
+      "narration": "The Matrix — structure the setup. Every tile has a home; lock the clean structure."
     },
     {
       "action": "navigate",
@@ -55,25 +55,49 @@
       "action": "run",
       "selector": "window.__shiftDemoPlay.playMineRound()",
       "ms": 2000,
-      "narration": "The Minefield — a five-by-five grid of clinical hazards. Every cell hides a question. Pick wrong and the mine detonates — navigate clean or the breach fails."
+      "narration": "The Minefield — a grid of clinical hazards. Navigate clean or the breach fails."
     },
     {
       "action": "navigate",
-      "selector": "{BASE}/RealWorldScenarios",
+      "selector": "{BASE}/Polarity",
+      "ms": 600,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playPolarityRound()",
+      "ms": 2000,
+      "narration": "Polarity — secure the network. Engage a node, answer the volley, keep the link alive."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Drop",
+      "ms": 600,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playDropRound()",
+      "ms": 1500,
+      "narration": "The Drop — match the falling term before it crosses the capture line."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/PreTrip",
       "ms": 800,
       "narration": ""
     },
     {
       "action": "run",
-      "selector": "window.__shiftDemoPlay.playDossierRound()",
-      "ms": 2500,
-      "narration": "Field Work — real pharmacy scenarios as classified dossiers. Read the incident report, choose your call, and commit. This is where the textbook meets the dispensing counter."
+      "selector": "window.__shiftDemoPlay.showSweepDiagram()",
+      "ms": 3000,
+      "narration": "The Sweep — the main schematic. Zone-by-zone defect hunt. Prestige closer for the weekly ladder — and the shot that sticks."
     },
     {
       "action": "navigate",
       "selector": "{BASE}/Queue",
-      "ms": 2500,
-      "narration": "The Queue sequences all of it — automatically. One session. Eight modes. Zero manual setup. The Shift adapts to you."
+      "ms": 2200,
+      "narration": "The Queue sequences all of it automatically. One session. Every mode. Zero manual setup."
     }
   ]
 }
