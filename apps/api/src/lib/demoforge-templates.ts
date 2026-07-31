@@ -56,7 +56,7 @@ export interface DemoForgeJobPayload {
   color_grade?: { preset: string };
 }
 
-/** Channel → default template id (Shift seeds). */
+/** Channel → default template id (Shift seeds) for demo_video. */
 export const DEFAULT_TEMPLATE_BY_CHANNEL: Record<string, string> = {
   x: "shift-queue-modes",
   linkedin: "shift-ube-university-demo",
@@ -68,7 +68,26 @@ export const DEFAULT_TEMPLATE_BY_CHANNEL: Record<string, string> = {
   facebook: "shift-queue-modes",
 };
 
+/** Visual type → default template when the idea/campaign omit one. */
+export const DEFAULT_TEMPLATE_BY_VISUAL_TYPE: Record<string, string> = {
+  product_still: "shift-product-stills",
+};
+
+/** Preferred keyframe index for write-back (`last` = Sweep hero on product stills). */
+export const DEFAULT_THUMBNAIL_FRAME_BY_VISUAL_TYPE: Record<string, number | "last"> = {
+  product_still: "last",
+};
+
 export const DEFAULT_BRAND_ID = "shift";
+
+/** Modes captured by shift-product-stills (rotation order; Sweep is the hero close). */
+export const PRODUCT_STILL_MODE_ROTATION = [
+  "minefield",
+  "polarity",
+  "matrix",
+  "blueprints",
+  "sweep",
+] as const;
 
 let cache: DemoForgeTemplate[] | null = null;
 
@@ -114,20 +133,47 @@ export function getDemoForgeTemplate(templateId: string): DemoForgeTemplate | nu
   return listDemoForgeTemplates().find((t) => t.id === templateId) ?? null;
 }
 
-/** Resolve template id: idea → campaign default → channel Shift default. */
+/** Resolve template id: idea → campaign default → visual-type default → channel Shift default. */
 export function resolveTemplateId(opts: {
   ideaTemplateId?: string | null;
   campaignDefaultTemplateId?: string | null;
   channel?: string | null;
+  visualType?: string | null;
 }): string {
   if (opts.ideaTemplateId && getDemoForgeTemplate(opts.ideaTemplateId)) {
     return opts.ideaTemplateId;
   }
+  // product_still ignores campaign video defaults unless the idea named a template —
+  // stills should use the mode-capture reel, not a narrated demo.
+  const visual = (opts.visualType ?? "").toLowerCase();
+  if (visual === "product_still") {
+    const stillDefault = DEFAULT_TEMPLATE_BY_VISUAL_TYPE.product_still;
+    if (stillDefault && getDemoForgeTemplate(stillDefault)) return stillDefault;
+  }
   if (opts.campaignDefaultTemplateId && getDemoForgeTemplate(opts.campaignDefaultTemplateId)) {
     return opts.campaignDefaultTemplateId;
   }
+  if (visual && DEFAULT_TEMPLATE_BY_VISUAL_TYPE[visual] && getDemoForgeTemplate(DEFAULT_TEMPLATE_BY_VISUAL_TYPE[visual]!)) {
+    return DEFAULT_TEMPLATE_BY_VISUAL_TYPE[visual]!;
+  }
   const channel = (opts.channel ?? "x").toLowerCase();
   return DEFAULT_TEMPLATE_BY_CHANNEL[channel] ?? "shift-queue-modes";
+}
+
+/** Resolve which extracted frame becomes the piece image_url / job thumbnail. */
+export function resolveThumbnailFrameIndex(
+  visualType: string | null | undefined,
+  explicit?: number | null,
+  frameCount = 0,
+): number {
+  if (typeof explicit === "number" && Number.isFinite(explicit) && explicit >= 0) {
+    if (frameCount > 0) return Math.min(Math.floor(explicit), frameCount - 1);
+    return Math.floor(explicit);
+  }
+  const pref = DEFAULT_THUMBNAIL_FRAME_BY_VISUAL_TYPE[(visualType ?? "").toLowerCase()];
+  if (pref === "last" && frameCount > 0) return frameCount - 1;
+  if (typeof pref === "number" && frameCount > 0) return Math.min(pref, frameCount - 1);
+  return 0;
 }
 
 export function resolveBrandId(opts: {

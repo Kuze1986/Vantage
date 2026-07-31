@@ -843,7 +843,11 @@ export default function CampaignBuilderPage() {
                             })}
                             disabled={idea.visual_type === 'none' || idea.visual_type === 'social_graphic'}
                           >
-                            <option value="">— channel default —</option>
+                            <option value="">
+                              {idea.visual_type === 'product_still'
+                                ? '— product stills (Sweep hero) —'
+                                : '— channel default —'}
+                            </option>
                             {templates.map((t) => (
                               <option key={t.id} value={t.id}>{t.name}</option>
                             ))}

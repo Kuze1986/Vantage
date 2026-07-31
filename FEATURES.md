@@ -644,6 +644,10 @@ MCQ → Streak → Blueprints → Matrix → Minefield → Polarity → Drop —
 `/PreTrip` and calls `showSweepDiagram()` for The Sweep main-schematic teaser.
 Field Dossier / Callback are intentionally omitted.
 
+**`shift-product-stills`:** silent LinkedIn-format capture for `visual_type=product_still` —
+Minefield → Polarity → Matrix → Blueprints → Sweep diagram. Default for product stills
+(overrides campaign video template defaults). Hero thumbnail = final Sweep frame.
+
 **Job lifecycle:** `pending → recording → synthesizing → mixing → done / failed`.
 Processing is sequential (one job at a time) to avoid overloading the Railway worker.
 
@@ -1211,9 +1215,11 @@ marketing goals (messaging pillars, channel mix, posting cadence) with daily con
 - `published_pieces` — array of `content_piece_id`s published on that day (plus media status)
 
 **Visual launch pipeline:** `POST /v1/campaigns/:id/launch` generates Kuze text, then:
-- `demo_video` / `product_still` — creates **2 A/B pieces** sharing `variant_group_id` (different
-  Kuze hooks; same DemoForge job; `thumbnail_frame_index` 0 vs 2), enqueues DemoForge once
-  (`media_status=pending` until write-back)
+- `demo_video` — enqueues channel-default DemoForge template (narrated reel / UBE demo)
+- `product_still` — enqueues `shift-product-stills` (Minefield → Polarity → Matrix → Blueprints →
+  Sweep diagram). Captions off, clean grade. Write-back prefers the **last keyframe** (Sweep hero)
+  as `image_url` / `demoforge_jobs.thumbnail_url`; earlier frames remain in `extracted_frames` for
+  Thumbnail Studio rotation
 - `social_graphic` — flags `needs_social_kit` for Queue OG/quote attach
 - `none` — text only
 Pieces land as approved drafts on the Queue for review with media badges / video preview.
