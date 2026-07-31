@@ -50,10 +50,28 @@ const messagingPillarSchema = z.object({
   targetAudience: z.string(),
 });
 
+/** Social channels allowed in campaign mix / timeline (email is out of scope). */
+const CAMPAIGN_CHANNELS = [
+  'x',
+  'linkedin',
+  'reddit',
+  'threads',
+  'bluesky',
+  'tiktok',
+  'instagram',
+  'facebook',
+] as const;
+
+const channelDailySchema = z.object({ daily: z.number().int().positive() }).optional();
 const channelMixSchema = z.object({
-  x: z.object({ daily: z.number().int().positive() }).optional(),
-  linkedin: z.object({ daily: z.number().int().positive() }).optional(),
-  reddit: z.object({ daily: z.number().int().positive() }).optional(),
+  x: channelDailySchema,
+  linkedin: channelDailySchema,
+  reddit: channelDailySchema,
+  threads: channelDailySchema,
+  bluesky: channelDailySchema,
+  tiktok: channelDailySchema,
+  instagram: channelDailySchema,
+  facebook: channelDailySchema,
 });
 
 const cadenceConfigSchema = z.object({
@@ -114,8 +132,8 @@ const timelineDaySchema = z.object({
   content_type: z
     .enum(['promotional', 'educational', 'engagement', 'behind_the_scenes', 'mixed'])
     .optional(),
-  primary_channel: z.enum(['x', 'linkedin', 'reddit']),
-  secondary_channels: z.array(z.enum(['x', 'linkedin', 'reddit'])).optional(),
+  primary_channel: z.enum(CAMPAIGN_CHANNELS),
+  secondary_channels: z.array(z.enum(CAMPAIGN_CHANNELS)).optional(),
   content_ideas: z.array(contentIdeaSchema).optional(),
 });
 
@@ -467,7 +485,7 @@ campaignRoutes.delete('/:id/timeline/:day', async (c) => {
 // ============================================================================
 
 const CONTENT_TYPES = ['promotional', 'educational', 'engagement', 'behind_the_scenes', 'mixed'] as const;
-const CHANNELS = ['x', 'linkedin', 'reddit'] as const;
+const CHANNELS = CAMPAIGN_CHANNELS;
 
 // The LLM frequently drifts on these fields (e.g. emits a numeric pillar index
 // instead of the UUID, or an off-enum channel/content_type). Validation here is
