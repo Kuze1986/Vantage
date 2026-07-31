@@ -912,8 +912,10 @@ dispatch pieces from this page.
 - **Audit** — runs Ilita review; transitions auditing → approved or rejected
 - **Queue / Force Queue** — schedules an approved piece (`force` when media-gated)
 - **Publish / Force Publish** — immediate publish for API channels (same media gate)
-- **Publish Pack** — TikTok / Instagram / Facebook with `video_url`: caption, download link,
-  thumbnail, Copy caption / Copy all (`GET /v1/queue/:id/publish-pack`)
+- **Publish Pack** — TikTok / Instagram / Facebook: modal with caption + hashtags, video /
+  thumbnail download links, Copy caption / Copy all, and upload instructions
+  (`GET /v1/queue/:id/publish-pack`). Shown for all statuses on manual channels; warns when
+  media is not ready.
 - **Manual channels** — paste post URL → mark published after manual upload
 - **Bulk** — multi-select → schedule / force schedule / audit selected
 
@@ -926,8 +928,9 @@ dispatch pieces from this page.
   hook, script, on-screen text, hashtags, and upload instructions. One-click copy-to-clipboard.
 
 **Files:**
-- `apps/web/src/pages/QueuePage.tsx`
+- `apps/web/src/pages/QueuePage.tsx` — Publish Pack modal + manual Mark Published
 - `apps/api/src/routes/queue.ts` — `GET /v1/queue`, publish-pack, bulk-schedule, calendar filter
+- `apps/api/src/lib/publish-pack.ts` — pack builder (reuses channel adapters)
 
 ---
 

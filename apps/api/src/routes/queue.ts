@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { getSupabaseAdmin } from "../lib/supabase.js";
+import { buildPublishPack, MANUAL_PUBLISH_CHANNELS } from "../lib/publish-pack.js";
 
 export const queueRoutes = new Hono();
 
@@ -100,6 +101,45 @@ queueRoutes.patch("/:id", async (c) => {
     .single();
   if (error) throw new HTTPException(500, { message: error.message });
   return c.json({ piece: updated });
+});
+
+// GET /v1/queue/:id/publish-pack — one-click export for TikTok / Instagram / Facebook
+queueRoutes.get("/:id/publish-pack", async (c) => {
+  const id = c.req.param("id");
+  const ws = c.get("workspaceId");
+  const sb = getSupabaseAdmin();
+
+  const { data: piece, error } = await sb
+    .from("content_pieces")
+    .select("id, channel_slug, content_payload, image_url, video_url, media_status")
+    .eq("workspace_id", ws)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new HTTPException(500, { message: error.message });
+  if (!piece) throw new HTTPException(404, { message: "Not found" });
+
+  const channel = String(piece.channel_slug ?? "");
+  if (!MANUAL_PUBLISH_CHANNELS.has(channel)) {
+    throw new HTTPException(400, {
+      message: `Publish Pack is only for TikTok / Instagram / Facebook (got '${channel}')`,
+    });
+  }
+
+  const payload =
+    piece.content_payload && typeof piece.content_payload === "object" && !Array.isArray(piece.content_payload)
+      ? (piece.content_payload as Record<string, unknown>)
+      : {};
+
+  return c.json(
+    buildPublishPack({
+      id: piece.id,
+      channel,
+      payload,
+      videoUrl: piece.video_url,
+      imageUrl: piece.image_url,
+      mediaStatus: piece.media_status,
+    }),
+  );
 });
 
 // 3A-6: Retry a failed piece — resets status to queued with a fresh scheduled_for
