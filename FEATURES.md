@@ -652,6 +652,13 @@ Processing is sequential (one job at a time) to avoid overloading the Railway wo
 - `eval` — run arbitrary JS via `addInitScript` (fires on every navigation; used for Shift auth bypass / content-pack flags)
 - `run` — evaluate JS in the live page (used by Shift demo helpers like `__shiftDemoPlay`)
 
+**Shift live site:** Campaign templates record `https://theshift.bioloopnexus.com`, which has a
+real login wall. DemoForge injects `sessionStorage.the_shift_auth_bypass_mode=admin` (and
+retries once if redirected to `/login`). The Shift app must expose `__shiftDemoPlay` when that
+bypass is active (`exposeDemoPlay` in RxBlitz) — production builds that only gate on
+`VITE_DEMO_RECORDING` will leave `run` steps no-ops / failing. Prefer deploying that Shift fix;
+DemoForge soft-skips missing helpers so the rest of the video can still finish.
+
 `ms` may be `0` (instant setup steps). Each step supports `speed_multiplier` (0.5–2×) when `timeline_config.per_step_speed` is enabled.
 
 ---
