@@ -33,13 +33,27 @@ export interface ContentIdea {
   brand_id?: string;
 }
 
+/** Social channels allowed in campaign mix / timeline (email excluded). */
+export const CAMPAIGN_CHANNEL_SLUGS = [
+  'x',
+  'linkedin',
+  'reddit',
+  'threads',
+  'bluesky',
+  'tiktok',
+  'instagram',
+  'facebook',
+] as const;
+
+export type CampaignChannelSlug = (typeof CAMPAIGN_CHANNEL_SLUGS)[number];
+
 export interface CampaignTimelineDay {
   day_number: number;
   date_scheduled: string;
   messaging_pillar_id?: string;
   content_type: 'promotional' | 'educational' | 'engagement' | 'behind_the_scenes' | 'mixed';
-  primary_channel: 'x' | 'linkedin' | 'reddit';
-  secondary_channels: string[];
+  primary_channel: CampaignChannelSlug;
+  secondary_channels: CampaignChannelSlug[];
   content_ideas: ContentIdea[];
 }
 
@@ -145,8 +159,8 @@ const timelineOutputSchema = z.object({
       day_number: z.number(),
       messaging_pillar_id: z.string(),
       content_type: z.enum(['promotional', 'educational', 'engagement', 'behind_the_scenes', 'mixed']),
-      primary_channel: z.enum(['x', 'linkedin', 'reddit']),
-      secondary_channels: z.array(z.enum(['x', 'linkedin', 'reddit'])),
+      primary_channel: z.enum(CAMPAIGN_CHANNEL_SLUGS),
+      secondary_channels: z.array(z.enum(CAMPAIGN_CHANNEL_SLUGS)),
     })
   ),
 });

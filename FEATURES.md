@@ -1205,20 +1205,24 @@ marketing goals (messaging pillars, channel mix, posting cadence) with daily con
 - `messaging_pillars` — array of (title, description, guidelines) that shape all generated content
 - `channel_mix` — JSONB specifying which social channels participate and daily volume.
   Supported: `x`, `linkedin`, `reddit`, `threads`, `bluesky`, `tiktok`, `instagram`, `facebook`
-  (all social platforms; email is out of scope for campaign mix). Timeline day Channel
-  dropdown and Zod schemas use the same set (not just the original x/linkedin/reddit trio).
+  (all social platforms; email is out of scope for campaign mix). Create/edit UI toggles these
+  channels; timeline generation only plans keys present in `channel_mix`. DB CHECKs and Zod
+  schemas use the same eight-channel set.
 - `kpi_targets` — goals for engagement, reach, conversion, sentiment
 - `default_brand_id` — Social Kit brand default for launched pieces (app default: `shift`)
 - `default_demoforge_template_id` — DemoForge template default when a day omits one
 
 **Campaign timeline** stores one row per day:
 - `campaign_id`, `date`
+- `primary_channel` + `secondary_channels` — launch generates one Kuze piece per channel listed
+  (primary and each secondary), not primary alone
 - `content_ideas` — JSONB with AI-suggested content hooks for that day, including optional
   `visual_type` (`demo_video` | `product_still` | `social_graphic` | `none`),
   `demoforge_template_id`, and `brand_id` (Shift templates/brand are defaults, overridable)
 - `published_pieces` — array of `content_piece_id`s published on that day (plus media status)
 
-**Visual launch pipeline:** `POST /v1/campaigns/:id/launch` generates Kuze text, then:
+**Visual launch pipeline:** `POST /v1/campaigns/:id/launch` generates Kuze text for each
+day channel (primary + secondaries), then:
 - `demo_video` — enqueues channel-default DemoForge template (narrated reel / UBE demo)
 - `product_still` — enqueues `shift-product-stills` (Minefield → Polarity → Matrix → Blueprints →
   Sweep diagram). Captions off, clean grade. Write-back prefers the **last keyframe** (Sweep hero)
@@ -1266,12 +1270,12 @@ pending-media count, pack picker, refill button.
 **UI (`apps/web/src/pages/CampaignBuilderPage.tsx`):**
 Three-view interface:
 - **List view** — all campaigns with status badge, date range, and active engagement count
-- **Create view** — form with campaign name, messaging pillar templates (pre-filled from brand voice),
-  channel selection, cadence config, and KPI target inputs
+- **Create view** — form with campaign name, eight-channel mix toggles (+ daily targets),
+  cadence config, and KPI target inputs (defaults enable all social channels)
 - **Details view** — dashboard showing:
-  - **Messaging pillars panel** — visual breakdown of each pillar and its content distribution
-  - **Timeline panel** — per-day editors for channel, idea brief, visual type, DemoForge template,
-    and Social Kit brand; generate/launch actions
+  - **Edit campaign** — pillars, channel mix, brand/template defaults
+  - **Timeline panel** — per-day editors for primary + secondary channels, idea brief, visual type,
+    DemoForge template, and Social Kit brand; generate/launch actions
   - **Shift packs / evergreen / calendar** — add pack days, refill evergreen, open filtered calendar,
     pending-media count
   - **KPI dashboard** — progress cards toward each goal, with trend sparklines
@@ -1279,6 +1283,9 @@ Three-view interface:
 
 **Database:**
 - `supabase/migrations/20260626000000_campaign_builder.sql` — campaigns, timeline, KPI tables
+- `supabase/migrations/20260731225143_widen_campaign_channels.sql` — expands
+  `primary_channel` / KPI `source` CHECKs to all eight social channels; updates
+  `channel_mix` default
 - `supabase/migrations/20260729000000_content_piece_media.sql` — `content_pieces.video_url` /
   `media_status`; campaign `default_brand_id` / `default_demoforge_template_id`
 - `supabase/migrations/20260729120000_demoforge_thumbnail_and_product_profile.sql` — job `thumbnail_url`

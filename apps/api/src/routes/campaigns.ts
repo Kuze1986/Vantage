@@ -63,16 +63,20 @@ const CAMPAIGN_CHANNELS = [
 ] as const;
 
 const channelDailySchema = z.object({ daily: z.number().int().positive() }).optional();
-const channelMixSchema = z.object({
-  x: channelDailySchema,
-  linkedin: channelDailySchema,
-  reddit: channelDailySchema,
-  threads: channelDailySchema,
-  bluesky: channelDailySchema,
-  tiktok: channelDailySchema,
-  instagram: channelDailySchema,
-  facebook: channelDailySchema,
-});
+const channelMixSchema = z
+  .object({
+    x: channelDailySchema,
+    linkedin: channelDailySchema,
+    reddit: channelDailySchema,
+    threads: channelDailySchema,
+    bluesky: channelDailySchema,
+    tiktok: channelDailySchema,
+    instagram: channelDailySchema,
+    facebook: channelDailySchema,
+  })
+  .refine((mix) => Object.values(mix).some((v) => v != null && typeof v.daily === 'number'), {
+    message: 'channel_mix must include at least one channel with a daily target',
+  });
 
 const cadenceConfigSchema = z.object({
   weeks: z.number().int().positive(),
@@ -644,7 +648,8 @@ Produce exactly ${total} day objects, sequenced as a coherent narrative arc (awa
   return c.json({ timeline: inserted ?? [] }, 201);
 });
 
-// POST /v1/campaigns/:id/launch — generate + audit a content piece per timeline day
+// POST /v1/campaigns/:id/launch — generate + audit a content piece per day channel
+// (primary_channel + each secondary_channel)
 campaignRoutes.post('/:id/launch', async (c) => {
   const campaignId = c.req.param('id');
   const workspaceId = c.req.header('x-workspace-id');
@@ -714,7 +719,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
     media_status: string;
     demoforge_job_id?: string;
   }[] = [];
-  const failures: { day_number: number; error: string }[] = [];
+  const failures: { day_number: number; channel?: string; error: string }[] = [];
 
   const campaignDefaultBrand =
     typeof campaign.default_brand_id === 'string' ? campaign.default_brand_id : null;
@@ -725,6 +730,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
 
   const productProfile = await loadProductProfile(workspaceId);
   const demoBaseUrl = productProfile.product_base_url || undefined;
+  const allowedChannels = new Set<string>(CAMPAIGN_CHANNELS);
 
   for (const day of timeline) {
     const idea = (day.content_ideas as Idea[] | null)?.[0];
@@ -732,7 +738,19 @@ campaignRoutes.post('/:id/launch', async (c) => {
       failures.push({ day_number: day.day_number, error: 'No content idea on this day' });
       continue;
     }
-    const channel = day.primary_channel as ChannelSlug;
+
+    const secondary = Array.isArray(day.secondary_channels)
+      ? (day.secondary_channels as unknown[])
+      : [];
+    const channelsForDay = [day.primary_channel, ...secondary]
+      .filter((ch): ch is string => typeof ch === 'string' && allowedChannels.has(ch))
+      .filter((ch, i, arr) => arr.indexOf(ch) === i) as ChannelSlug[];
+
+    if (!channelsForDay.length) {
+      failures.push({ day_number: day.day_number, error: 'No valid channels on this day' });
+      continue;
+    }
+
     const visualType = (VISUAL_TYPES as readonly string[]).includes(idea.visual_type ?? '')
       ? (idea.visual_type as (typeof VISUAL_TYPES)[number])
       : day.content_type === 'engagement'
@@ -742,178 +760,187 @@ campaignRoutes.post('/:id/launch', async (c) => {
       ideaBrandId: idea.brand_id,
       campaignDefaultBrandId: campaignDefaultBrand,
     });
-    const templateId = resolveTemplateId({
-      ideaTemplateId: idea.demoforge_template_id,
-      campaignDefaultTemplateId: campaignDefaultTemplate,
-      channel,
-      visualType,
-    });
+    const topicText = `${idea.title}\n\n${idea.outline ?? ''}`.trim();
+    const published = Array.isArray(day.published_pieces) ? [...day.published_pieces] : [];
 
-    try {
-      // Each idea becomes a topic so the existing content pipeline can own the piece.
-      const { data: topic, error: topicErr } = await sb
-        .from('topics')
-        .insert({
-          workspace_id: workspaceId,
-          source_product: 'campaign',
-          source_ref: campaignId,
-          vertical: null,
-          topic_text: `${idea.title}\n\n${idea.outline ?? ''}`.trim(),
-          context_payload: {
-            campaign_id: campaignId,
-            day_number: day.day_number,
-            visual_type: visualType,
-            demoforge_template_id: templateId,
-            brand_id: brandId,
-          },
-        })
-        .select('id')
-        .single();
-      if (topicErr || !topic) throw new Error(topicErr?.message ?? 'Failed to create topic');
-
-      const gen = await generateContent({
-        workspace_id: workspaceId,
+    for (const channel of channelsForDay) {
+      const templateId = resolveTemplateId({
+        ideaTemplateId: idea.demoforge_template_id,
+        campaignDefaultTemplateId: campaignDefaultTemplate,
         channel,
-        topic_text: `${idea.title}\n\n${idea.outline ?? ''}`.trim(),
-        vertical: null,
-        brand_voice: brandVoiceStr,
+        visualType,
       });
 
-      let auditNotes: string | null = null;
       try {
-        const audit = await auditContent({
-          content: gen.text_preview || JSON.stringify(gen.content_payload),
-          format: gen.format,
+        // Each channel gets its own topic so the content pipeline can own the piece.
+        const { data: topic, error: topicErr } = await sb
+          .from('topics')
+          .insert({
+            workspace_id: workspaceId,
+            source_product: 'campaign',
+            source_ref: campaignId,
+            vertical: null,
+            topic_text: topicText,
+            context_payload: {
+              campaign_id: campaignId,
+              day_number: day.day_number,
+              visual_type: visualType,
+              demoforge_template_id: templateId,
+              brand_id: brandId,
+              channel,
+            },
+          })
+          .select('id')
+          .single();
+        if (topicErr || !topic) throw new Error(topicErr?.message ?? 'Failed to create topic');
+
+        const gen = await generateContent({
+          workspace_id: workspaceId,
+          channel,
+          topic_text: topicText,
+          vertical: null,
           brand_voice: brandVoiceStr,
-          workspace_id: workspaceId,
         });
-        auditNotes = `[${audit.verdict}] ${audit.feedback}`.slice(0, 1000);
-      } catch {
-        // Audit is best-effort; the piece is still produced for review.
-      }
 
-      const payload: Record<string, unknown> = {
-        ...gen.content_payload,
-        brand_id: brandId,
-        visual_type: visualType,
-        demoforge_template_id: templateId,
-      };
-      if (visualType === 'social_graphic') {
-        payload.needs_social_kit = true;
-      }
-      // product_still: prefer final Sweep diagram keyframe as the attached image.
-      if (visualType === 'product_still') {
-        payload.product_still_modes = ['minefield', 'polarity', 'matrix', 'blueprints', 'sweep'];
-        payload.thumbnail_preference = 'last';
-      }
-
-      let mediaStatus: 'none' | 'pending' | 'failed' = visualType === 'none' ? 'none' : 'pending';
-
-      const scheduledFor = `${day.date_scheduled}T09:00:00Z`;
-      const { data: piece, error: pieceErr } = await sb
-        .from('content_pieces')
-        .insert({
-          workspace_id: workspaceId,
-          topic_id: topic.id,
-          channel_slug: channel,
-          format: gen.format,
-          content_payload: payload,
-          status: 'approved', // approved drafts: user reviews + schedules from the Queue
-          audit_notes: auditNotes,
-          audit_iterations: 0,
-          scheduled_for: scheduledFor,
-          media_status: mediaStatus,
-        })
-        .select('id')
-        .single();
-      if (pieceErr || !piece) throw new Error(pieceErr?.message ?? 'Failed to create content piece');
-
-      let demoforgeJobId: string | undefined;
-
-      // Enqueue DemoForge for video / product stills (async — does not block launch).
-      if (visualType === 'demo_video' || visualType === 'product_still') {
+        let auditNotes: string | null = null;
         try {
-          const dfPayload = buildDemoForgePayload(templateId, demoBaseUrl, {
-            // Stills stay silent/clean; videos keep captions + grade.
-            captions: visualType !== 'product_still',
-            colorPreset: visualType === 'product_still' ? 'clean' : 'cinematic',
+          const audit = await auditContent({
+            content: gen.text_preview || JSON.stringify(gen.content_payload),
+            format: gen.format,
+            brand_voice: brandVoiceStr,
+            workspace_id: workspaceId,
           });
-          const base = process.env.DEMOFORGE_URL?.trim();
-          if (!base) throw new Error('DEMOFORGE_URL is not configured');
-          let dfUrl = base;
-          if (!dfUrl.startsWith('http://') && !dfUrl.startsWith('https://')) dfUrl = `https://${dfUrl}`;
-          dfUrl = dfUrl.replace(/\/$/, '');
-          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-          const secret = process.env.DEMOFORGE_SECRET?.trim();
-          if (secret) headers['x-demoforge-secret'] = secret;
-          const res = await fetch(`${dfUrl}/jobs`, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              ...dfPayload,
-              workspace_id: workspaceId,
-              content_piece_id: piece.id,
-            }),
-          });
-          const text = await res.text();
-          let body: unknown = null;
-          try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-          if (!res.ok) {
-            const msg =
-              typeof body === 'object' && body && 'error' in body
-                ? String((body as { error: string }).error)
-                : text || `demoforge ${res.status}`;
-            throw new Error(msg);
-          }
-          demoforgeJobId =
-            typeof body === 'object' && body && 'job_id' in body
-              ? String((body as { job_id: string }).job_id)
-              : undefined;
-          payload.demoforge_job_id = demoforgeJobId;
-          await sb
-            .from('content_pieces')
-            .update({ content_payload: payload, updated_at: new Date().toISOString() })
-            .eq('id', piece.id);
-        } catch (mediaErr) {
-          mediaStatus = 'failed';
-          const msg = mediaErr instanceof Error ? mediaErr.message : 'DemoForge enqueue failed';
-          payload.media_error = msg.slice(0, 500);
-          await sb
-            .from('content_pieces')
-            .update({
-              media_status: 'failed',
-              content_payload: payload,
-              audit_notes: [auditNotes, `[media] ${msg}`].filter(Boolean).join('\n').slice(0, 1000),
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', piece.id);
+          auditNotes = `[${audit.verdict}] ${audit.feedback}`.slice(0, 1000);
+        } catch {
+          // Audit is best-effort; the piece is still produced for review.
         }
+
+        const payload: Record<string, unknown> = {
+          ...gen.content_payload,
+          brand_id: brandId,
+          visual_type: visualType,
+          demoforge_template_id: templateId,
+        };
+        if (visualType === 'social_graphic') {
+          payload.needs_social_kit = true;
+        }
+        // product_still: prefer final Sweep diagram keyframe as the attached image.
+        if (visualType === 'product_still') {
+          payload.product_still_modes = ['minefield', 'polarity', 'matrix', 'blueprints', 'sweep'];
+          payload.thumbnail_preference = 'last';
+        }
+
+        let mediaStatus: 'none' | 'pending' | 'failed' = visualType === 'none' ? 'none' : 'pending';
+
+        const scheduledFor = `${day.date_scheduled}T09:00:00Z`;
+        const { data: piece, error: pieceErr } = await sb
+          .from('content_pieces')
+          .insert({
+            workspace_id: workspaceId,
+            topic_id: topic.id,
+            channel_slug: channel,
+            format: gen.format,
+            content_payload: payload,
+            status: 'approved', // approved drafts: user reviews + schedules from the Queue
+            audit_notes: auditNotes,
+            audit_iterations: 0,
+            scheduled_for: scheduledFor,
+            media_status: mediaStatus,
+          })
+          .select('id')
+          .single();
+        if (pieceErr || !piece) throw new Error(pieceErr?.message ?? 'Failed to create content piece');
+
+        let demoforgeJobId: string | undefined;
+
+        // Enqueue DemoForge for video / product stills (async — does not block launch).
+        if (visualType === 'demo_video' || visualType === 'product_still') {
+          try {
+            const dfPayload = buildDemoForgePayload(templateId, demoBaseUrl, {
+              // Stills stay silent/clean; videos keep captions + grade.
+              captions: visualType !== 'product_still',
+              colorPreset: visualType === 'product_still' ? 'clean' : 'cinematic',
+            });
+            const base = process.env.DEMOFORGE_URL?.trim();
+            if (!base) throw new Error('DEMOFORGE_URL is not configured');
+            let dfUrl = base;
+            if (!dfUrl.startsWith('http://') && !dfUrl.startsWith('https://')) dfUrl = `https://${dfUrl}`;
+            dfUrl = dfUrl.replace(/\/$/, '');
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            const secret = process.env.DEMOFORGE_SECRET?.trim();
+            if (secret) headers['x-demoforge-secret'] = secret;
+            const res = await fetch(`${dfUrl}/jobs`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify({
+                ...dfPayload,
+                workspace_id: workspaceId,
+                content_piece_id: piece.id,
+              }),
+            });
+            const text = await res.text();
+            let body: unknown = null;
+            try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+            if (!res.ok) {
+              const msg =
+                typeof body === 'object' && body && 'error' in body
+                  ? String((body as { error: string }).error)
+                  : text || `demoforge ${res.status}`;
+              throw new Error(msg);
+            }
+            demoforgeJobId =
+              typeof body === 'object' && body && 'job_id' in body
+                ? String((body as { job_id: string }).job_id)
+                : undefined;
+            payload.demoforge_job_id = demoforgeJobId;
+            await sb
+              .from('content_pieces')
+              .update({ content_payload: payload, updated_at: new Date().toISOString() })
+              .eq('id', piece.id);
+          } catch (mediaErr) {
+            mediaStatus = 'failed';
+            const msg = mediaErr instanceof Error ? mediaErr.message : 'DemoForge enqueue failed';
+            payload.media_error = msg.slice(0, 500);
+            await sb
+              .from('content_pieces')
+              .update({
+                media_status: 'failed',
+                content_payload: payload,
+                audit_notes: [auditNotes, `[media] ${msg}`].filter(Boolean).join('\n').slice(0, 1000),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', piece.id);
+          }
+        }
+
+        published.push({
+          content_piece_id: piece.id,
+          channel,
+          status: 'approved',
+          media_status: mediaStatus,
+          demoforge_job_id: demoforgeJobId,
+        });
+        created.push({
+          content_piece_id: piece.id,
+          channel,
+          day_number: day.day_number,
+          media_status: mediaStatus,
+          demoforge_job_id: demoforgeJobId,
+        });
+      } catch (e) {
+        failures.push({
+          day_number: day.day_number,
+          channel,
+          error: e instanceof Error ? e.message : 'unknown error',
+        });
       }
-
-      // Link the generated piece back onto the timeline day.
-      const published = Array.isArray(day.published_pieces) ? day.published_pieces : [];
-      published.push({
-        content_piece_id: piece.id,
-        channel,
-        status: 'approved',
-        media_status: mediaStatus,
-        demoforge_job_id: demoforgeJobId,
-      });
-      await sb
-        .from('campaign_timeline')
-        .update({ published_pieces: published, updated_at: new Date().toISOString() })
-        .eq('id', day.id);
-
-      created.push({
-        content_piece_id: piece.id,
-        channel,
-        day_number: day.day_number,
-        media_status: mediaStatus,
-        demoforge_job_id: demoforgeJobId,
-      });
-    } catch (e) {
-      failures.push({ day_number: day.day_number, error: e instanceof Error ? e.message : 'unknown error' });
     }
+
+    // Persist all pieces generated for this day (primary + secondary channels).
+    await sb
+      .from('campaign_timeline')
+      .update({ published_pieces: published, updated_at: new Date().toISOString() })
+      .eq('id', day.id);
   }
 
   if (created.length) {

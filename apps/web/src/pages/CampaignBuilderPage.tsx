@@ -39,6 +39,17 @@ const CAMPAIGN_CHANNELS = [
   { id: 'facebook', label: 'Facebook' },
 ] as const
 
+const DEFAULT_CHANNEL_MIX: Record<string, { daily: number }> = {
+  x: { daily: 2 },
+  linkedin: { daily: 1 },
+  reddit: { daily: 1 },
+  threads: { daily: 1 },
+  bluesky: { daily: 1 },
+  tiktok: { daily: 1 },
+  instagram: { daily: 1 },
+  facebook: { daily: 1 },
+}
+
 interface TimelineDay {
   id: string
   campaign_id: string
@@ -95,7 +106,7 @@ export default function CampaignBuilderPage() {
         targetAudience: 'Early adopters & decision makers',
       },
     ],
-    channel_mix: { x: { daily: 2 }, linkedin: { daily: 1 }, reddit: { daily: 1 } },
+    channel_mix: { ...DEFAULT_CHANNEL_MIX },
     kpi_targets: { impressions: 10000, engagements: 500 },
   })
 
@@ -105,12 +116,14 @@ export default function CampaignBuilderPage() {
     name: string
     description: string
     messaging_pillars: any[]
+    channel_mix: Record<string, { daily: number }>
     default_brand_id: string
     default_demoforge_template_id: string
   }>({
     name: '',
     description: '',
     messaging_pillars: [],
+    channel_mix: { ...DEFAULT_CHANNEL_MIX },
     default_brand_id: 'shift',
     default_demoforge_template_id: '',
   })
@@ -157,9 +170,36 @@ export default function CampaignBuilderPage() {
     setView('details')
   }
 
+  const toggleChannelMix = (
+    mix: Record<string, { daily: number }>,
+    channelId: string,
+    enabled: boolean,
+  ): Record<string, { daily: number }> => {
+    const next = { ...mix }
+    if (enabled) {
+      next[channelId] = { daily: next[channelId]?.daily ?? (channelId === 'x' ? 2 : 1) }
+    } else {
+      delete next[channelId]
+    }
+    return next
+  }
+
+  const setChannelDaily = (
+    mix: Record<string, { daily: number }>,
+    channelId: string,
+    daily: number,
+  ): Record<string, { daily: number }> => ({
+    ...mix,
+    [channelId]: { daily: Math.max(1, daily || 1) },
+  })
+
   const handleCreateCampaign = async () => {
     if (!formData.name) {
       alert('Campaign name is required')
+      return
+    }
+    if (!Object.keys(formData.channel_mix).length) {
+      alert('Select at least one channel')
       return
     }
     try {
@@ -182,7 +222,7 @@ export default function CampaignBuilderPage() {
             targetAudience: 'Early adopters & decision makers',
           },
         ],
-        channel_mix: { x: { daily: 2 }, linkedin: { daily: 1 }, reddit: { daily: 1 } },
+        channel_mix: { ...DEFAULT_CHANNEL_MIX },
         kpi_targets: { impressions: 10000, engagements: 500 },
       })
     } catch (err) {
@@ -248,6 +288,7 @@ export default function CampaignBuilderPage() {
     try {
       await vantageApi.updateCampaignTimelineDay(selectedCampaign.id, day.day_number, {
         primary_channel: day.primary_channel,
+        secondary_channels: day.secondary_channels ?? [],
         content_type: day.content_type,
         messaging_pillar_id: day.messaging_pillar_id ?? null,
         content_ideas: day.content_ideas,
@@ -320,10 +361,18 @@ export default function CampaignBuilderPage() {
 
   const startEditCampaign = () => {
     if (!selectedCampaign) return
+    const mix = selectedCampaign.channel_mix && typeof selectedCampaign.channel_mix === 'object'
+      ? Object.fromEntries(
+          Object.entries(selectedCampaign.channel_mix)
+            .filter(([, v]) => v && typeof (v as any).daily === 'number')
+            .map(([k, v]) => [k, { daily: (v as { daily: number }).daily }]),
+        )
+      : { ...DEFAULT_CHANNEL_MIX }
     setEditData({
       name: selectedCampaign.name,
       description: selectedCampaign.description || '',
       messaging_pillars: JSON.parse(JSON.stringify(selectedCampaign.messaging_pillars || [])),
+      channel_mix: mix,
       default_brand_id: selectedCampaign.default_brand_id || 'shift',
       default_demoforge_template_id: selectedCampaign.default_demoforge_template_id || '',
     })
@@ -332,12 +381,17 @@ export default function CampaignBuilderPage() {
 
   const handleSaveCampaign = async () => {
     if (!selectedCampaign) return
+    if (!Object.keys(editData.channel_mix).length) {
+      alert('Select at least one channel')
+      return
+    }
     setBusy('campaign')
     try {
       const updated = await vantageApi.updateCampaign(selectedCampaign.id, {
         name: editData.name,
         description: editData.description,
         messaging_pillars: editData.messaging_pillars,
+        channel_mix: editData.channel_mix,
         default_brand_id: editData.default_brand_id || 'shift',
         default_demoforge_template_id: editData.default_demoforge_template_id || null,
       })
@@ -349,6 +403,65 @@ export default function CampaignBuilderPage() {
       setBusy(null)
     }
   }
+
+  const renderChannelMixEditor = (
+    mix: Record<string, { daily: number }>,
+    onChange: (next: Record<string, { daily: number }>) => void,
+  ) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      <label style={{ fontSize: '0.875rem', fontWeight: 500, display: 'block' }}>
+        Channel mix
+      </label>
+      <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--nx-text-4)' }}>
+        Timeline AI only plans channels you enable here. Launch generates a piece for each day&apos;s
+        primary channel and its secondary channels.
+      </p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '0.5rem' }}>
+        {CAMPAIGN_CHANNELS.map((ch) => {
+          const enabled = ch.id in mix
+          return (
+            <label
+              key={ch.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                border: '1px solid var(--nx-border)',
+                borderRadius: '0.25rem',
+                padding: '0.5rem 0.65rem',
+                fontSize: '0.85rem',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => onChange(toggleChannelMix(mix, ch.id, e.target.checked))}
+              />
+              <span style={{ flex: 1 }}>{ch.label}</span>
+              <input
+                type="number"
+                min={1}
+                disabled={!enabled}
+                value={enabled ? mix[ch.id].daily : ''}
+                onChange={(e) => onChange(setChannelDaily(mix, ch.id, parseInt(e.target.value, 10)))}
+                title="Daily target"
+                style={{
+                  width: '3rem',
+                  padding: '0.25rem',
+                  border: '1px solid var(--nx-border)',
+                  borderRadius: '0.25rem',
+                  fontFamily: 'inherit',
+                  background: enabled ? 'transparent' : 'var(--nx-bg-2, transparent)',
+                  color: 'inherit',
+                  opacity: enabled ? 1 : 0.4,
+                }}
+              />
+            </label>
+          )
+        })}
+      </div>
+    </div>
+  )
 
   const addPillar = () =>
     setEditData((prev) => ({
@@ -542,6 +655,10 @@ export default function CampaignBuilderPage() {
               />
             </div>
 
+            {renderChannelMixEditor(formData.channel_mix, (channel_mix) =>
+              setFormData({ ...formData, channel_mix }),
+            )}
+
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
               <Button
                 label="Cancel"
@@ -552,7 +669,7 @@ export default function CampaignBuilderPage() {
                 label="Create Campaign"
                 variant="primary"
                 onClick={handleCreateCampaign}
-                disabled={!formData.name}
+                disabled={!formData.name || !Object.keys(formData.channel_mix).length}
               />
             </div>
           </div>
@@ -675,6 +792,10 @@ export default function CampaignBuilderPage() {
                 </div>
               </div>
 
+              {renderChannelMixEditor(editData.channel_mix, (channel_mix) =>
+                setEditData({ ...editData, channel_mix }),
+              )}
+
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                   <label style={{ ...labelStyle, marginBottom: 0 }}>Messaging Pillars</label>
@@ -780,11 +901,17 @@ export default function CampaignBuilderPage() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
                         <div>
-                          <label style={labelStyle}>Channel</label>
+                          <label style={labelStyle}>Primary channel</label>
                           <select
                             style={inputStyle}
                             value={day.primary_channel}
-                            onChange={(e) => updateDayLocal(day.day_number, { primary_channel: e.target.value })}
+                            onChange={(e) => {
+                              const primary_channel = e.target.value
+                              const secondary_channels = (day.secondary_channels || []).filter(
+                                (ch) => ch !== primary_channel,
+                              )
+                              updateDayLocal(day.day_number, { primary_channel, secondary_channels })
+                            }}
                           >
                             {CAMPAIGN_CHANNELS.map((ch) => (
                               <option key={ch.id} value={ch.id}>{ch.label}</option>
@@ -815,6 +942,32 @@ export default function CampaignBuilderPage() {
                               <option key={p.id} value={p.id}>{p.name}</option>
                             ))}
                           </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Secondary channels (cross-post)</label>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          {CAMPAIGN_CHANNELS.filter((ch) => ch.id !== day.primary_channel).map((ch) => {
+                            const checked = (day.secondary_channels || []).includes(ch.id)
+                            return (
+                              <label
+                                key={ch.id}
+                                style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem' }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) => {
+                                    const secondary_channels = e.target.checked
+                                      ? [...(day.secondary_channels || []), ch.id]
+                                      : (day.secondary_channels || []).filter((id) => id !== ch.id)
+                                    updateDayLocal(day.day_number, { secondary_channels })
+                                  }}
+                                />
+                                {ch.label}
+                              </label>
+                            )
+                          })}
                         </div>
                       </div>
                       <div>
