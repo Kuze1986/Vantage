@@ -1,10 +1,10 @@
 {
   "id": "shift-queue-reel",
   "name": "The Shift — Adaptive Queue Reel",
-  "tagline": "One session mixing MCQ, mini-games, and a boss fight — zero manual setup.",
+  "tagline": "One session mixing every current Queue mode — ending on The Sweep schematic.",
   "audience": "PTCB students · pharmacy educators · social media · product demos",
   "format": "tiktok",
-  "estimatedSec": 150,
+  "estimatedSec": 180,
   "estimatedSecNote": "Actual duration is driven by ElevenLabs per-line synthesis in DemoForge",
   "baseUrlPlaceholder": "{BASE}",
   "defaultBaseUrl": "https://theshift.bioloopnexus.com",
@@ -19,7 +19,7 @@
       "action": "scroll",
       "selector": "",
       "ms": 1800,
-      "narration": "Eight game modes staged in one run. Blueprints, Drop, Minefield, Field Work, Boss fights — mixed automatically."
+      "narration": "Seven live modes in one deploy — MCQ, Streak, Blueprints, Matrix, Minefield, Polarity, Drop — then The Sweep as the prestige closer."
     },
     {
       "action": "run",
@@ -31,37 +31,55 @@
       "action": "run",
       "selector": "window.__shiftDemoPlay.playQueueMission()",
       "ms": 2000,
-      "narration": "Deploy — and the first mission is straight recall. Quick hit, baseline check."
-    },
-    {
-      "action": "run",
-      "selector": "window.__shiftDemoPlay.playQueueMission()",
-      "ms": 2200,
-      "narration": "Next slot switches to Blueprints — a full procedure builder, inline, no loading a separate screen."
+      "narration": "Deploy — first mission is straight MCQ. Quick hit, baseline recall."
     },
     {
       "action": "run",
       "selector": "window.__shiftDemoPlay.playQueueMission()",
       "ms": 2000,
-      "narration": "The Drop — same queue, different mechanic. React before the term fades."
+      "narration": "Streak Run — keep the multiplier climbing. Miss and it resets."
     },
     {
       "action": "run",
       "selector": "window.__shiftDemoPlay.playQueueMission()",
       "ms": 2200,
-      "narration": "Boss Fight — the full phased encounter. Radar, HP bars, intercept or clear under pressure."
+      "narration": "Blueprints — rebuild a real procedure step by step. One wrong pick drains stability."
     },
     {
       "action": "run",
       "selector": "window.__shiftDemoPlay.playQueueMission()",
       "ms": 2400,
-      "narration": "The Minefield drops in — breach the grid, defuse one cell at a time."
+      "narration": "The Matrix — structure the setup. Place every fact where it belongs before you lock the answer."
     },
     {
       "action": "run",
       "selector": "window.__shiftDemoPlay.playQueueMission()",
-      "ms": 2800,
-      "narration": "Field Work closes the run — classified dossier, real decision, tribunal ruling. Eight modes, one session, zero setup. That's why the Queue works."
+      "ms": 2400,
+      "narration": "Minefield — breach the grid one cell at a time. Wrong cell, detonation."
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playQueueMission()",
+      "ms": 2400,
+      "narration": "Polarity — secure the network node by node. Resolve the volley or the link drops."
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playQueueMission()",
+      "ms": 2200,
+      "narration": "The Drop — react before the term fades. Same queue, higher pressure."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/PreTrip",
+      "ms": 800,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.showSweepDiagram()",
+      "ms": 3200,
+      "narration": "And The Sweep — the prestige schematic. Zone by zone, flag the defects. That's the Queue: every mode, one session, zero setup."
     }
   ]
 }
