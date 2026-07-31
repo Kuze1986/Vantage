@@ -128,28 +128,67 @@ async function executeStep(
       if (step.selector?.trim()) {
         const expr = step.selector.trim();
         if (expr.includes("__shiftDemoPlay")) {
-          await page.waitForFunction(
-            () => typeof (window as unknown as { __shiftDemoPlay?: unknown }).__shiftDemoPlay === "object",
-            { timeout: 20_000 },
-          ).catch(() => undefined);
-        }
-        await page.evaluate(async (code) => {
-          // Demo script snippets come from trusted portfolio templates only.
-          // eslint-disable-next-line no-eval
-          const result = eval(code);
-          if (result != null && typeof (result as Promise<unknown>).then === "function") {
-            await result;
+          // Wait for the specific helper (e.g. playDossierRound), not just the object —
+          // production Shift only exposes handlers when auth-bypass / DEMO_RECORDING is on.
+          const methodMatch = /__shiftDemoPlay\.([a-zA-Z0-9_]+)/.exec(expr);
+          const method = methodMatch?.[1];
+          const ready = await page.waitForFunction(
+            (name) => {
+              const api = (window as unknown as { __shiftDemoPlay?: Record<string, unknown> }).__shiftDemoPlay;
+              if (!api || typeof api !== "object") return false;
+              return !name || typeof api[name] === "function";
+            },
+            method ?? "",
+            { timeout: 25_000 },
+          ).then(() => true).catch(() => false);
+          if (!ready) {
+            const path = page.url();
+            console.warn(
+              `[demoforge] run skipped — __shiftDemoPlay${method ? `.${method}` : ""} not available at ${path}. ` +
+                "Likely stuck on login or Shift production missing demo-recording/auth-bypass exposure.",
+            );
+            if (step.ms) await page.waitForTimeout(step.ms);
+            break;
           }
-        }, expr);
+        }
+        try {
+          await page.evaluate(async (code) => {
+            // Demo script snippets come from trusted portfolio templates only.
+            // eslint-disable-next-line no-eval
+            const result = eval(code);
+            if (result != null && typeof (result as Promise<unknown>).then === "function") {
+              await result;
+            }
+          }, expr);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(`[demoforge] run step failed (continuing): ${msg.slice(0, 300)}`);
+        }
       }
       if (step.ms) await page.waitForTimeout(step.ms);
       break;
-    case "navigate":
+    case "navigate": {
       // URL is stored in selector (as set by DemoForgePage.tsx); fall back to text
-      await page.goto(step.selector ?? step.text ?? "", { waitUntil: "domcontentloaded", timeout: 15_000 });
+      const target = step.selector ?? step.text ?? "";
+      await page.goto(target, { waitUntil: "domcontentloaded", timeout: 15_000 });
       await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => undefined);
+      // Live Shift requires auth. DemoForge sets sessionStorage bypass via eval/init scripts;
+      // if we still landed on /login, re-assert and retry once.
+      if (/\/login(?:[/?#]|$)/i.test(page.url()) && target) {
+        await page.evaluate(() => {
+          try {
+            sessionStorage.setItem("the_shift_auth_bypass_mode", "admin");
+          } catch { /* ignore */ }
+        });
+        await page.goto(target, { waitUntil: "domcontentloaded", timeout: 15_000 });
+        await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => undefined);
+        if (/\/login(?:[/?#]|$)/i.test(page.url())) {
+          console.warn(`[demoforge] still on login after auth-bypass retry: ${page.url()}`);
+        }
+      }
       if (step.ms) await page.waitForTimeout(step.ms);
       break;
+    }
     case "click":
       if (step.selector) {
         // Wait for the element to appear (handles async-rendered content) before clicking
