@@ -70,10 +70,25 @@ async function recordBrowser(
   const videoPath = join(workDir, "screen.webm");
 
   const browser = await chromium.launch({ headless: true });
+  // Record at the full platform size (e.g. 1080×1920 for TikTok). Previously height was
+  // clamped to 1080, then FFmpeg padded to 9:16 — leaving huge black bars around a square.
   const context = await browser.newContext({
-    viewport: { width: dims.width, height: Math.min(dims.height, 1080) },
-    recordVideo: { dir: workDir, size: { width: dims.width, height: Math.min(dims.height, 1080) } },
+    viewport: { width: dims.width, height: dims.height },
+    recordVideo: { dir: workDir, size: { width: dims.width, height: dims.height } },
+    colorScheme: "dark",
+    // Match Shift's dark canvas so about:blank / early paint isn't a white flash.
+    deviceScaleFactor: 1,
   });
+  // Paint dark backgrounds as soon as any document is created (covers FOUC before CSS).
+  await context.addInitScript(`(function(){
+    try {
+      var s = document.createElement('style');
+      s.textContent = 'html,body{background:#070b14!important;color-scheme:dark}';
+      (document.head || document.documentElement).appendChild(s);
+      if (document.documentElement) document.documentElement.style.background = '#070b14';
+      if (document.body) document.body.style.background = '#070b14';
+    } catch (e) {}
+  })()`);
   // Any "eval" steps that set sessionStorage/localStorage need to run before
   // React mounts on each navigation, not just once via page.evaluate().
   // addInitScript registers a snippet that fires at document creation time on
@@ -87,6 +102,15 @@ async function recordBrowser(
   const page = await context.newPage();
 
   try {
+    // Replace Playwright's default white about:blank with a dark frame before the script runs.
+    await page.setContent(
+      `<!DOCTYPE html><html><head><style>
+        html,body{margin:0;width:100%;height:100%;background:#070b14;color-scheme:dark}
+      </style></head><body></body></html>`,
+      { waitUntil: "domcontentloaded" },
+    );
+    await page.waitForTimeout(250);
+
     for (const step of job.input_payload.script) {
       await executeStep(page, step);
     }
@@ -186,6 +210,13 @@ async function executeStep(
           console.warn(`[demoforge] still on login after auth-bypass retry: ${page.url()}`);
         }
       }
+      // Settle past the initial white/cream paint so the first usable frames are the dark UI.
+      await page.waitForFunction(
+        () => ((document.body?.innerText || "").trim().length > 40),
+        undefined,
+        { timeout: 8_000 },
+      ).catch(() => undefined);
+      await page.waitForTimeout(400);
       if (step.ms) await page.waitForTimeout(step.ms);
       break;
     }

@@ -62,6 +62,14 @@ const colorGradeSchema = z.object({
   preset: z.enum(["clean", "warm", "cinematic", "vibrant", "muted", "cool", "dark"]).optional(),
 }).passthrough();
 
+const timelineConfigSchema = z.object({
+  target_duration_sec: z.number().positive().optional(),
+  trim_start_sec: z.number().nonnegative().optional(),
+  trim_end_sec: z.number().nonnegative().optional(),
+  global_speed_multiplier: z.number().min(0.5).max(2).optional(),
+  per_step_speed: z.boolean().optional(),
+}).passthrough();
+
 const jobSchema = z.object({
   workspace_id:     z.string().uuid(),
   content_piece_id: z.string().uuid().optional(),
@@ -72,6 +80,7 @@ const jobSchema = z.object({
   voice_id:         z.string().optional(),
   caption_config:   captionConfigSchema.optional(),
   color_grade:      colorGradeSchema.optional(),
+  timeline_config:  timelineConfigSchema.optional(),
 });
 
 // ── POST /jobs — submit a new video job ───────────────────────────────────────
@@ -84,7 +93,7 @@ app.post("/jobs", async (c) => {
 
   const {
     workspace_id, content_piece_id, target_format, url, script,
-    music_track_id, voice_id, caption_config, color_grade,
+    music_track_id, voice_id, caption_config, color_grade, timeline_config,
   } = parsed.data;
 
   const jobId = randomUUID();
@@ -97,6 +106,7 @@ app.post("/jobs", async (c) => {
     voice_id,
     ...(caption_config ? { caption_config } : {}),
     ...(color_grade ? { color_grade } : {}),
+    ...(timeline_config ? { timeline_config } : {}),
   };
 
   // Persist job record

@@ -54,6 +54,13 @@ export interface DemoForgeJobPayload {
   script: DemoForgeScriptStep[];
   caption_config?: { enabled: boolean };
   color_grade?: { preset: string };
+  /** Passed through to DemoForge mix — used to drop blank/white lead-in frames. */
+  timeline_config?: {
+    trim_start_sec?: number;
+    trim_end_sec?: number;
+    target_duration_sec?: number;
+    global_speed_multiplier?: number;
+  };
 }
 
 /** Channel → default template id (Shift seeds) for demo_video. */
@@ -239,5 +246,7 @@ export function buildDemoForgePayload(
     script,
     ...(opts?.captions !== false ? { caption_config: { enabled: true } } : {}),
     ...(opts?.colorPreset ? { color_grade: { preset: opts.colorPreset } } : {}),
+    // Drop the short lead-in (about:blank → first paint) so Queue previews don't open on white.
+    timeline_config: { trim_start_sec: 0.75 },
   };
 }

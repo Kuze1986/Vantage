@@ -596,9 +596,12 @@ all applied in post-processing by FFmpeg before upload.
 1. **Timeline pre-pass** — if `timeline_config.target_duration_sec` is set, all script step
    `ms` values are scaled proportionally so the recording hits the target length before
    Playwright is invoked.
-2. **Record** — Playwright launches a headless Chromium browser at the target URL,
-   executes script steps (navigate / click / fill / wait / scroll / narrate), and
-   records the session as a WebM video.
+2. **Record** — Playwright launches a headless Chromium browser at the **full platform
+   viewport** (TikTok/Instagram `1080×1920`, LinkedIn `1920×1080` — not a 1080-tall clamp
+   that later letterboxes into 9:16). Recording starts on a dark pre-roll frame
+   (`colorScheme: dark` + dark `about:blank` replacement + init CSS) so Queue previews
+   do not open on a white flash. Script steps then run (navigate / click / fill / wait /
+   scroll / narrate); navigates settle until body content is present before continuing.
 3. **Synthesize** — a pluggable `TtsProvider` (see below) converts all `narration` fields
    into audio + per-word timing data. Word timings feed the auto-caption generator.
    Provider is selectable per job (`tts_provider`) or via `DEMOFORGE_TTS_PROVIDER`
@@ -614,10 +617,13 @@ all applied in post-processing by FFmpeg before upload.
    - Caption burn (`subtitles=captions.ass`) if caption file generated.
    - Color grade (`eq` + `colorbalance` preset or custom) if `color_grade` set.
    - Audio mix: narration + background music + sound effects → amix → master volume.
-   - Outputs to platform dimensions:
+   - Outputs to platform dimensions (source already matches when record size = format size;
+     pad is a no-op for correctly sized portrait/landscape jobs):
      - TikTok: 1080×1920 (9:16 portrait)
      - Instagram Reels: 1080×1920 (9:16 portrait)
      - LinkedIn: 1920×1080 (16:9 landscape)
+   - Campaign / template payloads set `timeline_config.trim_start_sec` (~0.75s) by default
+     to drop residual lead-in; `POST /jobs` accepts `timeline_config` on the job schema.
 6. **Intro/Outro concat** — if `intro_clip_id` or `outro_clip_id` set, clips are downloaded
    from storage, normalized to match the main video's dimensions/codecs, and concatenated
    using FFmpeg `concat` filter.
