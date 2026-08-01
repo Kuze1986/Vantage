@@ -284,8 +284,13 @@ draft → auditing → approved → queued → publishing → published
   retry/rate-limit or advanced to `published`/`failed`. A reaper re-queues pieces stuck here
   (stale `locked_at`) after a crashed worker.
 - **published** — successfully sent to platform; `published_at` and `external_post_id` set
-- **rejected** — failed audit twice in auto-approve, or manually rejected
+- **rejected** — failed audit twice in auto-approve, or manually dismissed from Queue
 - **failed** — publish attempt threw an error / retries exhausted; error stored in `audit_notes`
+
+**Operator remove path:** Queue actions can **Dismiss** (`POST /v1/queue/:id/reject` →
+`status=rejected`, clears schedule/lock) or **Remove** (`DELETE /v1/queue/:id` hard-delete).
+Publishing-in-flight pieces are blocked. Delete also scrubs matching
+`campaign_timeline.published_pieces` JSON refs for that workspace.
 
 The `scheduled_for` field controls when the cadence tick will attempt publishing. It is
 set either by the manual schedule endpoint or automatically by the auto-approve pipeline
@@ -923,6 +928,9 @@ dispatch pieces from this page.
   (`GET /v1/queue/:id/publish-pack`). Shown for all statuses on manual channels; warns when
   media is not ready.
 - **Manual channels** — paste post URL → mark published after manual upload
+- **Dismiss** — soft-reject (`POST /v1/queue/:id/reject`); piece moves to Rejected and will
+  not publish
+- **Remove** — permanently delete (`DELETE /v1/queue/:id`); blocked while `publishing`
 - **Bulk** — multi-select → schedule / force schedule / audit selected
 
 **Per-piece display:**
@@ -934,8 +942,8 @@ dispatch pieces from this page.
   hook, script, on-screen text, hashtags, and upload instructions. One-click copy-to-clipboard.
 
 **Files:**
-- `apps/web/src/pages/QueuePage.tsx` — Publish Pack modal + manual Mark Published
-- `apps/api/src/routes/queue.ts` — `GET /v1/queue`, publish-pack, bulk-schedule, calendar filter
+- `apps/web/src/pages/QueuePage.tsx` — Publish Pack modal, Dismiss/Remove, manual Mark Published
+- `apps/api/src/routes/queue.ts` — `GET /v1/queue`, publish-pack, reject, delete, calendar
 - `apps/api/src/lib/publish-pack.ts` — pack builder (reuses channel adapters)
 
 ---

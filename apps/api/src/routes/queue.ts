@@ -3,8 +3,54 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { buildPublishPack, MANUAL_PUBLISH_CHANNELS } from "../lib/publish-pack.js";
+import { logActivity } from "../lib/activity.js";
 
 export const queueRoutes = new Hono();
+
+const REMOVABLE_STATUSES = new Set([
+  "draft",
+  "auditing",
+  "approved",
+  "rejected",
+  "queued",
+  "failed",
+  "published",
+]);
+
+/** Best-effort scrub of campaign timeline JSON refs after a piece is deleted. */
+async function scrubCampaignPublishedPieces(
+  sb: ReturnType<typeof getSupabaseAdmin>,
+  workspaceId: string,
+  pieceId: string,
+): Promise<void> {
+  const { data: campaigns } = await sb
+    .from("campaigns")
+    .select("id")
+    .eq("workspace_id", workspaceId);
+  if (!campaigns?.length) return;
+
+  const { data: days } = await sb
+    .from("campaign_timeline")
+    .select("id, published_pieces")
+    .in(
+      "campaign_id",
+      campaigns.map((c) => c.id),
+    );
+  if (!days?.length) return;
+
+  for (const day of days) {
+    const pubs = Array.isArray(day.published_pieces) ? day.published_pieces : [];
+    const next = pubs.filter(
+      (p) =>
+        !(p && typeof p === "object" && (p as { content_piece_id?: string }).content_piece_id === pieceId),
+    );
+    if (next.length === pubs.length) continue;
+    await sb
+      .from("campaign_timeline")
+      .update({ published_pieces: next, updated_at: new Date().toISOString() })
+      .eq("id", day.id);
+  }
+}
 
 // 3B-2: Calendar endpoint — pieces with scheduled_for in a date range
 queueRoutes.get("/calendar", async (c) => {
@@ -169,4 +215,112 @@ queueRoutes.post("/:id/retry", async (c) => {
   if (error) throw new HTTPException(500, { message: error.message });
 
   return c.json({ ok: true });
+});
+
+// POST /v1/queue/:id/reject — soft-dismiss (keep row, hide from publish path)
+queueRoutes.post("/:id/reject", async (c) => {
+  const id = c.req.param("id");
+  const ws = c.get("workspaceId");
+  const sb = getSupabaseAdmin();
+  const json = await c.req.json().catch(() => ({}));
+  const reason =
+    typeof (json as { reason?: unknown }).reason === "string"
+      ? String((json as { reason: string }).reason).slice(0, 500)
+      : "Manually dismissed from Queue";
+
+  const { data: piece, error: loadErr } = await sb
+    .from("content_pieces")
+    .select("id, status, audit_notes")
+    .eq("workspace_id", ws)
+    .eq("id", id)
+    .single();
+  if (loadErr || !piece) throw new HTTPException(404, { message: "Not found" });
+  if (piece.status === "publishing") {
+    throw new HTTPException(409, { message: "Cannot dismiss a piece that is currently publishing" });
+  }
+  if (piece.status === "rejected") {
+    return c.json({ ok: true, status: "rejected" });
+  }
+  if (!REMOVABLE_STATUSES.has(piece.status)) {
+    throw new HTTPException(400, {
+      message: `Cannot dismiss piece with status '${piece.status}'`,
+    });
+  }
+
+  const notes = [piece.audit_notes, `[dismissed] ${reason}`].filter(Boolean).join("\n").slice(0, 1000);
+  const { error } = await sb
+    .from("content_pieces")
+    .update({
+      status: "rejected",
+      scheduled_for: null,
+      locked_at: null,
+      audit_notes: notes,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("workspace_id", ws)
+    .eq("id", id);
+  if (error) throw new HTTPException(500, { message: error.message });
+
+  await logActivity({
+    source: "queue",
+    source_type: "adapter",
+    event_type: "piece_dismissed",
+    summary: `Dismissed content piece ${id}`,
+    payload: { content_piece_id: id, previous_status: piece.status },
+    workspace_id: ws,
+  });
+
+  return c.json({ ok: true, status: "rejected" });
+});
+
+// DELETE /v1/queue/:id — permanently remove a piece the operator does not want
+queueRoutes.delete("/:id", async (c) => {
+  const id = c.req.param("id");
+  const ws = c.get("workspaceId");
+  const sb = getSupabaseAdmin();
+
+  const { data: piece, error: loadErr } = await sb
+    .from("content_pieces")
+    .select("id, status, channel_slug")
+    .eq("workspace_id", ws)
+    .eq("id", id)
+    .single();
+  if (loadErr || !piece) throw new HTTPException(404, { message: "Not found" });
+  if (piece.status === "publishing") {
+    throw new HTTPException(409, {
+      message: "Cannot delete a piece that is currently publishing — wait for it to finish or fail",
+    });
+  }
+  if (!REMOVABLE_STATUSES.has(piece.status)) {
+    throw new HTTPException(400, {
+      message: `Cannot delete piece with status '${piece.status}'`,
+    });
+  }
+
+  const { error } = await sb
+    .from("content_pieces")
+    .delete()
+    .eq("workspace_id", ws)
+    .eq("id", id);
+  if (error) throw new HTTPException(500, { message: error.message });
+
+  try {
+    await scrubCampaignPublishedPieces(sb, ws, id);
+  } catch (scrubErr) {
+    console.warn(
+      `[queue] campaign scrub failed for ${id}:`,
+      scrubErr instanceof Error ? scrubErr.message : scrubErr,
+    );
+  }
+
+  await logActivity({
+    source: "queue",
+    source_type: "adapter",
+    event_type: "piece_deleted",
+    summary: `Deleted content piece ${id} (${piece.channel_slug})`,
+    payload: { content_piece_id: id, previous_status: piece.status, channel: piece.channel_slug },
+    workspace_id: ws,
+  });
+
+  return c.json({ ok: true, deleted: id });
 });

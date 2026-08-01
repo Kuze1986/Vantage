@@ -196,6 +196,17 @@ export const vantageApi = {
   retryPiece: (id: string) =>
     vantageFetch(`/v1/queue/${id}/retry`, { method: "POST" }) as Promise<{ ok: boolean }>,
 
+  /** Soft-dismiss — status → rejected (still visible on Rejected tab). */
+  rejectPiece: (id: string, reason?: string) =>
+    vantageFetch(`/v1/queue/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {}),
+    }) as Promise<{ ok: boolean; status: string }>,
+
+  /** Permanently delete a piece from the queue. */
+  deletePiece: (id: string) =>
+    vantageFetch(`/v1/queue/${id}`, { method: "DELETE" }) as Promise<{ ok: boolean; deleted: string }>,
+
   // ── Dashboard ─────────────────────────────────────────────────────────────
   dashboardOverview: () =>
     vantageFetch("/v1/dashboard/overview") as Promise<DashboardOverview>,

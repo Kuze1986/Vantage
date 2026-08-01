@@ -560,6 +560,40 @@ export function QueuePage() {
             )}
           </div>
         )}
+        {p.status !== 'publishing' && p.status !== 'rejected' && (
+          <button
+            type="button"
+            className="nx-btn nx-btn--ghost nx-btn--sm"
+            disabled={busy === p.id}
+            onClick={() => {
+              if (!confirm('Dismiss this piece? It will move to Rejected and will not be published.')) return
+              setBusy(p.id)
+              void action(() => vantageApi.rejectPiece(p.id), 'Dismissed').finally(() => setBusy(null))
+            }}
+            title="Mark as rejected — keeps a record on the Rejected tab"
+          >
+            Dismiss
+          </button>
+        )}
+        {p.status !== 'publishing' && (
+          <button
+            type="button"
+            className="nx-btn nx-btn--ghost nx-btn--sm"
+            disabled={busy === p.id}
+            onClick={() => {
+              const publishedNote = p.status === 'published'
+                ? ' This was already published on the platform — only the Vantage copy is deleted.'
+                : ''
+              if (!confirm(`Permanently delete this piece?${publishedNote}`)) return
+              setBusy(p.id)
+              void action(() => vantageApi.deletePiece(p.id), 'Deleted').finally(() => setBusy(null))
+            }}
+            title="Permanently remove this piece from the queue"
+            style={{ color: 'var(--nx-danger, #f87171)' }}
+          >
+            {busy === p.id ? '…' : 'Remove'}
+          </button>
+        )}
       </div>
     ),
   }))
