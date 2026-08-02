@@ -4,6 +4,8 @@ import { z } from "zod";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { buildPublishPack, MANUAL_PUBLISH_CHANNELS } from "../lib/publish-pack.js";
 import { logActivity } from "../lib/activity.js";
+import { scheduleContentPiece } from "../services/scheduler.js";
+import { maybeAutoQueuePiece } from "../lib/auto-queue.js";
 
 export const queueRoutes = new Hono();
 
@@ -58,20 +60,84 @@ queueRoutes.get("/calendar", async (c) => {
   const sb   = getSupabaseAdmin();
   const from = c.req.query("from"); // ISO date string
   const to   = c.req.query("to");   // ISO date string
+  const campaignId = c.req.query("campaign_id");
   if (!from || !to) return c.json({ error: "from and to query params are required" }, 400);
+
+  // Without campaign filter, skip the topics join
+  if (!campaignId) {
+    const { data, error } = await sb
+      .from("content_pieces")
+      .select("id, status, channel_slug, format, content_payload, scheduled_for, published_at")
+      .eq("workspace_id", ws)
+      .in("status", ["queued", "published"])
+      .gte("scheduled_for", from)
+      .lte("scheduled_for", to)
+      .order("scheduled_for", { ascending: true })
+      .limit(500);
+    if (error) return c.json({ error: error.message }, 500);
+    return c.json({ pieces: data ?? [] });
+  }
 
   const { data, error } = await sb
     .from("content_pieces")
-    .select("id, status, channel_slug, format, content_payload, scheduled_for, published_at")
+    .select("id, status, channel_slug, format, content_payload, scheduled_for, published_at, topic_id, topics!inner(source_ref, context_payload, source_product)")
     .eq("workspace_id", ws)
-    .in("status", ["queued", "published"])
+    .in("status", ["queued", "published", "approved"])
     .gte("scheduled_for", from)
     .lte("scheduled_for", to)
     .order("scheduled_for", { ascending: true })
     .limit(500);
-
   if (error) return c.json({ error: error.message }, 500);
-  return c.json({ pieces: data ?? [] });
+
+  type TopicJoin = { source_ref?: string; source_product?: string; context_payload?: unknown };
+  const pieces = (data ?? [])
+    .filter((row) => {
+      const topics = (row as { topics?: TopicJoin | TopicJoin[] }).topics;
+      const t = Array.isArray(topics) ? topics[0] : topics;
+      if (!t) return false;
+      if (t.source_product === "campaign" && t.source_ref === campaignId) return true;
+      const ctx = t.context_payload;
+      return (
+        ctx &&
+        typeof ctx === "object" &&
+        !Array.isArray(ctx) &&
+        (ctx as { campaign_id?: string }).campaign_id === campaignId
+      );
+    })
+    .map((row) => {
+      const { topics: _t, topic_id: _tid, ...rest } = row as Record<string, unknown>;
+      return rest;
+    });
+
+  return c.json({ pieces });
+});
+
+// POST /v1/queue/bulk-schedule — schedule many approved pieces at once
+queueRoutes.post("/bulk-schedule", async (c) => {
+  const ws = c.get("workspaceId");
+  const json = await c.req.json().catch(() => ({}));
+  const schema = z.object({
+    content_piece_ids: z.array(z.string().uuid()).min(1).max(100),
+    scheduled_for: z.string().optional(),
+    force: z.boolean().optional(),
+  });
+  const parsed = schema.safeParse(json);
+  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+
+  const results: { id: string; ok: boolean; error?: string }[] = [];
+  for (const id of parsed.data.content_piece_ids) {
+    try {
+      await scheduleContentPiece(ws, id, parsed.data.scheduled_for, { force: parsed.data.force });
+      results.push({ id, ok: true });
+    } catch (e) {
+      results.push({ id, ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return c.json({
+    ok: results.every((r) => r.ok),
+    scheduled: results.filter((r) => r.ok).length,
+    results,
+  });
 });
 
 queueRoutes.get("/", async (c) => {
@@ -105,7 +171,7 @@ queueRoutes.patch("/:id", async (c) => {
   const sb = getSupabaseAdmin();
   const { data: piece, error: loadErr } = await sb
     .from("content_pieces")
-    .select("id, content_payload, image_url, video_url, media_status")
+    .select("id, content_payload, image_url, video_url, media_status, status, scheduled_for")
     .eq("workspace_id", ws)
     .eq("id", id)
     .single();
@@ -143,10 +209,22 @@ queueRoutes.patch("/:id", async (c) => {
     })
     .eq("workspace_id", ws)
     .eq("id", id)
-    .select("id, image_url, video_url, media_status, content_payload")
+    .select("id, image_url, video_url, media_status, content_payload, status, scheduled_for")
     .single();
   if (error) throw new HTTPException(500, { message: error.message });
-  return c.json({ piece: updated });
+
+  // Autopilot: operator marking media ready can auto-queue campaign pieces
+  if (mediaStatus === "ready" || mediaStatus === "none") {
+    await maybeAutoQueuePiece(ws, id);
+  }
+
+  const { data: refreshed } = await sb
+    .from("content_pieces")
+    .select("id, image_url, video_url, media_status, content_payload, status")
+    .eq("id", id)
+    .single();
+
+  return c.json({ piece: refreshed ?? updated });
 });
 
 // GET /v1/queue/:id/publish-pack — one-click export for TikTok / Instagram / Facebook

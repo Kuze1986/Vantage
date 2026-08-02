@@ -3,8 +3,25 @@ import { z } from "zod";
 import { listNextTopics, refreshAllSources } from "../services/source.js";
 import { refreshTopicsFromPulse } from "../services/pulse.js";
 import { getSupabaseAdmin } from "../lib/supabase.js";
+import { listShiftPacks, getShiftPack } from "../lib/shift-packs.js";
 
 export const sourceRoutes = new Hono();
+
+// GET /v1/source/shift-packs — list curated Shift packs (same catalog as campaigns meta)
+sourceRoutes.get("/shift-packs", async (c) => {
+  return c.json({ packs: listShiftPacks() });
+});
+
+// POST /v1/source/shift-packs — inspect a pack (seed intake preview)
+sourceRoutes.post("/shift-packs", async (c) => {
+  const json = await c.req.json().catch(() => ({}));
+  const packId = typeof (json as { pack_id?: string }).pack_id === "string"
+    ? (json as { pack_id: string }).pack_id
+    : "";
+  const pack = getShiftPack(packId);
+  if (!pack) return c.json({ error: `Unknown pack: ${packId}` }, 404);
+  return c.json({ pack });
+});
 
 sourceRoutes.get("/topics", async (c) => {
   const ws = c.get("workspaceId");

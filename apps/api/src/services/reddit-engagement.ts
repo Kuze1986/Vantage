@@ -14,6 +14,8 @@
 
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
+import { recordGrowthEvent, engagementKind } from "../lib/growth.js";
+import { recordCampaignEngagement } from "../lib/campaign-kpi.js";
 
 const REDDIT_BY_ID = "https://www.reddit.com/by_id";
 const USER_AGENT   = "vantage-marketing-bot/1.0";
@@ -130,6 +132,29 @@ export async function pollRedditEngagement(workspaceId: string): Promise<{ polle
         console.warn("[reddit-engagement] insert error:", insErr.message);
       } else if (!insErr) {
         totalInserted += 2;
+        if (contentPieceId) {
+          await recordCampaignEngagement({
+            contentPieceId,
+            channel: "reddit",
+            eventType: "reddit_score",
+          });
+          await recordCampaignEngagement({
+            contentPieceId,
+            channel: "reddit",
+            eventType: "reddit_comment_count",
+          });
+          await recordGrowthEvent({
+            loop: "acquisition",
+            kind: engagementKind("reddit_score"),
+            channel: "reddit",
+            meta: {
+              event_type: "reddit_score",
+              content_piece_id: contentPieceId,
+              workspace_id: workspaceId,
+              polled: true,
+            },
+          });
+        }
       }
     }
   }

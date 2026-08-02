@@ -39,6 +39,8 @@ export async function recordGrowthEvent(e: GrowthEventInput): Promise<void> {
     if (error) throw new Error(error.message);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // Surface in Railway logs — activity_events alone is easy to miss.
+    console.warn(`[growth] record failed loop=${e.loop} kind=${e.kind}:`, msg);
     await logActivity({
       source: "growth-os",
       source_type: "system",

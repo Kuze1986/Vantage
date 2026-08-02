@@ -84,6 +84,21 @@ const STATUS_VARIANTS: Record<string, 'active' | 'pending' | 'critical' | 'new' 
   paused: 'new',
 }
 
+/** Nexus Design CampaignsView status chrome (mapped to product statuses). */
+const STATUS_HUD: Record<string, { label: string; tone: string }> = {
+  active: { label: 'AUTOPILOT', tone: 'var(--nx-green, #00E47A)' },
+  draft: { label: 'NEEDS REVIEW', tone: 'var(--nx-amber, #EFA020)' },
+  paused: { label: 'PAUSED', tone: 'var(--nx-text-2)' },
+  completed: { label: 'COMPLETE', tone: 'var(--nx-cyan, #00C4E8)' },
+}
+
+type ShiftPackMeta = {
+  id: string
+  name: string
+  description: string
+  items: { id: string; title: string; outline: string; visual_type: string }[]
+}
+
 export default function CampaignBuilderPage() {
   const [view, setView] = useState<ViewState>('list')
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
@@ -129,6 +144,8 @@ export default function CampaignBuilderPage() {
   })
   const [launchInfo, setLaunchInfo] = useState<string | null>(null)
   const [templates, setTemplates] = useState<DemoForgeTemplateMeta[]>([])
+  const [shiftPacks, setShiftPacks] = useState<ShiftPackMeta[]>([])
+  const [selectedPackId, setSelectedPackId] = useState('')
 
   useEffect(() => {
     fetchCampaigns()
@@ -139,6 +156,12 @@ export default function CampaignBuilderPage() {
         { id: 'shift-ube-university-demo', name: 'The Shift — UBE University Demo', format: 'linkedin' },
         { id: 'shift-queue-reel', name: 'The Shift — Adaptive Queue Reel', format: 'tiktok' },
       ]))
+    void vantageApi.listShiftPacks()
+      .then((res) => {
+        setShiftPacks(res.packs || [])
+        if (res.packs?.[0]) setSelectedPackId(res.packs[0].id)
+      })
+      .catch(() => setShiftPacks([]))
   }, [])
 
   const fetchCampaigns = async () => {
@@ -263,13 +286,26 @@ export default function CampaignBuilderPage() {
       alert('Generate a timeline before launching.')
       return
     }
-    if (!confirm(`Generate content for all ${timeline.length} timeline day(s)? Pieces are created as approved drafts for you to review on the Queue page before they post.`)) return
+    const channelEstimate = timeline.reduce((n, day) => {
+      const secs = Array.isArray(day.secondary_channels) ? day.secondary_channels.length : 0
+      return n + 1 + secs
+    }, 0)
+    if (!confirm(
+      `Launch autopilot for ${timeline.length} day(s) (~${channelEstimate} pieces)? ` +
+      'Ilita audits each piece; media-ready pieces auto-queue for cadence publish.',
+    )) return
     setBusy('launch')
     setLaunchInfo(null)
     try {
       const res = await vantageApi.launchCampaign(selectedCampaign.id)
+      const failDetail = Array.isArray(res.failures) && res.failures.length
+        ? `\nFailures: ${res.failures.slice(0, 8).map((f: { day_number?: number; channel?: string; error?: string }) =>
+            `day ${(f.day_number ?? 0) + 1}${f.channel ? '/' + f.channel : ''}: ${f.error ?? 'error'}`,
+          ).join('; ')}${res.failures.length > 8 ? '…' : ''}`
+        : ''
       setLaunchInfo(
-        `Created ${res.launched} content piece(s) as approved drafts${res.failed ? `, ${res.failed} failed` : ''}. Review and schedule them on the Queue page.`,
+        `Autopilot launched ${res.launched} piece(s)${res.failed ? `, ${res.failed} failed` : ''}. ` +
+        `Text-only pieces are queued; DemoForge media auto-queues when ready.${failDetail}`,
       )
       await fetchCampaignDetails(selectedCampaign.id)
     } catch (err) {
@@ -340,6 +376,39 @@ export default function CampaignBuilderPage() {
     }
   }
 
+  const pendingMediaCount = timeline.reduce((n, day) => {
+    const pubs = Array.isArray(day.published_pieces) ? day.published_pieces : []
+    return n + pubs.filter((p) => p?.media_status === 'pending' || p?.media_status === 'failed').length
+  }, 0)
+
+  const handleAddPack = async () => {
+    if (!selectedCampaign || !selectedPackId) return
+    setBusy('pack')
+    try {
+      const res = await vantageApi.addCampaignPack(selectedCampaign.id, selectedPackId)
+      setLaunchInfo(`Added ${res.added} pack day(s) to timeline.`)
+      await fetchCampaignDetails(selectedCampaign.id)
+    } catch (err) {
+      alert('Failed to add pack: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleRefillEvergreen = async () => {
+    if (!selectedCampaign) return
+    setBusy('evergreen')
+    try {
+      const res = await vantageApi.refillCampaignEvergreen(selectedCampaign.id)
+      setLaunchInfo(res.message || `Refilled ${res.added} evergreen day(s).`)
+      if (res.added) await fetchCampaignDetails(selectedCampaign.id)
+    } catch (err) {
+      alert('Failed to refill evergreen: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const handleGenerateDay = async (day: TimelineDay) => {
     if (!selectedCampaign) return
     setBusy(`gen-day:${day.day_number}`)
@@ -349,7 +418,7 @@ export default function CampaignBuilderPage() {
       if (res.failed) {
         alert(`Generation failed: ${res.failures[0]?.error ?? 'Unknown error'}`)
       } else {
-        setLaunchInfo(`Generated ${res.launched} piece for day ${day.day_number + 1}. Review it on the Queue page.`)
+        setLaunchInfo(`Generated ${res.launched} piece for day ${day.day_number + 1} (auto-queues when media-ready).`)
       }
       await fetchCampaignDetails(selectedCampaign.id)
     } catch (err) {
@@ -413,8 +482,8 @@ export default function CampaignBuilderPage() {
         Channel mix
       </label>
       <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--nx-text-4)' }}>
-        Timeline AI only plans channels you enable here. Launch generates a piece for each day&apos;s
-        primary channel and its secondary channels.
+        Enabled channels are all cross-posted on every timeline day (primary + secondaries).
+        Launch creates one piece per enabled channel per day — regenerate the timeline after changing this mix.
       </p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '0.5rem' }}>
         {CAMPAIGN_CHANNELS.map((ch) => {
@@ -493,14 +562,22 @@ export default function CampaignBuilderPage() {
 
   if (view === 'list') {
     return (
-      <div style={{ padding: '2rem', maxWidth: '1200px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-          <h1 style={{ fontSize: '2rem', fontWeight: 700 }}>Campaigns</h1>
-          <Button
-            label="+ New Campaign"
-            variant="primary"
-            onClick={() => setView('create')}
-          />
+      <div className="v-page" style={{ padding: 20, maxWidth: 1200, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 }}>
+          <div>
+            <div className="nx-mono" style={{ fontSize: 10, letterSpacing: '0.14em', color: 'var(--nx-text-muted, var(--nx-text-4))', marginBottom: 6 }}>
+              CAMPAIGNS · OBJECTIVES
+            </div>
+            <h1 className="nx-display" style={{ margin: 0, fontSize: 34, letterSpacing: '0.03em', lineHeight: 0.95 }}>
+              CAMPAIGN PORTFOLIO
+            </h1>
+            <p className="nx-mono" style={{ margin: '10px 0 0', fontSize: 11, color: 'var(--nx-text-2)', maxWidth: 520, lineHeight: 1.5 }}>
+              Each campaign carries an objective. Autopilot launches pieces through audit → media → cadence.
+            </p>
+          </div>
+          <button type="button" className="nx-btn nx-btn--primary" style={{ padding: '11px 18px' }} onClick={() => setView('create')}>
+            + NEW CAMPAIGN
+          </button>
         </div>
 
         {campaigns.length === 0 ? (
@@ -508,41 +585,50 @@ export default function CampaignBuilderPage() {
             Create your first campaign to get started with multi-week social media planning.
           </Panel>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {campaigns.map((campaign) => (
-              <Panel
-                key={campaign.id}
-                title={campaign.name}
-                action={{
-                  label: 'Delete',
-                  onClick: () => handleDeleteCampaign(campaign.id),
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ flex: 1 }}>
-                    {campaign.description && (
-                      <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', color: 'var(--nx-text-3)' }}>
-                        {campaign.description}
-                      </p>
-                    )}
-                    <p style={{ margin: '0', fontSize: '0.85rem', color: 'var(--nx-text-4)' }}>
-                      {campaign.start_date} → {campaign.end_date}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {campaigns.map((campaign) => {
+              const hud = STATUS_HUD[campaign.status] || STATUS_HUD.draft
+              const channelCount = campaign.channel_mix ? Object.keys(campaign.channel_mix).length : 0
+              return (
+                <button
+                  key={campaign.id}
+                  type="button"
+                  onClick={() => void handleSelectCampaign(campaign)}
+                  className="nx-panel"
+                  style={{
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    padding: 14,
+                    width: '100%',
+                    display: 'block',
+                    border: '1px solid var(--nx-border)',
+                    background: 'var(--nx-surface, transparent)',
+                    color: 'inherit',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 11 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: hud.tone, boxShadow: `0 0 7px ${hud.tone}` }} />
+                      <span className="nx-mono" style={{ fontSize: 9, letterSpacing: '0.12em', color: hud.tone }}>{hud.label}</span>
+                    </span>
+                    <span className="nx-chip" style={{ fontSize: 8.5, padding: '2px 6px' }}>{channelCount} CH</span>
+                  </div>
+                  <div className="nx-display" style={{ fontSize: 19, letterSpacing: '0.03em', lineHeight: 1 }}>{campaign.name}</div>
+                  {campaign.description && (
+                    <p style={{ margin: '10px 0 0', fontSize: 12, color: 'var(--nx-text-3)', lineHeight: 1.4 }}>
+                      {campaign.description.slice(0, 120)}{campaign.description.length > 120 ? '…' : ''}
                     </p>
+                  )}
+                  <div className="nx-mono" style={{ marginTop: 12, fontSize: 10, color: 'var(--nx-text-4)' }}>
+                    {campaign.start_date} → {campaign.end_date}
                   </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <Badge
-                      label={campaign.status}
-                      variant={STATUS_VARIANTS[campaign.status] || 'default'}
-                    />
-                    <Button
-                      label="Open"
-                      variant="secondary"
-                      onClick={() => handleSelectCampaign(campaign)}
-                    />
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }} onClick={(e) => e.stopPropagation()}>
+                    <button type="button" className="nx-btn nx-btn--ghost nx-btn--sm" onClick={() => void handleSelectCampaign(campaign)}>OPEN</button>
+                    <button type="button" className="nx-btn nx-btn--ghost nx-btn--sm" onClick={() => void handleDeleteCampaign(campaign.id)}>DELETE</button>
                   </div>
-                </div>
-              </Panel>
-            ))}
+                </button>
+              )
+            })}
           </div>
         )}
       </div>
@@ -679,7 +765,11 @@ export default function CampaignBuilderPage() {
   }
 
   if (view === 'details' && selectedCampaign) {
-    const kpiSummary = kpiMetrics.reduce(
+    // Prefer rolled-up `all` rows so per-channel sources aren't double-counted
+    const kpiRows = kpiMetrics.some((m) => (m as { source?: string }).source === 'all')
+      ? kpiMetrics.filter((m) => (m as { source?: string }).source === 'all')
+      : kpiMetrics
+    const kpiSummary = kpiRows.reduce(
       (acc, metric) => ({
         impressions: acc.impressions + (metric.impressions || 0),
         engagements: acc.engagements + (metric.engagements || 0),
@@ -711,37 +801,50 @@ export default function CampaignBuilderPage() {
     }
     const pillars = (selectedCampaign.messaging_pillars || []) as any[]
 
+    const hud = STATUS_HUD[selectedCampaign.status] || STATUS_HUD.draft
+    const targets = selectedCampaign.kpi_targets || {}
+    const impressionProgress = targets.impressions
+      ? Math.min(100, Math.round((kpiSummary.impressions / targets.impressions) * 100))
+      : 0
+
     return (
-      <div style={{ padding: '2rem', maxWidth: '1200px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-          <Button label="← Back to Campaigns" variant="secondary" onClick={() => setView('list')} />
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+      <div className="v-page" style={{ padding: 20, maxWidth: 1200, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <button type="button" className="nx-btn nx-btn--ghost" onClick={() => setView('list')}>← PORTFOLIO</button>
+          <div style={{ display: 'flex', gap: 8 }}>
             {!editingCampaign && (
-              <Button label="Edit" variant="secondary" onClick={startEditCampaign} />
+              <button type="button" className="nx-btn" style={{ fontSize: 10, padding: '8px 12px' }} onClick={startEditCampaign}>EDIT</button>
             )}
-            <Button
-              label={busy === 'launch' ? 'Launching…' : 'Launch Campaign'}
-              variant="primary"
-              onClick={handleLaunch}
+            <button
+              type="button"
+              className="nx-btn nx-btn--primary"
+              style={{ fontSize: 10, padding: '8px 12px' }}
+              onClick={() => void handleLaunch()}
               disabled={busy !== null || timeline.length === 0}
-            />
+            >
+              {busy === 'launch' ? 'LAUNCHING…' : '▶ ENGAGE AUTOPILOT'}
+            </button>
           </div>
         </div>
 
-        <h1 style={{ fontSize: '2rem', fontWeight: 700, marginBottom: '0.5rem' }}>
-          {selectedCampaign.name}
-        </h1>
-        <div style={{ marginBottom: '2rem' }}>
-          <Badge
-            label={selectedCampaign.status}
-            variant={STATUS_VARIANTS[selectedCampaign.status] || 'default'}
-          />
+        <div className="nx-panel" style={{ padding: 16, border: '1px solid var(--nx-border)', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', top: -40, right: -30, width: 220, height: 220, background: `radial-gradient(circle, ${hud.tone}22, transparent 70%)`, pointerEvents: 'none' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 9, position: 'relative' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: hud.tone, boxShadow: `0 0 8px ${hud.tone}` }} />
+            <span className="nx-mono" style={{ fontSize: 10, letterSpacing: '0.14em', color: hud.tone }}>{hud.label}</span>
+            <Badge label={selectedCampaign.status} variant={STATUS_VARIANTS[selectedCampaign.status] || 'default'} />
+          </div>
+          <h1 className="nx-display" style={{ margin: 0, fontSize: 34, letterSpacing: '0.03em', lineHeight: 0.95, position: 'relative' }}>
+            {selectedCampaign.name}
+          </h1>
+          <div className="nx-mono" style={{ marginTop: 10, fontSize: 11, color: 'var(--nx-text-3)' }}>
+            {selectedCampaign.start_date} → {selectedCampaign.end_date}
+            {pendingMediaCount > 0 ? ` · ${pendingMediaCount} pending media` : ''}
+          </div>
         </div>
 
         {launchInfo && (
-          <div style={{ marginBottom: '1.5rem' }}>
-            <Panel title="Campaign Launched">{launchInfo}</Panel>
-          </div>
+          <Panel title="Reactor Note">{launchInfo}</Panel>
         )}
 
         {editingCampaign ? (
@@ -838,28 +941,67 @@ export default function CampaignBuilderPage() {
           )
         )}
 
-        <div style={{ marginTop: '2rem', marginBottom: '2rem' }}>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: '1rem' }}>Performance</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-            <Panel title={`${kpiSummary.impressions.toLocaleString()} Impressions`}>
-              Total impressions across all campaign posts.
-            </Panel>
-            <Panel title={`${kpiSummary.engagements.toLocaleString()} Engagements`}>
-              Total likes, comments, shares, and replies.
-            </Panel>
-            <Panel title={`${engagementRate}% Engagement Rate`}>
-              Engagement as a percentage of impressions.
-            </Panel>
-            <Panel title={`${kpiSummary.follows.toLocaleString()} New Follows`}>
-              New followers gained during campaign.
-            </Panel>
+        <div>
+          <div className="nx-mono" style={{ fontSize: 10, letterSpacing: '0.12em', color: 'var(--nx-text-4)', marginBottom: 10 }}>KPI BAND · LIVE</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+            {[
+              { label: 'IMPRESSIONS', value: kpiSummary.impressions.toLocaleString(), sub: targets.impressions ? `${impressionProgress}% of target` : 'no target' },
+              { label: 'ENGAGEMENTS', value: kpiSummary.engagements.toLocaleString(), sub: targets.engagements ? `target ${targets.engagements}` : '—' },
+              { label: 'ENG RATE', value: `${engagementRate}%`, sub: 'of impressions' },
+              { label: 'FOLLOWS', value: kpiSummary.follows.toLocaleString(), sub: targets.follows ? `target ${targets.follows}` : '—' },
+            ].map((t) => (
+              <div key={t.label} className="nx-tile" style={{ padding: 12, border: '1px solid var(--nx-border)', background: 'var(--nx-surface, transparent)' }}>
+                <div className="nx-label" style={{ fontSize: 9 }}>{t.label}</div>
+                <div className="nx-display" style={{ fontSize: 26, marginTop: 5, letterSpacing: '0.03em' }}>{t.value}</div>
+                <div className="nx-mono" style={{ fontSize: 9, color: 'var(--nx-text-4)', marginTop: 6 }}>{t.sub}</div>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div style={{ marginTop: '2rem' }}>
+        <Panel title="Shift Packs · Evergreen · Calendar">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <select
+              className="vg-input"
+              style={{ minWidth: 220, fontSize: 12 }}
+              value={selectedPackId}
+              onChange={(e) => setSelectedPackId(e.target.value)}
+            >
+              {shiftPacks.length === 0 && <option value="">No packs loaded</option>}
+              {shiftPacks.map((p) => (
+                <option key={p.id} value={p.id}>{p.name} ({p.items.length})</option>
+              ))}
+            </select>
+            <button type="button" className="nx-btn nx-btn--secondary nx-btn--sm" disabled={busy !== null || !selectedPackId} onClick={() => void handleAddPack()}>
+              {busy === 'pack' ? '…' : 'Add Pack Days'}
+            </button>
+            <button type="button" className="nx-btn nx-btn--ghost nx-btn--sm" disabled={busy !== null} onClick={() => void handleRefillEvergreen()}>
+              {busy === 'evergreen' ? '…' : 'Refill Evergreen'}
+            </button>
+            <a
+              href={`/calendar?campaign_id=${selectedCampaign.id}`}
+              className="nx-btn nx-btn--ghost nx-btn--sm"
+              style={{ textDecoration: 'none' }}
+            >
+              Open Calendar
+            </a>
+            {pendingMediaCount > 0 && (
+              <span className="nx-mono" style={{ fontSize: 10, color: 'var(--nx-amber)' }}>
+                {pendingMediaCount} piece(s) waiting on media
+              </span>
+            )}
+          </div>
+          {selectedPackId && shiftPacks.find((p) => p.id === selectedPackId)?.description && (
+            <p className="nx-mono" style={{ margin: '10px 0 0', fontSize: 11, color: 'var(--nx-text-3)' }}>
+              {shiftPacks.find((p) => p.id === selectedPackId)?.description}
+            </p>
+          )}
+        </Panel>
+
+        <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 600, margin: 0 }}>
-              Timeline ({timeline.length} days)
+            <h2 className="nx-display" style={{ fontSize: 22, margin: 0, letterSpacing: '0.04em' }}>
+              TIMELINE · {timeline.length} DAYS
             </h2>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               {timeline.length > 0 && (
@@ -894,7 +1036,7 @@ export default function CampaignBuilderPage() {
                     titleAccent={
                       day.primary_channel === 'x' ? 'cyan'
                         : day.primary_channel === 'linkedin' ? 'green'
-                          : day.primary_channel === 'tiktok' || day.primary_channel === 'instagram' ? 'violet'
+                          : day.primary_channel === 'tiktok' || day.primary_channel === 'instagram' ? 'red'
                             : 'amber'
                     }
                   >

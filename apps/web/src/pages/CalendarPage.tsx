@@ -49,6 +49,13 @@ export function CalendarPage() {
   const [loading, setLoading] = React.useState(false)
   const [err, setErr]         = React.useState<string | null>(null)
   const [expanded, setExpanded] = React.useState<string | null>(null) // 'channel:dateKey'
+  const campaignId = React.useMemo(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('campaign_id') ?? undefined
+    } catch {
+      return undefined
+    }
+  }, [])
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekOf, i))
 
@@ -57,11 +64,11 @@ export function CalendarPage() {
     try {
       const from = start.toISOString()
       const to   = addDays(start, 7).toISOString()
-      const r    = await vantageApi.getCalendar(from, to)
+      const r    = await vantageApi.getCalendar(from, to, campaignId)
       setPieces(r.pieces)
     } catch (e) { setErr(String((e as Error).message)) }
     finally { setLoading(false) }
-  }, [])
+  }, [campaignId])
 
   React.useEffect(() => { void load(weekOf) }, [load, weekOf])
 
@@ -82,7 +89,10 @@ export function CalendarPage() {
     <>
       <div className="vg-page-header">
         <h1 className="vg-page-title">Content Calendar</h1>
-        <p className="vg-page-sub">Scheduled and published posts — 7-day week view</p>
+        <p className="vg-page-sub">
+          Scheduled and published posts — 7-day week view
+          {campaignId ? ` · campaign ${campaignId.slice(0, 8)}…` : ''}
+        </p>
       </div>
 
       {err && <div className="vg-error" style={{ marginBottom: 16 }}>{err}</div>}

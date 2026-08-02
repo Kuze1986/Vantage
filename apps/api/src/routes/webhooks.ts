@@ -4,7 +4,39 @@ import { createHmac } from "node:crypto";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import { recordGrowthEvent, engagementKind } from "../lib/growth.js";
+import { recordCampaignEngagement, resolveCampaignIdForPiece } from "../lib/campaign-kpi.js";
 import { crcResponseToken } from "../adapters/x.js";
+
+async function afterEngagement(opts: {
+  contentPieceId: string | null;
+  channel: string;
+  eventType: string;
+  workspaceId: string;
+  extraMeta?: Record<string, unknown>;
+}): Promise<void> {
+  const campaignId = opts.contentPieceId
+    ? await resolveCampaignIdForPiece(opts.contentPieceId).catch(() => null)
+    : null;
+  if (opts.contentPieceId) {
+    await recordCampaignEngagement({
+      contentPieceId: opts.contentPieceId,
+      channel: opts.channel,
+      eventType: opts.eventType,
+    });
+  }
+  await recordGrowthEvent({
+    loop: "acquisition",
+    kind: engagementKind(opts.eventType),
+    channel: opts.channel,
+    meta: {
+      event_type: opts.eventType,
+      content_piece_id: opts.contentPieceId,
+      workspace_id: opts.workspaceId,
+      ...(campaignId ? { campaign_id: campaignId } : {}),
+      ...opts.extraMeta,
+    },
+  });
+}
 
 export const webhooksRoutes = new Hono();
 
@@ -118,10 +150,12 @@ webhooksRoutes.post("/x", async (c) => {
     payload: { eventType, tweetId },
     workspace_id: workspaceId,
   });
-  // Growth OS — Loop A: engagement on a published piece.
-  await recordGrowthEvent({
-    loop: "acquisition", kind: engagementKind(eventType), channel: "x",
-    meta: { event_type: eventType, tweet_id: tweetId, content_piece_id: contentPieceId, workspace_id: workspaceId },
+  await afterEngagement({
+    contentPieceId,
+    channel: "x",
+    eventType,
+    workspaceId,
+    extraMeta: { tweet_id: tweetId },
   });
 
   return c.json({ ok: true });
@@ -195,10 +229,12 @@ webhooksRoutes.post("/linkedin", async (c) => {
     payload: { eventType, shareId },
     workspace_id: workspaceId,
   });
-  // Growth OS — Loop A: engagement on a published piece.
-  await recordGrowthEvent({
-    loop: "acquisition", kind: engagementKind(eventType), channel: "linkedin",
-    meta: { event_type: eventType, share_id: shareId, content_piece_id: contentPieceId, workspace_id: workspaceId },
+  await afterEngagement({
+    contentPieceId,
+    channel: "linkedin",
+    eventType,
+    workspaceId,
+    extraMeta: { share_id: shareId },
   });
 
   return c.json({ ok: true });
@@ -253,10 +289,12 @@ webhooksRoutes.post("/reddit", async (c) => {
     payload: { eventType, postId },
     workspace_id: workspaceId,
   });
-  // Growth OS — Loop A: engagement on a published piece.
-  await recordGrowthEvent({
-    loop: "acquisition", kind: engagementKind(eventType), channel: "reddit",
-    meta: { event_type: eventType, post_id: postId, content_piece_id: contentPieceId, workspace_id: workspaceId },
+  await afterEngagement({
+    contentPieceId,
+    channel: "reddit",
+    eventType,
+    workspaceId,
+    extraMeta: { post_id: postId },
   });
 
   return c.json({ ok: true });
@@ -318,6 +356,14 @@ webhooksRoutes.post("/email", async (c) => {
     summary: `Resend webhook: ${eventType}`,
     payload: { eventType },
     workspace_id: workspaceId,
+  });
+
+  await afterEngagement({
+    contentPieceId,
+    channel: "email",
+    eventType,
+    workspaceId,
+    extraMeta: { email_id: emailId },
   });
 
   return c.json({ ok: true });

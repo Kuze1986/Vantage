@@ -41,6 +41,19 @@ function mediaBadgeVariant(status: string | null | undefined): BadgeVariant {
   }
 }
 
+function isMediaGated(p: Piece): boolean {
+  if (p.content_payload?.force_media === true) return false
+  if (p.media_status === 'pending' || p.media_status === 'failed') return true
+  if (p.content_payload?.needs_social_kit === true && !p.image_url && !p.content_payload?.image_url) {
+    return true
+  }
+  return false
+}
+
+function isAutopilotQueued(p: Piece): boolean {
+  return p.status === 'queued' && Boolean(p.content_payload?.visual_type || p.content_payload?.campaign_id)
+}
+
 const MANUAL_CHANNELS = new Set(['tiktok', 'instagram', 'facebook'])
 const VIDEO_FORMATS   = new Set(['tiktok_script', 'instagram_caption', 'facebook_post'])
 
@@ -277,6 +290,8 @@ export function QueuePage() {
   const [ogPiece, setOgPiece]           = React.useState<Piece | null>(null)
   const [publishPack, setPublishPack]   = React.useState<PublishPack | null>(null)
   const [packBusy, setPackBusy]         = React.useState<string | null>(null)
+  const [selected, setSelected]         = React.useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy]         = React.useState(false)
 
   const load = React.useCallback(async () => {
     setErr(null)
@@ -325,12 +340,54 @@ export function QueuePage() {
     }
   }
 
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const approvedSelected = [...selected].filter((id) =>
+    pieces.some((p) => p.id === id && p.status === 'approved'),
+  )
+
+  const bulkSchedule = async (force: boolean) => {
+    if (!approvedSelected.length) return
+    setBulkBusy(true)
+    setErr(null)
+    setMsg(null)
+    try {
+      const r = await vantageApi.bulkSchedule(approvedSelected, force)
+      setMsg(`Bulk scheduled ${r.scheduled}/${approvedSelected.length}${force ? ' (force)' : ''}`)
+      setSelected(new Set())
+      await load()
+    } catch (e) {
+      setErr(String((e as Error).message))
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
   const tableRows: Record<string, ReactNode>[] = visible.map((p) => ({
+    pick: (
+      <input
+        type="checkbox"
+        checked={selected.has(p.id)}
+        disabled={p.status !== 'approved'}
+        onChange={() => toggleSelect(p.id)}
+        title={p.status === 'approved' ? 'Select for bulk schedule' : 'Only approved pieces can be bulk-scheduled'}
+      />
+    ),
     channel: (
       <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--nx-text-3)' }}>
         {p.channel_slug}
         {p.variant_group_id && (
           <span style={{ display: 'block', fontSize: 8, color: 'var(--nx-amber)', marginTop: 1 }}>A/B</span>
+        )}
+        {isAutopilotQueued(p) && (
+          <span style={{ display: 'block', fontSize: 8, color: 'var(--nx-green, #00E47A)', marginTop: 1 }}>AUTOPILOT</span>
         )}
       </span>
     ),
@@ -346,11 +403,46 @@ export function QueuePage() {
         )}
         {/* Media status + previews */}
         {p.media_status && p.media_status !== 'none' && (
-          <div style={{ marginTop: 4 }}>
+          <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             <Badge label={`media: ${p.media_status}`} variant={mediaBadgeVariant(p.media_status)} />
+            {isMediaGated(p) && <Badge label="gated" variant="pending" />}
           </div>
         )}
         {p.image_url && <ImagePreview url={p.image_url} />}
+        {Array.isArray(p.content_payload?.mode_stills) && (p.content_payload.mode_stills as unknown[]).length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 8, color: 'var(--nx-text-4)', letterSpacing: '0.08em', marginBottom: 4 }}>
+              MODE STILLS
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {(p.content_payload.mode_stills as Array<{ mode?: string; url?: string }>)
+                .filter((m) => typeof m?.url === 'string')
+                .map((m) => (
+                  <button
+                    key={`${m.mode}-${m.url}`}
+                    type="button"
+                    title={m.mode ?? 'mode'}
+                    onClick={() => {
+                      void vantageApi.patchQueuePiece(p.id, {
+                        image_url: m.url!,
+                        media_status: 'ready',
+                        content_payload_patch: { image_url: m.url, thumbnail_mode: m.mode },
+                      }).then(() => load())
+                    }}
+                    style={{
+                      padding: 0, border: '1px solid var(--nx-border)', borderRadius: 4,
+                      overflow: 'hidden', background: 'none', cursor: 'pointer', width: 72,
+                    }}
+                  >
+                    <img src={m.url} alt={m.mode ?? 'mode'} style={{ width: 72, height: 44, objectFit: 'cover', display: 'block' }} />
+                    <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 7, color: 'var(--nx-text-3)', padding: '2px 3px', textTransform: 'uppercase' }}>
+                      {(m.mode ?? 'mode').replace(/_/g, ' ')}
+                    </div>
+                  </button>
+                ))}
+            </div>
+          </div>
+        )}
         {(p.video_url || (typeof p.content_payload?.video_url === 'string' && p.content_payload.video_url)) && (
           <div style={{ marginTop: 6 }}>
             <video
@@ -469,17 +561,34 @@ export function QueuePage() {
           </button>
         )}
         {p.status === 'approved' && (
-          <button
-            type="button"
-            className="nx-btn nx-btn--ghost nx-btn--sm"
-            disabled={busy === p.id}
-            onClick={() => {
-              setBusy(p.id)
-              void action(() => vantageApi.schedule(p.id), 'Queued for cadence').finally(() => setBusy(null))
-            }}
-          >
-            Queue
-          </button>
+          <>
+            <button
+              type="button"
+              className="nx-btn nx-btn--ghost nx-btn--sm"
+              disabled={busy === p.id}
+              onClick={() => {
+                setBusy(p.id)
+                void action(() => vantageApi.schedule(p.id), 'Queued for cadence').finally(() => setBusy(null))
+              }}
+              title={isMediaGated(p) ? 'Blocked until media is ready — use Force Queue' : 'Queue for cadence'}
+            >
+              Queue
+            </button>
+            {isMediaGated(p) && (
+              <button
+                type="button"
+                className="nx-btn nx-btn--secondary nx-btn--sm"
+                disabled={busy === p.id}
+                onClick={() => {
+                  setBusy(p.id)
+                  void action(() => vantageApi.schedule(p.id, undefined, true), 'Force-queued').finally(() => setBusy(null))
+                }}
+                title="Bypass media gate and queue anyway"
+              >
+                Force Queue
+              </button>
+            )}
+          </>
         )}
         {MANUAL_CHANNELS.has(p.channel_slug) && (
           <button
@@ -526,17 +635,37 @@ export function QueuePage() {
           </div>
         )}
         {(p.status === 'approved' || p.status === 'queued') && !MANUAL_CHANNELS.has(p.channel_slug) && (
-          <button
-            type="button"
-            className="nx-btn nx-btn--primary nx-btn--sm"
-            disabled={busy === p.id}
-            onClick={() => {
-              setBusy(p.id)
-              void action(() => vantageApi.publish(p.channel_slug, p.id), 'Published').finally(() => setBusy(null))
-            }}
-          >
-            {busy === p.id ? '…' : 'Publish'}
-          </button>
+          <>
+            <button
+              type="button"
+              className="nx-btn nx-btn--primary nx-btn--sm"
+              disabled={busy === p.id}
+              onClick={() => {
+                setBusy(p.id)
+                void action(() => vantageApi.publish(p.channel_slug, p.id), 'Published').finally(() => setBusy(null))
+              }}
+              title={isMediaGated(p) ? 'Blocked until media is ready — use Force Publish' : 'Publish now'}
+            >
+              {busy === p.id ? '…' : 'Publish'}
+            </button>
+            {isMediaGated(p) && (
+              <button
+                type="button"
+                className="nx-btn nx-btn--secondary nx-btn--sm"
+                disabled={busy === p.id}
+                onClick={() => {
+                  setBusy(p.id)
+                  void action(
+                    () => vantageApi.publish(p.channel_slug, p.id, undefined, true),
+                    'Force-published',
+                  ).finally(() => setBusy(null))
+                }}
+                title="Bypass media gate and publish anyway"
+              >
+                Force Publish
+              </button>
+            )}
+          </>
         )}
         {/* 3A-6: Retry button for permanently-failed pieces */}
         {p.status === 'failed' && (
@@ -691,6 +820,37 @@ export function QueuePage() {
         </button>
       </div>
 
+      {approvedSelected.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+          <span className="nx-mono" style={{ fontSize: 10, color: 'var(--nx-text-3)' }}>
+            {approvedSelected.length} selected
+          </span>
+          <button
+            type="button"
+            className="nx-btn nx-btn--ghost nx-btn--sm"
+            disabled={bulkBusy}
+            onClick={() => void bulkSchedule(false)}
+          >
+            {bulkBusy ? '…' : 'Bulk Schedule'}
+          </button>
+          <button
+            type="button"
+            className="nx-btn nx-btn--secondary nx-btn--sm"
+            disabled={bulkBusy}
+            onClick={() => void bulkSchedule(true)}
+          >
+            Force Bulk Schedule
+          </button>
+          <button
+            type="button"
+            className="nx-btn nx-btn--ghost nx-btn--sm"
+            onClick={() => setSelected(new Set())}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {/* A/B variant groups notice */}
       {variantGroups.size > 0 && (
         <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-amber)', marginBottom: 8 }}>
@@ -704,8 +864,9 @@ export function QueuePage() {
         ) : (
           <DataTable
             columns={[
+              { key: 'pick',       label: '',           width: '36px' },
               { key: 'channel',    label: 'Channel',    width: '90px' },
-              { key: 'content',    label: 'Content',    width: '40%' },
+              { key: 'content',    label: 'Content',    width: '38%' },
               { key: 'status',     label: 'Status',     width: '100px' },
               { key: 'iterations', label: 'Iters',      width: '56px' },
               { key: 'created',    label: 'Created',    width: '130px' },

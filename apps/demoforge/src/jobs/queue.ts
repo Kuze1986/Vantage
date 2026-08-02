@@ -108,7 +108,7 @@ export interface TimelineConfig {
 }
 
 export interface ScriptStep {
-  action:    "navigate" | "click" | "fill" | "wait" | "scroll" | "narrate" | "eval" | "run";
+  action:    "navigate" | "click" | "fill" | "wait" | "scroll" | "narrate" | "eval" | "run" | "capture";
   selector?: string;
   text?:     string;
   ms?:       number;
@@ -186,7 +186,7 @@ async function writeBackMediaToPiece(
   try {
     const { data: piece } = await sb
       .from("content_pieces")
-      .select("id, content_payload, image_url")
+      .select("id, content_payload, image_url, status, scheduled_for, workspace_id")
       .eq("id", contentPieceId)
       .maybeSingle();
     if (!piece) return;
@@ -216,25 +216,43 @@ async function writeBackMediaToPiece(
       .select("extracted_frames, thumbnail_url")
       .eq("id", opts.jobId)
       .maybeSingle();
-    const frames = (jobRow?.extracted_frames as Array<{ url?: string }> | null) ?? [];
+    const frames = (jobRow?.extracted_frames as Array<{ url?: string; mode?: string }> | null) ?? [];
     const usable = frames.filter((f) => typeof f?.url === "string");
-    // product_still → last keyframe (Sweep hero); otherwise honor thumbnail_frame_index or first frame.
+    const modeStills = usable
+      .filter((f) => typeof f.mode === "string" && f.mode.length > 0)
+      .map((f) => ({ mode: String(f.mode), url: String(f.url) }));
+    // product_still → Sweep mode still when tagged, else last keyframe; otherwise honor index/first.
     const visualType = typeof payload.visual_type === "string" ? payload.visual_type : "";
     const explicitIdx =
       typeof payload.thumbnail_frame_index === "number" ? payload.thumbnail_frame_index : null;
     let frameIdx = 0;
+    let frameUrl: string | undefined;
     if (typeof explicitIdx === "number" && explicitIdx >= 0 && usable.length) {
       frameIdx = Math.min(Math.floor(explicitIdx), usable.length - 1);
-    } else if (visualType === "product_still" && usable.length) {
-      frameIdx = usable.length - 1;
+      frameUrl = usable[frameIdx]?.url;
+    } else if (visualType === "product_still") {
+      const sweep = modeStills.find((m) => m.mode === "sweep") ?? modeStills[modeStills.length - 1];
+      if (sweep) {
+        frameUrl = sweep.url;
+        frameIdx = usable.findIndex((f) => f.url === sweep.url);
+        if (frameIdx < 0) frameIdx = 0;
+      } else if (usable.length) {
+        frameIdx = usable.length - 1;
+        frameUrl = usable[frameIdx]?.url;
+      }
+    } else if (usable.length) {
+      frameUrl = usable[0]?.url;
     }
-    const frameUrl = usable[frameIdx]?.url;
     if (frameUrl) imageUrl = frameUrl;
 
     if (opts.videoUrl) payload.video_url = opts.videoUrl;
     if (imageUrl) payload.image_url = imageUrl;
     payload.demoforge_job_id = opts.jobId;
     if (usable.length) payload.thumbnail_frame_index = frameIdx;
+    if (modeStills.length) {
+      payload.mode_stills = modeStills;
+      payload.product_still_modes = modeStills.map((m) => m.mode);
+    }
     delete payload.media_error;
 
     if (frameUrl) {
@@ -244,6 +262,12 @@ async function writeBackMediaToPiece(
         .eq("id", opts.jobId);
     }
 
+    // Autopilot: approved + scheduled_for → queued once media is ready
+    const autoQueue =
+      piece.status === "approved" &&
+      typeof piece.scheduled_for === "string" &&
+      piece.scheduled_for.length > 0;
+
     await sb
       .from("content_pieces")
       .update({
@@ -251,9 +275,14 @@ async function writeBackMediaToPiece(
         video_url: opts.videoUrl ?? null,
         ...(imageUrl ? { image_url: imageUrl } : {}),
         content_payload: payload,
+        ...(autoQueue ? { status: "queued" } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq("id", contentPieceId);
+
+    if (autoQueue) {
+      console.log(`[demoforge] auto-queued piece ${contentPieceId} after media ready`);
+    }
   } catch (err) {
     console.warn(`[demoforge] media write-back failed for piece ${contentPieceId}:`, err);
   }

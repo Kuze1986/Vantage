@@ -65,9 +65,10 @@ class VoiceboxNotReadyError extends Error {}
 async function recordBrowser(
   job: DemoJob,
   workDir: string,
-): Promise<string> {
+): Promise<{ videoPath: string; modeCaptures: Array<{ mode: string; path: string }> }> {
   const dims = FORMAT_DIMS[job.target_format] ?? FORMAT_DIMS.linkedin;
   const videoPath = join(workDir, "screen.webm");
+  const modeCaptures: Array<{ mode: string; path: string }> = [];
 
   const browser = await chromium.launch({ headless: true });
   // Record at the full platform size (e.g. 1080×1920 for TikTok). Previously height was
@@ -112,7 +113,7 @@ async function recordBrowser(
     await page.waitForTimeout(250);
 
     for (const step of job.input_payload.script) {
-      await executeStep(page, step);
+      await executeStep(page, step, workDir, modeCaptures);
     }
     // Brief pause at the end so last state is visible
     await page.waitForTimeout(1500);
@@ -135,19 +136,45 @@ async function recordBrowser(
   if (!info || info.size === 0) {
     throw new Error(`Browser recording not found or empty at ${videoPath}`);
   }
-  console.log(`[demoforge] recorded ${(info.size / 1024).toFixed(0)} KB → ${videoPath}`);
+  console.log(
+    `[demoforge] recorded ${(info.size / 1024).toFixed(0)} KB → ${videoPath}` +
+      (modeCaptures.length ? ` (+${modeCaptures.length} mode stills)` : ""),
+  );
 
-  return videoPath;
+  return { videoPath, modeCaptures };
 }
 
 async function executeStep(
   page: import("playwright").Page,
   step: ScriptStep,
+  workDir?: string,
+  modeCaptures?: Array<{ mode: string; path: string }>,
 ): Promise<void> {
   switch (step.action) {
     case "eval":
       // Handled via addInitScript before navigation — no runtime action.
       break;
+    case "capture": {
+      // Labeled full-viewport still for product_still mode galleries.
+      if (workDir && modeCaptures) {
+        const mode = (step.text || step.selector || `mode-${modeCaptures.length + 1}`)
+          .toLowerCase()
+          .replace(/[^a-z0-9_-]+/g, "-")
+          .replace(/^-|-$/g, "") || `mode-${modeCaptures.length + 1}`;
+        const path = join(workDir, `mode-${mode}.png`);
+        try {
+          await page.screenshot({ path, fullPage: false, type: "png" });
+          modeCaptures.push({ mode, path });
+        } catch (err) {
+          console.warn(
+            `[demoforge] capture failed for ${mode}:`,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      }
+      if (step.ms) await page.waitForTimeout(step.ms);
+      break;
+    }
     case "run":
       if (step.selector?.trim()) {
         const expr = step.selector.trim();
@@ -1201,6 +1228,43 @@ async function concatSequences(params: {
   });
 }
 
+// ── Step 3.45: Upload labeled mode stills from capture steps ──────────────────
+
+async function uploadModeCaptures(
+  captures: Array<{ mode: string; path: string }>,
+  jobId: string,
+): Promise<Array<{ timestamp_sec: number; url: string; extracted_at: string; mode: string }>> {
+  const sb = getSupabase();
+  const frames: Array<{ timestamp_sec: number; url: string; extracted_at: string; mode: string }> = [];
+  for (let i = 0; i < captures.length; i++) {
+    const { mode, path } = captures[i];
+    try {
+      const frameData = await readFile(path);
+      const key = `demoforge/frames/${jobId}/mode-${mode}.png`;
+      const { error: uploadErr } = await sb.storage.from("vantage-media").upload(key, frameData, {
+        contentType: "image/png",
+        upsert: true,
+      });
+      if (uploadErr) {
+        console.warn(`[demoforge] mode still upload failed for ${mode}:`, uploadErr.message);
+        continue;
+      }
+      const { data: urlData } = sb.storage.from("vantage-media").getPublicUrl(key);
+      if (urlData?.publicUrl) {
+        frames.push({
+          timestamp_sec: i,
+          url: urlData.publicUrl,
+          extracted_at: new Date().toISOString(),
+          mode,
+        });
+      }
+    } catch (err) {
+      console.warn(`[demoforge] mode still read failed for ${mode}:`, err);
+    }
+  }
+  return frames;
+}
+
 // ── Step 3.5: Extract keyframes ───────────────────────────────────────────────
 
 async function extractFrames(
@@ -1338,7 +1402,7 @@ export async function processJob(
 
     // 2. Record browser with narration-synced step timing
     await onStatus("recording");
-    const videoPath = await recordBrowser(job, workDir);
+    const { videoPath, modeCaptures } = await recordBrowser(job, workDir);
 
     // 3. Background music
     let musicPath: string | null = null;
@@ -1510,12 +1574,29 @@ export async function processJob(
       }
     }
 
-    // 5. Extract keyframes
-    let extractedFrames: Array<{ timestamp_sec: number; url: string; extracted_at: string }> = [];
+    // 5. Extract keyframes (+ prefer labeled mode captures from product_still scripts)
+    let extractedFrames: Array<{
+      timestamp_sec: number;
+      url: string;
+      extracted_at: string;
+      mode?: string;
+    }> = [];
     try {
       extractedFrames = await extractFrames(finalVideoPath, workDir, job.id);
     } catch (err) {
       console.warn("Frame extraction failed, continuing without frames:", err);
+    }
+
+    if (modeCaptures.length) {
+      try {
+        const modeFrames = await uploadModeCaptures(modeCaptures, job.id);
+        if (modeFrames.length) {
+          // Mode stills first — write-back maps them into content_payload.mode_stills.
+          extractedFrames = [...modeFrames, ...extractedFrames];
+        }
+      } catch (err) {
+        console.warn("Mode capture upload failed:", err);
+      }
     }
 
     // 6. Upload video

@@ -30,10 +30,14 @@ import {
   buildDemoForgePayload,
   DEFAULT_BRAND_ID,
   listDemoForgeTemplates,
+  PRODUCT_STILL_MODE_ROTATION,
   resolveBrandId,
   resolveTemplateId,
 } from '../lib/demoforge-templates.js';
 import { loadProductProfile } from '../lib/product-profile.js';
+import { launchStatusForMedia } from '../lib/auto-queue.js';
+import { listShiftPacks, getShiftPack } from '../lib/shift-packs.js';
+import { syncCampaignKpis } from '../lib/campaign-kpi.js';
 
 export const campaignRoutes = new Hono();
 
@@ -214,6 +218,11 @@ campaignRoutes.get('/', async (c) => {
   }
 
   return c.json({ campaigns: data ?? [] });
+});
+
+// GET /v1/campaigns/meta/shift-packs — curated Shift content packs
+campaignRoutes.get('/meta/shift-packs', async (c) => {
+  return c.json({ packs: listShiftPacks() });
 });
 
 // GET /v1/campaigns/:id — get campaign details
@@ -500,7 +509,8 @@ const generatedDaySchema = z.object({
   messaging_pillar_id: z.union([z.string(), z.number()]).transform(String).optional().nullable(),
   content_type: z.enum(CONTENT_TYPES).optional().catch(undefined),
   primary_channel: z.enum(CHANNELS).optional().catch(undefined),
-  secondary_channels: z.array(z.enum(CHANNELS)).optional().catch(undefined),
+  // Soft parse — normalization fills secondaries from channel_mix regardless.
+  secondary_channels: z.array(z.string()).optional().catch([]),
   content_idea: z.object({
     title: z.string(),
     outline: z.string(),
@@ -570,18 +580,24 @@ Runs ${campaign.start_date} to ${campaign.end_date} (${weeks} weeks, ${periodsPe
 Messaging pillars (use their id values):
 ${pillars.length ? pillars.map((p) => `- ${p.id}: ${p.name}${p.tone ? ` (tone: ${p.tone})` : ''}${p.description ? ` — ${p.description}` : ''}`).join('\n') : '- (none defined; leave messaging_pillar_id empty)'}
 
-Available channels: ${channels.join(', ')}
+Available channels (ALL must appear in the plan): ${channels.join(', ')}
+Channel daily targets (guidance): ${channels.map((ch) => {
+    const cfg = channelMix[ch] as { daily?: number } | undefined;
+    return `${ch}:${cfg?.daily ?? 1}/day`;
+  }).join(', ')}
 Content types: ${CONTENT_TYPES.join(', ')}
 Visual types: ${VISUAL_TYPES.join(', ')}
 DemoForge templates (prefer product visuals; Shift templates are defaults, others allowed): ${templateList}
 Default Social Kit brand when omitted: ${DEFAULT_BRAND_ID}
 
 For promotional/educational days prefer visual_type demo_video or product_still. Use social_graphic for quote/OG-style stills. Use none only for pure text engagement posts.
-When visual_type is product_still, omit demoforge_template_id (server defaults to shift-product-stills: Minefield→Polarity→Matrix→Blueprints→Sweep hero frame). For demo_video, prefer channel Shift templates or omit for channel default.
+When visual_type is product_still, omit demoforge_template_id (server defaults to shift-product-stills: Queue modes → Sweep hero). For demo_video, prefer channel Shift templates or omit for channel default.
 
-Return JSON: {"days":[{ "messaging_pillar_id": <one of the pillar ids or omit>, "content_type": <one of the content types>, "primary_channel": <one of the available channels>, "secondary_channels": [<other channels>], "content_idea": { "title": <short post idea>, "outline": <2-3 sentence brief of the post>, "visual_type": <visual type>, "demoforge_template_id": <template id or omit>, "brand_id": <brand id or omit> } }]}
+CRITICAL: For every day, set primary_channel to one available channel (rotate across days) and set secondary_channels to EVERY other available channel. Launch creates one piece per listed channel.
 
-Produce exactly ${total} day objects, sequenced as a coherent narrative arc (awareness → consideration → conversion). Vary channels and pillars sensibly. Respond with ONLY the JSON object.`;
+Return JSON: {"days":[{ "messaging_pillar_id": <one of the pillar ids or omit>, "content_type": <one of the content types>, "primary_channel": <one of the available channels>, "secondary_channels": [<all other available channels>], "content_idea": { "title": <short post idea>, "outline": <2-3 sentence brief of the post>, "visual_type": <visual type>, "demoforge_template_id": <template id or omit>, "brand_id": <brand id or omit> } }]}
+
+Produce exactly ${total} day objects, sequenced as a coherent narrative arc (awareness → consideration → conversion). Rotate primary_channel through the available set. Respond with ONLY the JSON object.`;
 
   type GeneratedTimeline = z.infer<typeof generatedTimelineSchema>;
   let generated: GeneratedTimeline;
@@ -601,26 +617,36 @@ Produce exactly ${total} day objects, sequenced as a coherent narrative arc (awa
   }
 
   const pillarIds = new Set(pillars.map((p) => p.id));
-  const days = generated.days.slice(0, total).map((d, i) => ({
-    campaign_id: campaignId,
-    day_number: i,
-    date_scheduled: dateFor(i),
-    messaging_pillar_id: d.messaging_pillar_id && pillarIds.has(d.messaging_pillar_id) ? d.messaging_pillar_id : null,
-    content_type: d.content_type ?? 'mixed',
-    primary_channel: d.primary_channel && channels.includes(d.primary_channel) ? d.primary_channel : channels[0],
-    secondary_channels: (d.secondary_channels ?? []).filter((ch) => channels.includes(ch) && ch !== d.primary_channel),
-    content_ideas: [{
-      id: crypto.randomUUID(),
-      title: d.content_idea.title,
-      outline: d.content_idea.outline,
-      visual_type: d.content_idea.visual_type ?? (
-        d.content_type === 'engagement' ? 'none' : 'demo_video'
-      ),
-      demoforge_template_id: d.content_idea.demoforge_template_id ?? undefined,
-      brand_id: d.content_idea.brand_id ?? undefined,
-    }],
-    published_pieces: [],
-  }));
+  const days = generated.days.slice(0, total).map((d, i) => {
+    // Rotate primary through the mix so every enabled channel gets a lead day.
+    const rotatedPrimary = channels[i % channels.length];
+    const primary =
+      d.primary_channel && channels.includes(d.primary_channel)
+        ? d.primary_channel
+        : rotatedPrimary;
+    // Always cross-post to every other enabled channel — LLM often leaves secondaries empty.
+    const secondary_channels = channels.filter((ch) => ch !== primary);
+    return {
+      campaign_id: campaignId,
+      day_number: i,
+      date_scheduled: dateFor(i),
+      messaging_pillar_id: d.messaging_pillar_id && pillarIds.has(d.messaging_pillar_id) ? d.messaging_pillar_id : null,
+      content_type: d.content_type ?? 'mixed',
+      primary_channel: primary,
+      secondary_channels,
+      content_ideas: [{
+        id: crypto.randomUUID(),
+        title: d.content_idea.title,
+        outline: d.content_idea.outline,
+        visual_type: d.content_idea.visual_type ?? (
+          d.content_type === 'engagement' ? 'none' : 'demo_video'
+        ),
+        demoforge_template_id: d.content_idea.demoforge_template_id ?? undefined,
+        brand_id: d.content_idea.brand_id ?? undefined,
+      }],
+      published_pieces: [],
+    };
+  });
 
   if (!days.length) {
     throw new HTTPException(502, { message: 'Timeline generation returned no days' });
@@ -717,6 +743,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
     channel: string;
     day_number: number;
     media_status: string;
+    status: string;
     demoforge_job_id?: string;
   }[] = [];
   const failures: { day_number: number; channel?: string; error: string }[] = [];
@@ -742,7 +769,16 @@ campaignRoutes.post('/:id/launch', async (c) => {
     const secondary = Array.isArray(day.secondary_channels)
       ? (day.secondary_channels as unknown[])
       : [];
-    const channelsForDay = [day.primary_channel, ...secondary]
+    // Prefer timeline secondaries; if empty (legacy timelines), expand from campaign channel_mix.
+    const mixChannels = CHANNELS.filter((ch) => ch in ((campaign.channel_mix ?? {}) as Record<string, unknown>));
+    const fallbackChannels = mixChannels.length ? mixChannels : [...CHANNELS];
+    const listed = [day.primary_channel, ...secondary]
+      .filter((ch): ch is string => typeof ch === 'string' && allowedChannels.has(ch));
+    const channelsForDay = (
+      listed.length > 1
+        ? listed
+        : [day.primary_channel, ...fallbackChannels.filter((ch) => ch !== day.primary_channel)]
+    )
       .filter((ch): ch is string => typeof ch === 'string' && allowedChannels.has(ch))
       .filter((ch, i, arr) => arr.indexOf(ch) === i) as ChannelSlug[];
 
@@ -803,6 +839,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
         });
 
         let auditNotes: string | null = null;
+        let auditPassed = true;
         try {
           const audit = await auditContent({
             content: gen.text_preview || JSON.stringify(gen.content_payload),
@@ -811,8 +848,11 @@ campaignRoutes.post('/:id/launch', async (c) => {
             workspace_id: workspaceId,
           });
           auditNotes = `[${audit.verdict}] ${audit.feedback}`.slice(0, 1000);
-        } catch {
-          // Audit is best-effort; the piece is still produced for review.
+          auditPassed = audit.verdict === 'pass';
+        } catch (auditErr) {
+          // Treat audit outage as soft-fail: still produce piece for review, do not auto-queue.
+          auditPassed = false;
+          auditNotes = `[audit_error] ${auditErr instanceof Error ? auditErr.message : 'audit failed'}`.slice(0, 1000);
         }
 
         const payload: Record<string, unknown> = {
@@ -826,13 +866,19 @@ campaignRoutes.post('/:id/launch', async (c) => {
         }
         // product_still: prefer final Sweep diagram keyframe as the attached image.
         if (visualType === 'product_still') {
-          payload.product_still_modes = ['minefield', 'polarity', 'matrix', 'blueprints', 'sweep'];
+          payload.product_still_modes = [...PRODUCT_STILL_MODE_ROTATION];
           payload.thumbnail_preference = 'last';
         }
 
         let mediaStatus: 'none' | 'pending' | 'failed' = visualType === 'none' ? 'none' : 'pending';
 
         const scheduledFor = `${day.date_scheduled}T09:00:00Z`;
+        // Audit fail → rejected (not queued). Pass + media ready → queued (autopilot).
+        // Pass + media pending → approved until DemoForge / Social Kit write-back.
+        const pieceStatus = !auditPassed
+          ? 'rejected'
+          : launchStatusForMedia(mediaStatus);
+
         const { data: piece, error: pieceErr } = await sb
           .from('content_pieces')
           .insert({
@@ -841,10 +887,10 @@ campaignRoutes.post('/:id/launch', async (c) => {
             channel_slug: channel,
             format: gen.format,
             content_payload: payload,
-            status: 'approved', // approved drafts: user reviews + schedules from the Queue
+            status: pieceStatus,
             audit_notes: auditNotes,
             audit_iterations: 0,
-            scheduled_for: scheduledFor,
+            scheduled_for: auditPassed ? scheduledFor : null,
             media_status: mediaStatus,
           })
           .select('id')
@@ -854,7 +900,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
         let demoforgeJobId: string | undefined;
 
         // Enqueue DemoForge for video / product stills (async — does not block launch).
-        if (visualType === 'demo_video' || visualType === 'product_still') {
+        if (auditPassed && (visualType === 'demo_video' || visualType === 'product_still')) {
           try {
             const dfPayload = buildDemoForgePayload(templateId, demoBaseUrl, {
               // Stills stay silent/clean; videos keep captions + grade.
@@ -916,7 +962,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
         published.push({
           content_piece_id: piece.id,
           channel,
-          status: 'approved',
+          status: pieceStatus,
           media_status: mediaStatus,
           demoforge_job_id: demoforgeJobId,
         });
@@ -925,6 +971,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
           channel,
           day_number: day.day_number,
           media_status: mediaStatus,
+          status: pieceStatus,
           demoforge_job_id: demoforgeJobId,
         });
       } catch (e) {
@@ -962,6 +1009,201 @@ campaignRoutes.post('/:id/launch', async (c) => {
   return c.json({ launched: created.length, failed: failures.length, pieces: created, failures }, 201);
 });
 
+// POST /v1/campaigns/:id/add-pack — append Shift pack items as timeline days
+campaignRoutes.post('/:id/add-pack', async (c) => {
+  const campaignId = c.req.param('id');
+  const workspaceId = c.req.header('x-workspace-id') ?? c.get('workspaceId');
+  if (!workspaceId) throw new HTTPException(400, { message: 'x-workspace-id header is required' });
+
+  const json = await c.req.json().catch(() => ({}));
+  const parsed = z
+    .object({
+      pack_id: z.string().min(1),
+      item_ids: z.array(z.string()).optional(),
+    })
+    .safeParse(json);
+  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+
+  const pack = getShiftPack(parsed.data.pack_id);
+  if (!pack) throw new HTTPException(404, { message: `Unknown pack: ${parsed.data.pack_id}` });
+
+  const items = parsed.data.item_ids?.length
+    ? pack.items.filter((i) => parsed.data.item_ids!.includes(i.id))
+    : pack.items;
+  if (!items.length) throw new HTTPException(400, { message: 'No pack items selected' });
+
+  const sb = getSupabaseAdmin();
+  const { data: campaign, error: campaignError } = await sb
+    .from('campaigns')
+    .select('id, start_date, end_date, messaging_pillars')
+    .eq('id', campaignId)
+    .eq('workspace_id', workspaceId)
+    .single();
+  if (campaignError || !campaign) throw new HTTPException(404, { message: 'Campaign not found' });
+
+  const { data: existing } = await sb
+    .from('campaign_timeline')
+    .select('day_number, date_scheduled')
+    .eq('campaign_id', campaignId)
+    .order('day_number', { ascending: false })
+    .limit(1);
+
+  let nextDay = (existing?.[0]?.day_number ?? -1) + 1;
+  let cursor = existing?.[0]?.date_scheduled
+    ? new Date(`${existing[0].date_scheduled}T12:00:00Z`)
+    : new Date(`${campaign.start_date}T12:00:00Z`);
+  if (existing?.[0]?.date_scheduled) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  const pillars = Array.isArray(campaign.messaging_pillars) ? campaign.messaging_pillars : [];
+  const pillarId =
+    pillars.length && typeof pillars[0] === 'object' && pillars[0] && 'id' in pillars[0]
+      ? String((pillars[0] as { id: string }).id)
+      : undefined;
+
+  const rows = items.map((item) => {
+    const dateScheduled = cursor.toISOString().slice(0, 10);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    const channel = (item.primary_channel && CAMPAIGN_CHANNELS.includes(item.primary_channel as typeof CAMPAIGN_CHANNELS[number]))
+      ? item.primary_channel
+      : 'x';
+    const day = {
+      campaign_id: campaignId,
+      day_number: nextDay++,
+      date_scheduled: dateScheduled,
+      messaging_pillar_id: pillarId,
+      content_type: 'mixed' as const,
+      primary_channel: channel,
+      secondary_channels: [] as string[],
+      content_ideas: [
+        {
+          id: item.id,
+          title: item.title,
+          outline: item.outline,
+          visual_type: item.visual_type,
+          demoforge_template_id: item.demoforge_template_id,
+          notes: `From pack ${pack.id}`,
+        },
+      ],
+      published_pieces: [],
+    };
+    return day;
+  });
+
+  const { data, error } = await sb.from('campaign_timeline').insert(rows).select();
+  if (error) throw new HTTPException(500, { message: error.message });
+
+  await logActivity({
+    source: 'campaigns',
+    source_type: 'adapter',
+    event_type: 'campaign_pack_added',
+    summary: `Added pack ${pack.id} (${rows.length} day(s)) to campaign ${campaignId}`,
+    payload: { campaign_id: campaignId, pack_id: pack.id, added: rows.length },
+  });
+
+  return c.json({ added: rows.length, timeline: data ?? [] }, 201);
+});
+
+// POST /v1/campaigns/:id/refill-evergreen — append due recycle topics as timeline days
+campaignRoutes.post('/:id/refill-evergreen', async (c) => {
+  const campaignId = c.req.param('id');
+  const workspaceId = c.req.header('x-workspace-id') ?? c.get('workspaceId');
+  if (!workspaceId) throw new HTTPException(400, { message: 'x-workspace-id header is required' });
+
+  const sb = getSupabaseAdmin();
+  const { data: campaign, error: campaignError } = await sb
+    .from('campaigns')
+    .select('id, start_date, messaging_pillars')
+    .eq('id', campaignId)
+    .eq('workspace_id', workspaceId)
+    .single();
+  if (campaignError || !campaign) throw new HTTPException(404, { message: 'Campaign not found' });
+
+  const nowIso = new Date().toISOString();
+  const { data: topics, error: topicErr } = await sb
+    .from('topics')
+    .select('id, topic_text, recycle_after')
+    .eq('workspace_id', workspaceId)
+    .not('recycle_after', 'is', null)
+    .lte('recycle_after', nowIso)
+    .order('recycle_after', { ascending: true })
+    .limit(14);
+  if (topicErr) throw new HTTPException(500, { message: topicErr.message });
+  if (!topics?.length) {
+    return c.json({ added: 0, message: 'No evergreen topics due for recycle' });
+  }
+
+  const { data: existing } = await sb
+    .from('campaign_timeline')
+    .select('day_number, date_scheduled')
+    .eq('campaign_id', campaignId)
+    .order('day_number', { ascending: false })
+    .limit(1);
+
+  let nextDay = (existing?.[0]?.day_number ?? -1) + 1;
+  let cursor = existing?.[0]?.date_scheduled
+    ? new Date(`${existing[0].date_scheduled}T12:00:00Z`)
+    : new Date(`${campaign.start_date}T12:00:00Z`);
+  if (existing?.[0]?.date_scheduled) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  const pillars = Array.isArray(campaign.messaging_pillars) ? campaign.messaging_pillars : [];
+  const pillarId =
+    pillars.length && typeof pillars[0] === 'object' && pillars[0] && 'id' in pillars[0]
+      ? String((pillars[0] as { id: string }).id)
+      : undefined;
+
+  const rows = topics.map((t) => {
+    const dateScheduled = cursor.toISOString().slice(0, 10);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+    return {
+      campaign_id: campaignId,
+      day_number: nextDay++,
+      date_scheduled: dateScheduled,
+      messaging_pillar_id: pillarId,
+      content_type: 'engagement' as const,
+      primary_channel: 'linkedin',
+      secondary_channels: ['x'],
+      content_ideas: [
+        {
+          id: `evergreen-${t.id}`,
+          title: String(t.topic_text).slice(0, 120),
+          outline: `Evergreen recycle of topic ${t.id}: ${t.topic_text}`,
+          visual_type: 'demo_video',
+          demoforge_template_id: 'shift-queue-modes',
+          notes: 'evergreen refill',
+          source_topic_id: t.id,
+        },
+      ],
+      published_pieces: [],
+    };
+  });
+
+  const { data, error } = await sb.from('campaign_timeline').insert(rows).select();
+  if (error) throw new HTTPException(500, { message: error.message });
+
+  // Clear recycle_after so topics aren't re-added until BioLoop marks them again
+  await sb
+    .from('topics')
+    .update({ recycle_after: null })
+    .in(
+      'id',
+      topics.map((t) => t.id),
+    );
+
+  await logActivity({
+    source: 'campaigns',
+    source_type: 'adapter',
+    event_type: 'campaign_evergreen_refilled',
+    summary: `Refilled ${rows.length} evergreen day(s) on campaign ${campaignId}`,
+    payload: { campaign_id: campaignId, added: rows.length },
+  });
+
+  return c.json({ added: rows.length, timeline: data ?? [] }, 201);
+});
+
 // ============================================================================
 // Campaign KPI Tracking
 // ============================================================================
@@ -986,6 +1228,11 @@ campaignRoutes.get('/:id/kpi', async (c) => {
 
   if (campaignError || !campaign) {
     throw new HTTPException(404, { message: 'Campaign not found' });
+  }
+
+  // Optional backfill when UI requests a fresh sync
+  if (c.req.query('sync') === '1') {
+    await syncCampaignKpis(campaignId).catch(() => 0);
   }
 
   const { data, error } = await sb

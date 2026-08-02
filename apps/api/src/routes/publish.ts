@@ -4,6 +4,8 @@ import { z } from "zod";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import { recordGrowthEvent } from "../lib/growth.js";
+import { assertMediaReady, withForceMedia } from "../lib/media-gate.js";
+import { resolveCampaignIdForPiece } from "../lib/campaign-kpi.js";
 
 // Adapters
 import { postTweet } from "../adapters/x.js";
@@ -17,6 +19,7 @@ const bodySchema = z.object({
   content_piece_id: z.string().uuid(),
   // Manual-post channels supply the external URL after the human posts it
   external_post_url: z.string().url().optional(),
+  force: z.boolean().optional(),
 });
 
 export const publishRoutes = new Hono();
@@ -27,18 +30,44 @@ publishRoutes.post("/:channel", async (c) => {
   const parsed  = bodySchema.safeParse(json);
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
-  const { content_piece_id, external_post_url } = parsed.data;
+  const { content_piece_id, external_post_url, force } = parsed.data;
   const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
 
   const { data: piece, error } = await sb
     .from("content_pieces")
-    .select("id, channel_slug, format, content_payload, status")
+    .select("id, channel_slug, format, content_payload, status, media_status, image_url, video_url")
     .eq("workspace_id", ws)
     .eq("id", content_piece_id).single();
   if (error || !piece) throw new HTTPException(404, { message: "Not found" });
   if (piece.status !== "approved" && piece.status !== "queued") {
     throw new HTTPException(400, { message: `Cannot publish from status ${piece.status}` });
+  }
+
+  let payload = withForceMedia(
+    piece.content_payload as Record<string, unknown> | null,
+    force === true,
+  );
+  try {
+    assertMediaReady(
+      {
+        media_status: piece.media_status,
+        image_url: piece.image_url,
+        video_url: piece.video_url,
+        content_payload: payload,
+      },
+      { force },
+    );
+  } catch (e) {
+    throw new HTTPException(400, { message: e instanceof Error ? e.message : String(e) });
+  }
+
+  if (force === true) {
+    await sb
+      .from("content_pieces")
+      .update({ content_payload: payload, updated_at: new Date().toISOString() })
+      .eq("workspace_id", ws)
+      .eq("id", content_piece_id);
   }
 
   // 2c: if the piece is queued, claim it atomically so this manual publish can't
@@ -54,8 +83,8 @@ publishRoutes.post("/:channel", async (c) => {
     }
   }
 
-  const payload = piece.content_payload as Record<string, unknown>;
-  const slug    = piece.channel_slug as string;
+  const slug = piece.channel_slug as string;
+  const campaignId = await resolveCampaignIdForPiece(content_piece_id).catch(() => null);
 
   // Manual-post channels: just record the external URL
   if (["tiktok", "instagram", "facebook"].includes(slug)) {
@@ -82,7 +111,10 @@ publishRoutes.post("/:channel", async (c) => {
     // Growth OS — Loop A: a published piece is an acquisition impression.
     await recordGrowthEvent({
       loop: "acquisition", kind: "impression", channel: slug,
-      meta: { content_piece_id, external_post_id: external_post_url, manual: true, workspace_id: ws },
+      meta: {
+        content_piece_id, external_post_id: external_post_url, manual: true, workspace_id: ws,
+        ...(campaignId ? { campaign_id: campaignId } : {}),
+      },
     });
     return c.json({ ok: true, external_post_id: external_post_url, manual: true });
   }
@@ -171,7 +203,10 @@ publishRoutes.post("/:channel", async (c) => {
     // Growth OS — Loop A: a published piece is an acquisition impression.
     await recordGrowthEvent({
       loop: "acquisition", kind: "impression", channel: slug,
-      meta: { content_piece_id, external_post_id: externalId, workspace_id: ws },
+      meta: {
+        content_piece_id, external_post_id: externalId, workspace_id: ws,
+        ...(campaignId ? { campaign_id: campaignId } : {}),
+      },
     });
 
     return c.json({ ok: true, external_post_id: externalId });

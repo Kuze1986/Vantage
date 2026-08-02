@@ -250,25 +250,41 @@ async function runTests() {
   }
 
   // =========================================================================
-  // Step 6: Schedule Content for Publishing
+  // Step 6: Schedule Content for Publishing (media gate + force)
   // =========================================================================
   for (let i = 0; i < Math.min(contentPieceIds.length, 3); i++) {
     try {
       const start = Date.now();
       const scheduledFor = new Date(Date.now() + (i + 1) * 3600000).toISOString(); // Stagger by 1 hour
-      const response = await apiCall<any>("POST", "/v1/schedule", {
-        piece_id: contentPieceIds[i],
+      await apiCall<any>("POST", "/v1/schedule", {
+        content_piece_id: contentPieceIds[i],
         scheduled_for: scheduledFor,
+        force: true, // closed-loop harness bypasses media gate
       });
       const duration = Date.now() - start;
 
       logStep(step++, `Schedule Content (${i + 1}/3)`, "PASS", duration, undefined, {
         piece_id: contentPieceIds[i],
         scheduled_for: scheduledFor,
+        force: true,
       });
     } catch (e) {
       logStep(step++, `Schedule Content (${i + 1}/3)`, "FAIL", 0, String(e));
     }
+  }
+
+  // =========================================================================
+  // Step 6b: Shift packs catalog (FEATURES parity)
+  // =========================================================================
+  try {
+    const start = Date.now();
+    const packs = await apiCall<{ packs: { id: string }[] }>("GET", "/v1/campaigns/meta/shift-packs");
+    const duration = Date.now() - start;
+    logStep(step++, "List Shift Packs", packs.packs?.length ? "PASS" : "FAIL", duration, undefined, {
+      pack_count: packs.packs?.length ?? 0,
+    });
+  } catch (e) {
+    logStep(step++, "List Shift Packs", "FAIL", 0, String(e));
   }
 
   // =========================================================================
@@ -279,7 +295,8 @@ async function runTests() {
     try {
       const start = Date.now();
       const response = await apiCall<any>("POST", `/v1/publish/x`, {
-        piece_id: contentPieceIds[i],
+        content_piece_id: contentPieceIds[i],
+        force: true,
       });
       const duration = Date.now() - start;
 
@@ -350,19 +367,18 @@ async function runTests() {
   }
 
   // =========================================================================
-  // Step 10: Fetch Campaign KPI Metrics
+  // Step 10: Fetch Campaign KPI Metrics (with sync backfill)
   // =========================================================================
   try {
     const start = Date.now();
-    const response = await apiCall<any>("GET", `/v1/campaigns/${campaignId}/kpi`);
+    const response = await apiCall<any>("GET", `/v1/campaigns/${campaignId}/kpi?sync=1`);
     const duration = Date.now() - start;
+    const rows = response.kpi_tracking ?? [];
 
     logStep(step++, "Fetch Campaign KPI Metrics", "PASS", duration, undefined, {
-      kpi_targets: response.kpi_targets,
-      current_metrics: {
-        engagement_events: response.engagement_events_7d,
-        reach: response.reach_7d,
-      },
+      kpi_rows: rows.length,
+      impressions: rows.reduce((s: number, r: { impressions?: number }) => s + (r.impressions ?? 0), 0),
+      engagements: rows.reduce((s: number, r: { engagements?: number }) => s + (r.engagements ?? 0), 0),
     });
   } catch (e) {
     logStep(step++, "Fetch Campaign KPI Metrics", "FAIL", 0, String(e));

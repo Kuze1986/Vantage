@@ -89,10 +89,15 @@ export const DEFAULT_BRAND_ID = "shift";
 
 /** Modes captured by shift-product-stills (rotation order; Sweep is the hero close). */
 export const PRODUCT_STILL_MODE_ROTATION = [
+  "queue",
+  "mcu",
+  "streak",
+  "blueprints",
+  "callback",
+  "matrix",
   "minefield",
   "polarity",
-  "matrix",
-  "blueprints",
+  "drop",
   "sweep",
 ] as const;
 

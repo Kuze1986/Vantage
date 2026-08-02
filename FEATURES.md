@@ -296,17 +296,23 @@ The `scheduled_for` field controls when the cadence tick will attempt publishing
 set either by the manual schedule endpoint or automatically by the auto-approve pipeline
 based on the channel's `posting_hours` config.
 
-**Media-ready gate:** Schedule and publish reject with `409` when a piece still needs media
-(`media_status` in `pending|failed`, or visual types `demo_video|product_still|social_graphic`
-without ready media / URLs). Pass `force: true` to override (logged in Queue as Force Queue /
-Force Publish). Cadence tick skips gated pieces. Helper: `apps/api/src/lib/media-gate.ts`.
+**Media-ready gate:** Schedule and publish reject with `400` when a piece still needs media
+(`media_status` in `pending|failed`, or `needs_social_kit` without an image). Pass
+`force: true` to override (stamps `content_payload.force_media` so cadence honors it).
+Cadence tick skips gated pieces (`media_gated_skip` activity). Helper:
+`apps/api/src/lib/media-gate.ts`. Bulk schedule: `POST /v1/queue/bulk-schedule`.
+
+**Autopilot auto-queue:** Campaign launch (and any piece with `scheduled_for`) moves to
+`queued` when media is `none`/`ready` (`apps/api/src/lib/auto-queue.ts`). DemoForge
+write-back and Queue media PATCH also auto-queue approved scheduled pieces.
 
 **Files:**
-- `apps/api/src/routes/schedule.ts` — `POST /v1/schedule`
+- `apps/api/src/routes/schedule.ts` — `POST /v1/schedule` (`force` optional)
 - `apps/api/src/routes/audit.ts` — `POST /v1/audit` (transitions auditing → approved/rejected)
-- `apps/api/src/routes/publish.ts` — `POST /v1/publish/:channel`
-- `apps/api/src/routes/queue.ts` — `GET /v1/queue`
+- `apps/api/src/routes/publish.ts` — `POST /v1/publish/:channel` (`force` optional)
+- `apps/api/src/routes/queue.ts` — `GET /v1/queue`, `POST /v1/queue/bulk-schedule`, calendar
 - `apps/api/src/lib/media-gate.ts`
+- `apps/api/src/lib/auto-queue.ts`
 
 ---
 
@@ -536,11 +542,25 @@ Verifies Resend/Svix signature: `HMAC-SHA256(RESEND_WEBHOOK_SECRET, "${timestamp
 Handles multiple signatures in the `svix-signature` header (space-separated).
 Inserts email delivery/open/click events.
 
+**Downstream side effects (all matched events):**
+1. Insert `engagement_events` (deduped by `external_event_id` where applicable)
+2. Upsert `campaign_kpi_tracking` when the piece links to a campaign
+   (`apps/api/src/lib/campaign-kpi.ts`)
+3. Fail-soft Growth OS write via `public.growth_record_event`
+   (`apps/api/src/lib/growth.ts`) — Loop A `impression`/`reply`
+4. Local BioLoop Learning (daily/edge) still reads `engagement_events` for weights
+
+Cadence publish and Reddit engagement poll also call Growth OS + campaign KPI sync.
+Manual publish already did; email webhooks and Reddit poll now match.
+
 **Files:**
 - `apps/api/src/routes/webhooks.ts`
+- `apps/api/src/lib/growth.ts`
+- `apps/api/src/lib/campaign-kpi.ts`
+- `apps/api/src/services/reddit-engagement.ts`
 
 **Configuration:** `X_WEBHOOK_SECRET` (or `X_CLIENT_SECRET`), `LINKEDIN_WEBHOOK_SECRET`,
-`RESEND_WEBHOOK_SECRET`.
+`RESEND_WEBHOOK_SECRET`. Nexus-core must expose `growth_record_event` (fail-soft if absent).
 
 ---
 
@@ -636,11 +656,11 @@ all applied in post-processing by FFmpeg before upload.
    to storage as PNG previews (`demoforge/frames/<job_id>/frame-N.png`).
 8. **Upload** — final MP4 uploaded to `vantage-media` at `demoforge/<format>/<job_id>.mp4`.
 9. **Content-piece write-back** — when the job has a `content_piece_id`, completion sets
-   `content_pieces.video_url`, picks a mid-sequence keyframe (~40% index of `extracted_frames`,
-   fallback first) into `demoforge_jobs.thumbnail_url` + piece `image_url` /
-   `content_payload.image_url`, and sets `media_status` to `ready` (or `failed` on error).
-   A/B siblings sharing `demoforge_job_id` get per-piece `thumbnail_frame_index` frames.
-   Operators can override via `POST /v1/demoforge/jobs/:id/set-thumbnail` `{ frame_index }`.
+   `content_pieces.video_url`, picks a product-still / keyframe into `demoforge_jobs.thumbnail_url`
+   + piece `image_url` / `content_payload.image_url`, and sets `media_status` to `ready`
+   (or `failed` on error). If the piece is `approved` with `scheduled_for` set, status flips
+   to `queued` (campaign autopilot). Operators can override thumbnail via
+   `POST /v1/demoforge/jobs/:id/set-thumbnail` `{ frame_index }`.
    Job failure with a linked piece triggers Slack/email alerts (`ALERT_SLACK_WEBHOOK` /
    `ALERT_EMAIL` + Resend) when configured.
 
@@ -656,8 +676,10 @@ MCQ → Streak → Blueprints → Matrix → Minefield → Polarity → Drop —
 Field Dossier / Callback are intentionally omitted.
 
 **`shift-product-stills`:** silent LinkedIn-format capture for `visual_type=product_still` —
-Minefield → Polarity → Matrix → Blueprints → Sweep diagram. Default for product stills
-(overrides campaign video template defaults). Hero thumbnail = final Sweep frame.
+Queue → MCU → Streak → Blueprints → Callback → Matrix → Minefield → Polarity → Drop →
+Sweep. Each mode ends with a `capture` step (labeled PNG). Write-back stores
+`content_payload.mode_stills[{mode,url}]`; hero `image_url` prefers the Sweep still.
+Queue shows a mode-still strip (click to set the piece thumbnail).
 
 **Job lifecycle:** `pending → recording → synthesizing → mixing → done / failed`.
 Processing is sequential (one job at a time) to avoid overloading the Railway worker.
@@ -671,6 +693,7 @@ Processing is sequential (one job at a time) to avoid overloading the Railway wo
 - `narrate` — pause for narration (audio-only, no browser action)
 - `eval` — run arbitrary JS via `addInitScript` (fires on every navigation; used for Shift auth bypass / content-pack flags)
 - `run` — evaluate JS in the live page (used by Shift demo helpers like `__shiftDemoPlay`)
+- `capture` — full-viewport PNG still labeled by `text` (mode slug) for product galleries
 
 **Shift live site:** Campaign templates record `https://theshift.bioloopnexus.com`, which has a
 real login wall. DemoForge injects `sessionStorage.the_shift_auth_bypass_mode=admin` (and
@@ -938,6 +961,9 @@ dispatch pieces from this page.
 - Ilita audit notes
 - A/B variant badge (if `variant_group_id` is set)
 - Image / video preview and media_status badges
+- **Mode stills strip** (product_still) — labeled Queue-mode thumbnails; click to set hero image
+- **Preview modal** — all formats including Threads/Bluesky; shows piece `image_url` /
+  `video_url` and mode gallery
 - **Video script panel** (TikTok / Instagram / Facebook only): expandable section showing
   hook, script, on-screen text, hashtags, and upload instructions. One-click copy-to-clipboard.
 
@@ -1229,22 +1255,22 @@ marketing goals (messaging pillars, channel mix, posting cadence) with daily con
 **Campaign timeline** stores one row per day:
 - `campaign_id`, `date`
 - `primary_channel` + `secondary_channels` — launch generates one Kuze piece per channel listed
-  (primary and each secondary), not primary alone
+  (primary and each secondary). Timeline generation **fills secondaries with every other
+  channel in `channel_mix`**, so enabling 8 channels → 8 pieces per day (not primary-only).
 - `content_ideas` — JSONB with AI-suggested content hooks for that day, including optional
   `visual_type` (`demo_video` | `product_still` | `social_graphic` | `none`),
   `demoforge_template_id`, and `brand_id` (Shift templates/brand are defaults, overridable)
 - `published_pieces` — array of `content_piece_id`s published on that day (plus media status)
 
 **Visual launch pipeline:** `POST /v1/campaigns/:id/launch` generates Kuze text for each
-day channel (primary + secondaries), then:
+day channel (primary + secondaries), runs Ilita audit (fail → `rejected`, no queue), then:
 - `demo_video` — enqueues channel-default DemoForge template (narrated reel / UBE demo)
-- `product_still` — enqueues `shift-product-stills` (Minefield → Polarity → Matrix → Blueprints →
-  Sweep diagram). Captions off, clean grade. Write-back prefers the **last keyframe** (Sweep hero)
-  as `image_url` / `demoforge_jobs.thumbnail_url`; earlier frames remain in `extracted_frames` for
-  Thumbnail Studio rotation
-- `social_graphic` — flags `needs_social_kit` for Queue OG/quote attach
-- `none` — text only
-Pieces land as approved drafts on the Queue for review with media badges / video preview.
+- `product_still` — enqueues `shift-product-stills` (Queue modes → Sweep). Captions off, clean
+  grade. Write-back attaches labeled `mode_stills` plus Sweep as `image_url` /
+  `demoforge_jobs.thumbnail_url` and **auto-queues** the piece when `scheduled_for` is set
+- `social_graphic` — flags `needs_social_kit` for Queue OG/quote attach (`approved` until image)
+- `none` — text only → status `queued` immediately for cadence at `scheduled_for`
+Media-pending pieces stay `approved` until DemoForge / Social Kit write-back, then auto-queue.
 
 **Shift content packs:** curated seeds in `apps/api/src/lib/shift-packs.ts`
 (`GET /v1/campaigns/meta/shift-packs`, `POST /v1/campaigns/:id/add-pack`, plus
@@ -1253,18 +1279,11 @@ Pieces land as approved drafts on the Queue for review with media badges / video
 with `visual_type=demo_video`. Details UI: open calendar (`/calendar?campaign_id=`),
 pending-media count, pack picker, refill button.
 
-**Campaign KPI tracking** aggregates daily metrics:
-- Engagement events, reach, conversions per day
-- Running total toward campaign goals
-- Per-channel and per-pillar breakdowns
-
-**Service functions (`apps/api/src/lib/campaigns.ts`):**
-- `generateContentIdeas()` — LLM calls Claude with the campaign's messaging pillars, date context,
-  and recent performance to suggest 5–10 specific content hooks for a given day
-- `generateTimeline()` — builds the `campaign_timeline` entries for a date range, balancing pillar
-  distribution and channel mix
-- `generateCampaignSummary()` — produces a narrative executive summary of campaign performance
-  and recommendations
+**Campaign KPI tracking** aggregates daily metrics into `campaign_kpi_tracking`:
+- Populated live from webhooks / Reddit poll (`recordCampaignEngagement`)
+- Optional backfill: `GET /v1/campaigns/:id/kpi?sync=1` → `syncCampaignKpis`
+- Per-channel rows plus `source=all` rollup; UI KPI band prefers `all`
+- Progress toward `kpi_targets` (impressions / engagements / follows)
 
 **API routes (`apps/api/src/routes/campaigns.ts`):**
 - `POST /v1/campaigns` — create campaign with validation (requires name, messaging_pillars, cadence_config)
@@ -1282,18 +1301,17 @@ pending-media count, pack picker, refill button.
 - `POST /v1/campaigns/:id/refill-evergreen` — append evergreen Shift topics as days
 
 **UI (`apps/web/src/pages/CampaignBuilderPage.tsx`):**
-Three-view interface:
-- **List view** — all campaigns with status badge, date range, and active engagement count
+Signal Reactor chrome (BioLoop Nexus Design `vantage-campaigns.jsx` language):
+- **List / portfolio** — AUTOPILOT / NEEDS REVIEW / PAUSED HUD cards, channel count chips
 - **Create view** — form with campaign name, eight-channel mix toggles (+ daily targets),
   cadence config, and KPI target inputs (defaults enable all social channels)
-- **Details view** — dashboard showing:
+- **Details view:**
+  - Status HUD + **Engage Autopilot** launch
+  - **KPI band** — impressions / engagements / rate / follows vs targets
+  - **Shift packs / evergreen / calendar** — add pack days, refill evergreen, open
+    `/calendar?campaign_id=`, pending-media count
+  - **Timeline panel** — per-day editors, generate content, AI timeline
   - **Edit campaign** — pillars, channel mix, brand/template defaults
-  - **Timeline panel** — per-day editors for primary + secondary channels, idea brief, visual type,
-    DemoForge template, and Social Kit brand; generate/launch actions
-  - **Shift packs / evergreen / calendar** — add pack days, refill evergreen, open filtered calendar,
-    pending-media count
-  - **KPI dashboard** — progress cards toward each goal, with trend sparklines
-  - **Action panel** — "Generate timeline", "Launch / generate content", "Archive campaign" buttons
 
 **Database:**
 - `supabase/migrations/20260626000000_campaign_builder.sql` — campaigns, timeline, KPI tables

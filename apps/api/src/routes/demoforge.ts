@@ -58,7 +58,7 @@ const soundEffectSchema = z.object({
 });
 
 const scriptStepSchema = z.object({
-  action:    z.enum(["navigate", "click", "fill", "wait", "scroll", "narrate", "eval", "run"]),
+  action:    z.enum(["navigate", "click", "fill", "wait", "scroll", "narrate", "eval", "run", "capture"]),
   selector:  z.string().optional(),
   text:      z.string().optional(),
   ms:        z.number().int().nonnegative().optional(),
@@ -161,10 +161,15 @@ demoforgeRoutes.get("/templates", async (c) => {
       product_still: "shift-product-stills",
     },
     product_still_mode_rotation: [
+      "queue",
+      "mcu",
+      "streak",
+      "blueprints",
+      "callback",
+      "matrix",
       "minefield",
       "polarity",
-      "matrix",
-      "blueprints",
+      "drop",
       "sweep",
     ],
   });

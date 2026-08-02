@@ -149,7 +149,11 @@ export const vantageApi = {
     vantageFetch("/v1/queue/bulk-schedule", {
       method: "POST",
       body: JSON.stringify({ content_piece_ids, force }),
-    }) as Promise<{ scheduled: number; skipped: { id: string; reason: string }[]; ids: string[] }>,
+    }) as Promise<{
+      ok: boolean;
+      scheduled: number;
+      results: { id: string; ok: boolean; error?: string }[];
+    }>,
 
   getPublishPack: (id: string) =>
     vantageFetch(`/v1/queue/${id}/publish-pack`) as Promise<{
@@ -637,7 +641,7 @@ export const vantageApi = {
         content_piece_id: string; channel: string; day_number: number;
         media_status: string; demoforge_job_id?: string;
       }[];
-      failures: { day_number: number; error: string }[];
+      failures: { day_number: number; channel?: string; error: string }[];
     }>,
 
   getCampaignKPI: (campaignId: string) =>

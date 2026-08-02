@@ -9,6 +9,9 @@ import { loadSettings } from "../lib/settings.js";
 import { listAllWorkspaceIds } from "../lib/workspace.js";
 import { sendAlert } from "../lib/alert.js";
 import { RateLimitError } from "../lib/rate-limit-error.js";
+import { recordGrowthEvent } from "../lib/growth.js";
+import { isMediaGated, mediaGateReason, withForceMedia } from "../lib/media-gate.js";
+import { resolveCampaignIdForPiece } from "../lib/campaign-kpi.js";
 import { channelFormatMap } from "@vantage/prompts";
 import type { ChannelSlug } from "@vantage/prompts";
 
@@ -43,6 +46,9 @@ type ContentPieceRow = {
   format: string;
   content_payload: Record<string, unknown>;
   retry_count: number;
+  media_status?: string | null;
+  image_url?: string | null;
+  video_url?: string | null;
 };
 
 // 3A-6: Exponential backoff delays — [0]=5m, [1]=15m, [2]=1h, then give up
@@ -53,19 +59,43 @@ const RETRY_DELAYS_MS = [5 * 60_000, 15 * 60_000, 60 * 60_000];
 const PUBLISH_LOCK_STALE_MS = 10 * 60_000;
 
 // ── Manual schedule: mark a piece queued with optional time ──────────────────
-export async function scheduleContentPiece(workspaceId: string, contentPieceId: string, scheduledForIso?: string): Promise<void> {
+export async function scheduleContentPiece(
+  workspaceId: string,
+  contentPieceId: string,
+  scheduledForIso?: string,
+  opts?: { force?: boolean },
+): Promise<void> {
   const sb = getSupabaseAdmin();
   const scheduledFor = scheduledForIso ?? new Date().toISOString();
+  const force = opts?.force === true;
 
   const { data: piece, error: loadErr } = await sb
     .from("content_pieces")
-    .select("id, status").eq("workspace_id", workspaceId).eq("id", contentPieceId).single();
+    .select("id, status, media_status, image_url, video_url, content_payload")
+    .eq("workspace_id", workspaceId)
+    .eq("id", contentPieceId)
+    .single();
   if (loadErr || !piece) throw new Error("Content piece not found");
   if (piece.status !== "approved") throw new Error(`Can only schedule approved pieces, got ${piece.status}`);
+
+  const payload = withForceMedia(
+    piece.content_payload as Record<string, unknown> | null,
+    force,
+  );
+  const gatedPiece = {
+    media_status: piece.media_status,
+    image_url: piece.image_url,
+    video_url: piece.video_url,
+    content_payload: payload,
+  };
+  if (!force && isMediaGated(gatedPiece)) {
+    throw new Error(mediaGateReason(gatedPiece));
+  }
 
   const { error } = await sb.from("content_pieces").update({
     status: "queued",
     scheduled_for: scheduledFor,
+    content_payload: payload,
     updated_at: new Date().toISOString(),
   }).eq("workspace_id", workspaceId).eq("id", contentPieceId);
   if (error) throw new Error(error.message);
@@ -73,8 +103,8 @@ export async function scheduleContentPiece(workspaceId: string, contentPieceId: 
   await logActivity({
     source: "scheduler", source_type: "system",
     event_type: "scheduled",
-    summary: `Content piece ${contentPieceId} queued for ${scheduledFor}`,
-    payload: { content_piece_id: contentPieceId, scheduled_for: scheduledFor },
+    summary: `Content piece ${contentPieceId} queued for ${scheduledFor}${force ? " (force)" : ""}`,
+    payload: { content_piece_id: contentPieceId, scheduled_for: scheduledFor, force },
     workspace_id: workspaceId,
   });
 }
@@ -161,6 +191,20 @@ export async function publishPiece(workspaceId: string, piece: ContentPieceRow, 
       summary: `Cadence published ${slug} piece ${piece.id} → ${externalId}`,
       payload: { content_piece_id: piece.id, external_post_id: externalId, channel: slug },
       workspace_id: workspaceId,
+    });
+
+    const campaignId = await resolveCampaignIdForPiece(piece.id).catch(() => null);
+    await recordGrowthEvent({
+      loop: "acquisition",
+      kind: "impression",
+      channel: slug,
+      meta: {
+        content_piece_id: piece.id,
+        external_post_id: externalId,
+        workspace_id: workspaceId,
+        cadence: true,
+        ...(campaignId ? { campaign_id: campaignId } : {}),
+      },
     });
   } catch (e) {
     const msg        = e instanceof Error ? e.message : String(e);
@@ -262,7 +306,7 @@ export async function cadenceTickForWorkspace(workspaceId: string): Promise<void
   // 3A-6: also check retry_after — only pick up pieces whose retry window has elapsed
   const { data: pieces, error } = await sb
     .from("content_pieces")
-    .select("id, channel_slug, format, content_payload, retry_count")
+    .select("id, channel_slug, format, content_payload, retry_count, media_status, image_url, video_url")
     .eq("workspace_id", workspaceId)
     .eq("status", "queued")
     .lte("scheduled_for", now)
@@ -283,6 +327,22 @@ export async function cadenceTickForWorkspace(workspaceId: string): Promise<void
   for (const piece of pieces as ContentPieceRow[]) {
     const channelRow = channelMap[piece.channel_slug] as ChannelRow | undefined;
     if (!channelRow) continue;
+
+    if (isMediaGated(piece)) {
+      await logActivity({
+        source: "scheduler",
+        source_type: "system",
+        event_type: "media_gated_skip",
+        summary: `Cadence skipped ${piece.id}: ${mediaGateReason(piece)}`,
+        payload: {
+          content_piece_id: piece.id,
+          media_status: piece.media_status,
+          reason: mediaGateReason(piece),
+        },
+        workspace_id: workspaceId,
+      }).catch(() => {});
+      continue;
+    }
 
     // 2c: Atomic claim — flip queued→publishing only if still queued. The WHERE
     // status='queued' makes this a compare-and-swap: a concurrent tick (or a

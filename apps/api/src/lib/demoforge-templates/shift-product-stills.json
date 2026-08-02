@@ -1,54 +1,48 @@
 {
   "id": "shift-product-stills",
   "name": "The Shift — Product Still Capture",
-  "tagline": "Mode rotation for campaign stills — Minefield, Polarity, Matrix, Blueprints — closing on The Sweep schematic as the hero frame.",
+  "tagline": "Queue mode stills — MCU, Streak, Blueprints, Callback, Matrix, Minefield, Polarity, Drop — closing on The Sweep schematic as the hero frame.",
   "audience": "Campaign product_still / LinkedIn + feed thumbnails",
   "format": "linkedin",
-  "estimatedSec": 90,
-  "estimatedSecNote": "Silent capture; holds are sized for keyframe extraction (hero = final Sweep diagram)",
+  "estimatedSec": 140,
+  "estimatedSecNote": "Silent capture; each mode ends with a labeled screenshot for Queue mode gallery (hero = Sweep)",
   "baseUrlPlaceholder": "{BASE}",
   "defaultBaseUrl": "https://theshift.bioloopnexus.com",
   "steps": [
     {
       "action": "navigate",
       "selector": "{BASE}/Queue",
-      "ms": 1600,
+      "ms": 1800,
+      "narration": ""
+    },
+    {
+      "action": "capture",
+      "text": "queue",
+      "ms": 200,
       "narration": ""
     },
     {
       "action": "navigate",
-      "selector": "{BASE}/Minefield",
-      "ms": 700,
+      "selector": "{BASE}/MCQ",
+      "ms": 1400,
       "narration": ""
     },
     {
-      "action": "run",
-      "selector": "window.__shiftDemoPlay.playMineRound()",
-      "ms": 2800,
-      "narration": ""
-    },
-    {
-      "action": "navigate",
-      "selector": "{BASE}/Polarity",
-      "ms": 700,
-      "narration": ""
-    },
-    {
-      "action": "run",
-      "selector": "window.__shiftDemoPlay.playPolarityRound()",
-      "ms": 2800,
+      "action": "capture",
+      "text": "mcu",
+      "ms": 200,
       "narration": ""
     },
     {
       "action": "navigate",
-      "selector": "{BASE}/Matrix",
-      "ms": 700,
+      "selector": "{BASE}/Streak",
+      "ms": 1400,
       "narration": ""
     },
     {
-      "action": "run",
-      "selector": "window.__shiftDemoPlay.playMatrixRound()",
-      "ms": 2800,
+      "action": "capture",
+      "text": "streak",
+      "ms": 200,
       "narration": ""
     },
     {
@@ -60,7 +54,103 @@
     {
       "action": "run",
       "selector": "window.__shiftDemoPlay.playBlueprintsStep()",
-      "ms": 2400,
+      "ms": 2200,
+      "narration": ""
+    },
+    {
+      "action": "capture",
+      "text": "blueprints",
+      "ms": 200,
+      "narration": ""
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/FieldDossier",
+      "ms": 700,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playDossierRound()",
+      "ms": 2200,
+      "narration": ""
+    },
+    {
+      "action": "capture",
+      "text": "callback",
+      "ms": 200,
+      "narration": ""
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Matrix",
+      "ms": 700,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playMatrixRound()",
+      "ms": 2200,
+      "narration": ""
+    },
+    {
+      "action": "capture",
+      "text": "matrix",
+      "ms": 200,
+      "narration": ""
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Minefield",
+      "ms": 700,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playMineRound()",
+      "ms": 2200,
+      "narration": ""
+    },
+    {
+      "action": "capture",
+      "text": "minefield",
+      "ms": 200,
+      "narration": ""
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Polarity",
+      "ms": 700,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playPolarityRound()",
+      "ms": 2200,
+      "narration": ""
+    },
+    {
+      "action": "capture",
+      "text": "polarity",
+      "ms": 200,
+      "narration": ""
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Drop",
+      "ms": 700,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playDropRound()",
+      "ms": 2000,
+      "narration": ""
+    },
+    {
+      "action": "capture",
+      "text": "drop",
+      "ms": 200,
       "narration": ""
     },
     {
@@ -72,7 +162,13 @@
     {
       "action": "run",
       "selector": "window.__shiftDemoPlay.showSweepDiagram()",
-      "ms": 4200,
+      "ms": 3800,
+      "narration": ""
+    },
+    {
+      "action": "capture",
+      "text": "sweep",
+      "ms": 200,
       "narration": ""
     }
   ]
