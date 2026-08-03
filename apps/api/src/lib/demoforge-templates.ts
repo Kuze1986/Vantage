@@ -63,10 +63,17 @@ export interface DemoForgeJobPayload {
   };
 }
 
-/** Channel → default template id (Shift seeds) for demo_video. */
+/**
+ * Channel → default template id (Shift seeds) for demo_video.
+ * linkedin previously defaulted to shift-ube-university-demo, a law-school /
+ * Bar Exam pitch template (audience: "Law school deans · bar prep
+ * partnerships") — wrong for general LinkedIn content that doesn't name the
+ * UBE vertical. Campaigns wanting the UBE pitch should set
+ * demoforge_template_id explicitly.
+ */
 export const DEFAULT_TEMPLATE_BY_CHANNEL: Record<string, string> = {
   x: "shift-queue-modes",
-  linkedin: "shift-ube-university-demo",
+  linkedin: "shift-queue-modes",
   reddit: "shift-queue-modes",
   threads: "shift-queue-modes",
   bluesky: "shift-queue-modes",

@@ -12,6 +12,8 @@ import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import {
   buildDemoForgePayload,
+  DEFAULT_TEMPLATE_BY_CHANNEL,
+  DEFAULT_TEMPLATE_BY_VISUAL_TYPE,
   listDemoForgeTemplates,
   resolveTemplateId,
 } from "../lib/demoforge-templates.js";
@@ -151,15 +153,11 @@ demoforgeRoutes.get("/templates", async (c) => {
   }));
   return c.json({
     templates,
-    defaults_by_channel: {
-      x: "shift-queue-modes",
-      linkedin: "shift-ube-university-demo",
-      tiktok: "shift-queue-reel",
-      instagram: "shift-queue-reel",
-    },
-    defaults_by_visual_type: {
-      product_still: "shift-product-stills",
-    },
+    // Single source of truth — was a hand-maintained duplicate that drifted
+    // (still pointed linkedin at the law-school shift-ube-university-demo
+    // template after that default was fixed in demoforge-templates.ts).
+    defaults_by_channel: DEFAULT_TEMPLATE_BY_CHANNEL,
+    defaults_by_visual_type: DEFAULT_TEMPLATE_BY_VISUAL_TYPE,
     product_still_mode_rotation: [
       "queue",
       "mcu",

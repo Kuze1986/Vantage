@@ -570,7 +570,7 @@ campaignRoutes.post('/:id/timeline/generate', async (c) => {
   const templates = listDemoForgeTemplates();
   const templateList = templates.length
     ? templates.map((t) => `${t.id} (${t.format}${t.name ? ` — ${t.name}` : ''})`).join('; ')
-    : 'shift-queue-modes (tiktok), shift-ube-university-demo (linkedin), shift-queue-reel (tiktok)';
+    : 'shift-queue-modes (tiktok), shift-product-stills (linkedin), shift-queue-reel (tiktok)';
 
   const prompt = `You are a senior social-media campaign strategist. Design a ${total}-day content plan for this campaign.
 
