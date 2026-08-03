@@ -76,8 +76,16 @@ export async function resolveOrCreateWorkspace(userId: string): Promise<string> 
     .order("role", { ascending: true }) // 'admin','editor','owner','viewer' — see below
     .limit(50);
   if (membership?.length) {
-    const owned = membership.find((m) => m.role === "owner");
-    return (owned ?? membership[0]).workspace_id as string;
+    const workspaceId = (membership.find((m) => m.role === "owner") ?? membership[0]).workspace_id as string;
+    // Self-heal: DEFAULT_CHANNELS has grown over time (threads/bluesky, then
+    // tiktok/instagram/facebook were all added after some workspaces already existed),
+    // and each addition required a one-off backfill migration to reach pre-existing
+    // workspaces — one already missed a workspace in production (content_pieces_channel_fk
+    // violations on threads/bluesky). Upsert with ignoreDuplicates is cheap and a no-op
+    // once channels are in sync, so just keep every workspace current on every resolve
+    // instead of relying on a migration to remember every existing workspace.
+    await seedDefaultChannels(sb, workspaceId);
+    return workspaceId;
   }
 
   const slug = `workspace-${userId.slice(0, 8)}`;
