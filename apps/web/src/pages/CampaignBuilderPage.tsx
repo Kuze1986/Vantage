@@ -147,6 +147,22 @@ export default function CampaignBuilderPage() {
   const [shiftPacks, setShiftPacks] = useState<ShiftPackMeta[]>([])
   const [selectedPackId, setSelectedPackId] = useState('')
 
+  // Start Date, End Date, and Duration (weeks) used to be three independently-editable
+  // fields with no sync between them — a user could set a 3-week end date while leaving
+  // Duration at 2, and the timeline generator (which drives day count from
+  // cadence_config.weeks, not the date range) would silently produce a 2-day plan under
+  // a 3-week-looking date range. End Date is now derived from Start Date + Duration so
+  // the two can never drift apart.
+  useEffect(() => {
+    const start = new Date(`${formData.start_date}T00:00:00Z`)
+    if (Number.isNaN(start.getTime())) return
+    start.setUTCDate(start.getUTCDate() + formData.cadence_config.weeks * 7)
+    const computedEndDate = start.toISOString().split('T')[0]
+    if (computedEndDate !== formData.end_date) {
+      setFormData((prev) => ({ ...prev, end_date: computedEndDate }))
+    }
+  }, [formData.start_date, formData.cadence_config.weeks, formData.end_date])
+
   useEffect(() => {
     fetchCampaigns()
     void vantageApi.listDemoForgeTemplates()
@@ -703,7 +719,9 @@ export default function CampaignBuilderPage() {
                 <input
                   type="date"
                   value={formData.end_date}
-                  onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
+                  readOnly
+                  disabled
+                  title="Derived from Start Date + Duration (weeks) below — change Duration to adjust this."
                   style={{
                     width: '100%',
                     padding: '0.75rem',
@@ -712,6 +730,7 @@ export default function CampaignBuilderPage() {
                     fontFamily: 'inherit',
                     marginTop: '0.5rem',
                     boxSizing: 'border-box',
+                    opacity: 0.7,
                   }}
                 />
               </div>
