@@ -8,6 +8,7 @@ import { pollRedditEngagement } from "./reddit-engagement.js";
 import { pollBlueskyEngagement } from "./bluesky-engagement.js";
 import { pollThreadsEngagement } from "./threads-engagement.js";
 import { collectCompetitivePosts } from "./competitive-collector.js";
+import { assignSegmentMembers } from "./segment-assignment.js";
 import { loadSettings } from "../lib/settings.js";
 import { listAllWorkspaceIds } from "../lib/workspace.js";
 import { sendAlert } from "../lib/alert.js";
@@ -41,6 +42,9 @@ const THREADS_ENGAGE_TICK_MS = 3 * 60 * 60_000;  // Threads engagement poll ever
 // publish-blocking loop) and each new post costs an LLM analysis call, so this runs
 // infrequently — enough to keep the table from sitting empty, not enough to run up cost.
 const COMPETITIVE_COLLECT_TICK_MS = 4 * 60 * 60_000; // Competitive post collection every 4 hours
+// Decision-support, not publish-blocking — runs infrequently to keep segment_members from
+// sitting permanently empty without adding meaningful load.
+const SEGMENT_ASSIGN_TICK_MS = 6 * 60 * 60_000; // Segment assignment every 6 hours
 
 type ChannelRow = {
   slug: string;
@@ -616,6 +620,17 @@ async function competitiveCollectTick(): Promise<void> {
   }
 }
 
+// ── Segment assignment: per workspace ─────────────────────────────────────────
+async function segmentAssignTick(): Promise<void> {
+  for (const ws of await listAllWorkspaceIds()) {
+    try {
+      await assignSegmentMembers(ws);
+    } catch (e) {
+      console.error(`[segment-assign] ws ${ws} assignment error:`, e instanceof Error ? e.message : e);
+    }
+  }
+}
+
 // ── Engine boot ───────────────────────────────────────────────────────────────
 let cadenceTimer:            ReturnType<typeof setInterval> | null = null;
 let autoGenTimer:            ReturnType<typeof setInterval> | null = null;
@@ -624,6 +639,7 @@ let redditEngageTimer:        ReturnType<typeof setInterval> | null = null;
 let blueskyEngageTimer:       ReturnType<typeof setInterval> | null = null;
 let threadsEngageTimer:       ReturnType<typeof setInterval> | null = null;
 let competitiveCollectTimer:  ReturnType<typeof setInterval> | null = null;
+let segmentAssignTimer:       ReturnType<typeof setInterval> | null = null;
 
 export function startCadenceEngine(): void {
   if (cadenceTimer) return; // already running
@@ -673,15 +689,22 @@ export function startCadenceEngine(): void {
     void competitiveCollectTick().catch((e) => console.error("[competitive-collect] collect error:", e));
   }, COMPETITIVE_COLLECT_TICK_MS);
 
-  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | reddit-engage 2h | bluesky-engage 1h | threads-engage 3h | competitive-collect 4h | bioloop via edge function");
+  // Segment assignment every 6 hours (first run after startup)
+  void segmentAssignTick().catch((e) => console.error("[segment-assign] initial assignment error:", e));
+  segmentAssignTimer = setInterval(() => {
+    void segmentAssignTick().catch((e) => console.error("[segment-assign] assignment error:", e));
+  }, SEGMENT_ASSIGN_TICK_MS);
+
+  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | reddit-engage 2h | bluesky-engage 1h | threads-engage 3h | competitive-collect 4h | segment-assign 6h | bioloop via edge function");
 }
 
 export function stopCadenceEngine(): void {
-  if (cadenceTimer)           { clearInterval(cadenceTimer);           cadenceTimer           = null; }
-  if (autoGenTimer)           { clearInterval(autoGenTimer);           autoGenTimer           = null; }
-  if (pulseTimer)             { clearInterval(pulseTimer);             pulseTimer             = null; }
-  if (redditEngageTimer)      { clearInterval(redditEngageTimer);      redditEngageTimer      = null; }
-  if (blueskyEngageTimer)     { clearInterval(blueskyEngageTimer);     blueskyEngageTimer     = null; }
-  if (threadsEngageTimer)     { clearInterval(threadsEngageTimer);     threadsEngageTimer     = null; }
+  if (cadenceTimer)            { clearInterval(cadenceTimer);            cadenceTimer            = null; }
+  if (autoGenTimer)            { clearInterval(autoGenTimer);            autoGenTimer            = null; }
+  if (pulseTimer)              { clearInterval(pulseTimer);              pulseTimer              = null; }
+  if (redditEngageTimer)       { clearInterval(redditEngageTimer);       redditEngageTimer       = null; }
+  if (blueskyEngageTimer)      { clearInterval(blueskyEngageTimer);      blueskyEngageTimer      = null; }
+  if (threadsEngageTimer)      { clearInterval(threadsEngageTimer);      threadsEngageTimer      = null; }
   if (competitiveCollectTimer) { clearInterval(competitiveCollectTimer); competitiveCollectTimer = null; }
+  if (segmentAssignTimer)      { clearInterval(segmentAssignTimer);      segmentAssignTimer      = null; }
 }
