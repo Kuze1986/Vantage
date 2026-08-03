@@ -10,6 +10,7 @@ import { pollThreadsEngagement } from "./threads-engagement.js";
 import { collectCompetitivePosts } from "./competitive-collector.js";
 import { assignSegmentMembers } from "./segment-assignment.js";
 import { generateInsightsForWorkspace } from "./insights-generator.js";
+import { learnAndStorePreferences } from "./segment-preferences-learner.js";
 import { loadSettings } from "../lib/settings.js";
 import { listAllWorkspaceIds } from "../lib/workspace.js";
 import { sendAlert } from "../lib/alert.js";
@@ -49,6 +50,9 @@ const SEGMENT_ASSIGN_TICK_MS = 6 * 60 * 60_000; // Segment assignment every 6 ho
 // One substantial LLM call per active campaign per run — daily is plenty for strategic
 // insights, which don't need to react faster than a campaign's own daily KPI rollup does.
 const INSIGHTS_GENERATE_TICK_MS = 24 * 60 * 60_000; // Insights generation every 24 hours
+// Runs less often than segment-assign (6h) — preference learning is an LLM call per
+// qualifying segment and depends on segment_members having had time to populate first.
+const SEGMENT_PREFS_LEARN_TICK_MS = 12 * 60 * 60_000; // Segment preference learning every 12 hours
 
 type ChannelRow = {
   slug: string;
@@ -646,6 +650,17 @@ async function insightsGenerateTick(): Promise<void> {
   }
 }
 
+// ── Segment preference learning: per workspace ────────────────────────────────
+async function segmentPrefsLearnTick(): Promise<void> {
+  for (const ws of await listAllWorkspaceIds()) {
+    try {
+      await learnAndStorePreferences(ws);
+    } catch (e) {
+      console.error(`[segment-prefs] ws ${ws} learn error:`, e instanceof Error ? e.message : e);
+    }
+  }
+}
+
 // ── Engine boot ───────────────────────────────────────────────────────────────
 let cadenceTimer:            ReturnType<typeof setInterval> | null = null;
 let autoGenTimer:            ReturnType<typeof setInterval> | null = null;
@@ -656,6 +671,7 @@ let threadsEngageTimer:       ReturnType<typeof setInterval> | null = null;
 let competitiveCollectTimer:  ReturnType<typeof setInterval> | null = null;
 let segmentAssignTimer:       ReturnType<typeof setInterval> | null = null;
 let insightsGenerateTimer:    ReturnType<typeof setInterval> | null = null;
+let segmentPrefsLearnTimer:   ReturnType<typeof setInterval> | null = null;
 
 export function startCadenceEngine(): void {
   if (cadenceTimer) return; // already running
@@ -717,7 +733,13 @@ export function startCadenceEngine(): void {
     void insightsGenerateTick().catch((e) => console.error("[insights-generate] generation error:", e));
   }, INSIGHTS_GENERATE_TICK_MS);
 
-  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | reddit-engage 2h | bluesky-engage 1h | threads-engage 3h | competitive-collect 4h | segment-assign 6h | insights-generate 24h | bioloop via edge function");
+  // Segment preference learning every 12 hours (first run after startup)
+  void segmentPrefsLearnTick().catch((e) => console.error("[segment-prefs] initial learn error:", e));
+  segmentPrefsLearnTimer = setInterval(() => {
+    void segmentPrefsLearnTick().catch((e) => console.error("[segment-prefs] learn error:", e));
+  }, SEGMENT_PREFS_LEARN_TICK_MS);
+
+  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | reddit-engage 2h | bluesky-engage 1h | threads-engage 3h | competitive-collect 4h | segment-assign 6h | insights-generate 24h | segment-prefs-learn 12h | bioloop via edge function");
 }
 
 export function stopCadenceEngine(): void {
@@ -730,4 +752,5 @@ export function stopCadenceEngine(): void {
   if (competitiveCollectTimer) { clearInterval(competitiveCollectTimer); competitiveCollectTimer = null; }
   if (segmentAssignTimer)      { clearInterval(segmentAssignTimer);      segmentAssignTimer      = null; }
   if (insightsGenerateTimer)   { clearInterval(insightsGenerateTimer);   insightsGenerateTimer   = null; }
+  if (segmentPrefsLearnTimer)  { clearInterval(segmentPrefsLearnTimer);  segmentPrefsLearnTimer  = null; }
 }
