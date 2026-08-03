@@ -65,13 +65,13 @@
     },
     {
       "action": "navigate",
-      "selector": "{BASE}/FieldDossier",
+      "selector": "{BASE}/Callback",
       "ms": 700,
       "narration": ""
     },
     {
       "action": "run",
-      "selector": "window.__shiftDemoPlay.playDossierRound()",
+      "selector": "window.__shiftDemoPlay.playCallbackCase()",
       "ms": 2200,
       "narration": ""
     },

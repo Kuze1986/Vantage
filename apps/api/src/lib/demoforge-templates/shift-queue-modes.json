@@ -4,7 +4,7 @@
   "tagline": "Every current Queue mode as a standalone hit — closing on The Sweep schematic.",
   "audience": "PTCB students · pharmacy educators · social media · product demos",
   "format": "tiktok",
-  "estimatedSec": 150,
+  "estimatedSec": 165,
   "estimatedSecNote": "Actual duration is driven by ElevenLabs per-line synthesis in DemoForge",
   "baseUrlPlaceholder": "{BASE}",
   "defaultBaseUrl": "https://theshift.bioloopnexus.com",
@@ -19,7 +19,7 @@
       "action": "scroll",
       "selector": "",
       "ms": 1800,
-      "narration": "MCQ and Streak for recall. Blueprints, Matrix, Minefield, Polarity, Drop for the mechanics. The Sweep for the prestige close."
+      "narration": "MCQ and Streak for recall. Blueprints, Callback, Matrix, Minefield, Polarity, Drop for the mechanics. The Sweep for the prestige close."
     },
     {
       "action": "navigate",
@@ -32,6 +32,18 @@
       "selector": "window.__shiftDemoPlay.playBlueprintsStep()",
       "ms": 1500,
       "narration": "Blueprints — a real workflow, scrambled into steps. Rebuild it in the correct order."
+    },
+    {
+      "action": "navigate",
+      "selector": "{BASE}/Callback",
+      "ms": 600,
+      "narration": ""
+    },
+    {
+      "action": "run",
+      "selector": "window.__shiftDemoPlay.playCallbackCase()",
+      "ms": 1500,
+      "narration": "The Callback — the call comes in after the shift's already moved on. Commit to a decision, then live with how it lands."
     },
     {
       "action": "navigate",
@@ -97,7 +109,7 @@
       "action": "navigate",
       "selector": "{BASE}/Queue",
       "ms": 2200,
-      "narration": "The Queue sequences all of it automatically. One session. Every mode. Zero manual setup."
+      "narration": "The Queue sequences all of it automatically. One session. Every mode. Zero manual setup. The Shift is live now."
     }
   ]
 }
