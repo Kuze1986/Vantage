@@ -58,6 +58,42 @@ async function loadUnderperformingWeights(workspaceId: string, channel: ChannelS
   }
 }
 
+const REJECTION_LOOKBACK_DAYS = 90;
+const MIN_REJECTION_COUNT = 2; // a single rejection is noise, not a pattern worth avoiding
+
+// Aggregates content_pieces.audit_category (structured Ilita rejection reasons — see
+// packages/prompts ILITA_REJECTION_CATEGORIES) into the "avoid repeating this" prompt
+// section. Closes the loop Ilita's rejections previously fed nowhere.
+async function loadRejectionCategories(workspaceId: string, channel: ChannelSlug): Promise<string> {
+  try {
+    const sb = getSupabaseAdmin();
+    const cutoff = new Date(Date.now() - REJECTION_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    const { data } = await sb
+      .from("content_pieces")
+      .select("audit_category")
+      .eq("workspace_id", workspaceId)
+      .eq("channel_slug", channel)
+      .in("status", ["rejected", "failed"])
+      .not("audit_category", "is", null)
+      .gte("updated_at", cutoff)
+      .limit(200);
+    if (!data?.length) return "";
+
+    const counts = new Map<string, number>();
+    for (const row of data as { audit_category: string }[]) {
+      counts.set(row.audit_category, (counts.get(row.audit_category) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .filter(([, count]) => count >= MIN_REJECTION_COUNT)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([category, count]) => `${category}: ${count}`)
+      .join("\n");
+  } catch {
+    return "";
+  }
+}
+
 // virality_patterns.source_platform only allows x/linkedin/reddit today — this returns []
 // for bluesky/threads until BioLoop's pattern-detection is separately extended to cover them
 // (out of scope here; empty result is expected, not a bug).
@@ -96,10 +132,11 @@ export interface GenerateContentOutput {
 
 export async function generateContent(input: GenerateContentInput): Promise<GenerateContentOutput> {
   const format = channelFormatMap[input.channel] as ContentFormat;
-  const [weights, avoidWeights, viralityPatterns] = await Promise.all([
+  const [weights, avoidWeights, viralityPatterns, rejectionCategories] = await Promise.all([
     loadWeights(input.workspace_id, input.channel),
     loadUnderperformingWeights(input.workspace_id, input.channel),
     loadViralityPatterns(input.workspace_id, input.channel),
+    loadRejectionCategories(input.workspace_id, input.channel),
   ]);
   const provider = await resolveProvider("generate", input.workspace_id);
 
@@ -114,6 +151,7 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
         weights: weights || undefined,
         avoidWeights: avoidWeights || undefined,
         viralityPatterns: viralityPatterns.length ? viralityPatterns : undefined,
+        rejectionCategories: rejectionCategories || undefined,
       },
     }),
     { system_prompt: kuzeSystemPrompt(format), max_tokens: 1400 },
@@ -152,10 +190,11 @@ export interface GenerateCaptionsInput {
 }
 
 export async function generateCaptions(input: GenerateCaptionsInput): Promise<string[]> {
-  const [weights, avoidWeights, patterns] = await Promise.all([
+  const [weights, avoidWeights, patterns, rejectionCategories] = await Promise.all([
     loadWeights(input.workspace_id, input.channel),
     loadUnderperformingWeights(input.workspace_id, input.channel),
     loadViralityPatterns(input.workspace_id, input.channel),
+    loadRejectionCategories(input.workspace_id, input.channel),
   ]);
   const provider = await resolveProvider("generate", input.workspace_id);
 
@@ -172,13 +211,16 @@ export async function generateCaptions(input: GenerateCaptionsInput): Promise<st
   const patternHint = patterns.length
     ? `\n\nProven viral patterns: ${patterns.map((p) => p.pattern_name).join(', ')}`
     : '';
+  const rejectionHint = rejectionCategories
+    ? `\n\nRecently rejected for (avoid): ${rejectionCategories.split('\n').map((l) => l.split(':')[0]).join(', ')}`
+    : '';
   const countHint    = input.count ?? 3;
 
   const systemPrompt = `You are Kuze, a social-media copywriter. Return ONLY a JSON array of ${countHint} caption strings — no markdown, no wrapper object, just a raw JSON array. Each caption is a distinct variation of the same angle for ${channelLabel}. Platform character limits: X ≤ 280. LinkedIn ≤ 3000. Instagram ≤ 2200. Others: no limit.`;
 
   const userContent = `Brand voice:
 ${input.brand_voice}
-${weightsHint}${avoidHint}${patternHint}
+${weightsHint}${avoidHint}${patternHint}${rejectionHint}
 
 Topic/angle: ${input.prompt}
 ${toneHint}

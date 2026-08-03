@@ -73,6 +73,7 @@ auditRoutes.post("/", async (c) => {
     await sb.from("content_pieces").update({
       status: "rejected",
       audit_notes: first.feedback,
+      audit_category: first.category,
       audit_iterations: iterations,
       updated_at: new Date().toISOString(),
     }).eq("workspace_id", ws).eq("id", content_piece_id);
@@ -117,13 +118,15 @@ auditRoutes.post("/", async (c) => {
   );
   const second = await auditContent({ content: newContent, format: gen2.format, brand_voice: brandVoiceStr, workspace_id: ws });
 
-  const status = second.verdict === "pass" ? "approved" : "rejected";
-  const notes  = second.verdict === "pass" ? second.feedback : `${first.feedback} | ${second.feedback}`;
+  const status   = second.verdict === "pass" ? "approved" : "rejected";
+  const notes    = second.verdict === "pass" ? second.feedback : `${first.feedback} | ${second.feedback}`;
+  const category = second.verdict === "fail" ? second.category : null;
 
   await sb.from("content_pieces").update({
     status,
     content_payload:  gen2.content_payload,
     audit_notes:      notes,
+    audit_category:   category,
     audit_iterations: iterations,
     updated_at:       new Date().toISOString(),
   }).eq("workspace_id", ws).eq("id", content_piece_id);

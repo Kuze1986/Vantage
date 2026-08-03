@@ -1,5 +1,5 @@
-import { ilitaAuditSystemPrompt, ilitaAuditUserPrompt } from "@vantage/prompts";
-import type { ContentFormat } from "@vantage/prompts";
+import { ilitaAuditSystemPrompt, ilitaAuditUserPrompt, ILITA_REJECTION_CATEGORIES } from "@vantage/prompts";
+import type { ContentFormat, IlitaRejectionCategory } from "@vantage/prompts";
 import { resolveProvider } from "../lib/llm.js";
 
 function extractJson(text: string): Record<string, unknown> {
@@ -10,9 +10,11 @@ function extractJson(text: string): Record<string, unknown> {
   return JSON.parse(trimmed.slice(start, end + 1)) as Record<string, unknown>;
 }
 
+const CATEGORY_SET = new Set<string>(ILITA_REJECTION_CATEGORIES);
+
 export type AuditResult =
   | { verdict: "pass"; feedback: string }
-  | { verdict: "fail"; feedback: string };
+  | { verdict: "fail"; feedback: string; category: IlitaRejectionCategory };
 
 /**
  * Audit any content format. The content string passed here should be the
@@ -38,7 +40,12 @@ export async function auditContent(params: {
   const verdict = parsed.verdict === "pass" || parsed.verdict === "fail" ? parsed.verdict : null;
   if (!verdict) throw new Error(`Ilita: invalid verdict in response: ${text.slice(0, 200)}`);
   const feedback = typeof parsed.feedback === "string" ? parsed.feedback : "";
-  return { verdict, feedback };
+  if (verdict === "pass") return { verdict, feedback };
+
+  // Fall back to "other" rather than throwing if the model omits/mis-spells the category —
+  // a missing category shouldn't ever block a real rejection from being recorded.
+  const category = CATEGORY_SET.has(String(parsed.category)) ? (parsed.category as IlitaRejectionCategory) : "other";
+  return { verdict, feedback, category };
 }
 
 // ── Legacy shim ────────────────────────────────────────────────────────────────

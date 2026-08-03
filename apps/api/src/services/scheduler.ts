@@ -543,6 +543,7 @@ export async function autoGenerateTickForWorkspace(workspaceId: string): Promise
             status: finalStatus,
             content_payload: gen2.content_payload,
             audit_notes: audit2.feedback,
+            audit_category: audit2.verdict === "fail" ? audit2.category : null,
             audit_iterations: 1,
             updated_at: new Date().toISOString(),
           }).eq("workspace_id", workspaceId).eq("id", inserted.id);

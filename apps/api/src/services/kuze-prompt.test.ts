@@ -74,4 +74,36 @@ describe("kuzeUserPrompt — virality patterns and avoid-list sections", () => {
     expect(iAvoid).toBeGreaterThan(iVirality);
     expect(iFinal).toBeGreaterThan(iAvoid);
   });
+
+  it("renders the rejection-categories section, mapped through the category instruction lookup", () => {
+    const prompt = kuzeUserPrompt({
+      ...BASE,
+      extras: { rejectionCategories: "competitor_mention: 4\noff_topic: 2" },
+    });
+    expect(prompt).toContain("Ilita has recently rejected content on this channel");
+    expect(prompt).toContain("AVOID — mentioning competitor brands");
+    expect(prompt).toContain("[4× rejected recently]");
+    expect(prompt).toContain("AVOID — touching the operator-specified off-topics");
+    expect(prompt).toContain("[2× rejected recently]");
+  });
+
+  it("omits the rejection-categories section when no extras are provided", () => {
+    const prompt = kuzeUserPrompt(BASE);
+    expect(prompt).not.toContain("Ilita has recently rejected");
+  });
+
+  it("places the rejection-categories section last, right before the final instruction", () => {
+    const prompt = kuzeUserPrompt({
+      ...BASE,
+      extras: {
+        avoidWeights: "length_long: 0.6 (n=5)",
+        rejectionCategories: "off_topic: 3",
+      },
+    });
+    const iAvoid     = prompt.indexOf("Underperforming patterns");
+    const iRejection = prompt.indexOf("Ilita has recently rejected");
+    const iFinal     = prompt.indexOf("Generate the tweet JSON now.");
+    expect(iRejection).toBeGreaterThan(iAvoid);
+    expect(iFinal).toBeGreaterThan(iRejection);
+  });
 });

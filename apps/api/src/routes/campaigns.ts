@@ -840,6 +840,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
         });
 
         let auditNotes: string | null = null;
+        let auditCategory: string | null = null;
         let auditPassed = true;
         try {
           const audit = await auditContent({
@@ -850,6 +851,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
           });
           auditNotes = `[${audit.verdict}] ${audit.feedback}`.slice(0, 1000);
           auditPassed = audit.verdict === 'pass';
+          auditCategory = audit.verdict === 'fail' ? audit.category : null;
         } catch (auditErr) {
           // Treat audit outage as soft-fail: still produce piece for review, do not auto-queue.
           auditPassed = false;
@@ -890,6 +892,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
             content_payload: payload,
             status: pieceStatus,
             audit_notes: auditNotes,
+            audit_category: auditCategory,
             audit_iterations: 0,
             scheduled_for: auditPassed ? scheduledFor : null,
             media_status: mediaStatus,

@@ -144,6 +144,33 @@ function avoidWeightsToInstructions(raw: string): string {
   return instructions.join('\n')
 }
 
+const REJECTION_CATEGORY_INSTRUCTIONS: Record<IlitaRejectionCategory, string> = {
+  unsubstantiated_claim:    'making unsubstantiated medical, legal, or pass-rate claims',
+  competitor_mention:       'mentioning competitor brands',
+  discount_first_language:  'leading with aggressive discount-first language',
+  off_topic:                'touching the operator-specified off-topics',
+  inaccurate_product_claim: 'inventing or misrepresenting NEXUS product features',
+  audience_mismatch:        'content inappropriate for the target professional audience',
+  format_violation:         "violating this format's structural rules (length limits, hook placement, etc.)",
+  other:                    'issues previously flagged on this channel',
+}
+
+function rejectionCategoriesToInstructions(raw: string): string {
+  // raw format from loadRejectionCategories(): "category_key: 4\n..."
+  const lines = raw.trim().split('\n')
+  const instructions: string[] = []
+  for (const line of lines) {
+    const match = line.match(/^(\S+):\s*(\d+)/)
+    if (!match) continue
+    const [, key, count] = match
+    const instruction = REJECTION_CATEGORY_INSTRUCTIONS[key as IlitaRejectionCategory]
+    if (instruction) {
+      instructions.push(`- AVOID — ${instruction}  [${count}× rejected recently]`)
+    }
+  }
+  return instructions.join('\n')
+}
+
 export interface ViralityPatternExtra {
   pattern_name: string
   pattern_description?: string | null
@@ -186,6 +213,7 @@ export function kuzeUserPrompt(params: {
     weights?: string
     avoidWeights?: string
     viralityPatterns?: ViralityPatternExtra[]
+    rejectionCategories?: string
   }
 }): string {
   const parts: string[] = []
@@ -220,12 +248,35 @@ export function kuzeUserPrompt(params: {
       )
     }
   }
+  if (params.extras?.rejectionCategories) {
+    const rejectionInstructions = rejectionCategoriesToInstructions(params.extras.rejectionCategories)
+    if (rejectionInstructions) {
+      parts.push(
+        `Ilita has recently rejected content on this channel for these reasons — avoid repeating them:\n${rejectionInstructions}`
+      )
+    }
+  }
 
   parts.push(`Generate the ${params.format} JSON now.`)
   return parts.join('\n\n')
 }
 
 // ── Ilita — format-aware audit ────────────────────────────────────────────────
+
+// Rejection category — mirrors the "Universal compliance rules" below so aggregation
+// (see kuze.ts's loadRejectionCategories()) can turn repeated failures into avoid-list
+// guidance for future generations, without re-parsing freeform feedback text.
+export const ILITA_REJECTION_CATEGORIES = [
+  'unsubstantiated_claim',
+  'competitor_mention',
+  'discount_first_language',
+  'off_topic',
+  'inaccurate_product_claim',
+  'audience_mismatch',
+  'format_violation',
+  'other',
+] as const
+export type IlitaRejectionCategory = typeof ILITA_REJECTION_CATEGORIES[number]
 
 export function ilitaAuditSystemPrompt(format: ContentFormat): string {
   const rules: Record<ContentFormat, string> = {
@@ -255,7 +306,7 @@ Universal compliance rules (apply to ALL formats):
 Format-specific rules for this review:
 ${rules[format]}
 
-Return ONLY valid JSON: {"verdict":"pass"|"fail","feedback":"<1-2 sentences — required on fail, optional encouragement on pass>"}
+Return ONLY valid JSON: {"verdict":"pass"|"fail","feedback":"<1-2 sentences — required on fail, optional encouragement on pass>","category":"<on fail only, one of: ${ILITA_REJECTION_CATEGORIES.join('|')} — omit entirely on pass>"}
 No markdown, no preamble.`
 }
 
