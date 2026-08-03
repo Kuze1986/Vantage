@@ -16,6 +16,7 @@ export type Piece = {
   format: string
   content_payload: Record<string, unknown>
   audit_notes: string | null
+  audit_category?: string | null
   audit_iterations: number
   created_at: string
   image_url?: string | null
@@ -398,7 +399,8 @@ export function QueuePage() {
         </div>
         {p.audit_notes && (
           <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginTop: 3 }}>
-            Ilita: {p.audit_notes.slice(0, 80)}{p.audit_notes.length > 80 ? '…' : ''}
+            {p.audit_category && <Badge label={p.audit_category.replace(/_/g, ' ')} variant="pending" />}
+            {' '}Ilita: {p.audit_notes.slice(0, 300)}{p.audit_notes.length > 300 ? '…' : ''}
           </div>
         )}
         {/* Media status + previews */}

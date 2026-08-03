@@ -34,13 +34,21 @@ export function isMediaGated(piece: MediaGatePiece): boolean {
 }
 
 export function mediaGateReason(piece: MediaGatePiece): string {
+  // Checked first: campaigns.ts initializes media_status to "pending" for every non-"none"
+  // visual_type, including social_graphic — so a piece needing a Social Kit graphic (not a
+  // DemoForge render) always has media_status="pending" too. Without this ordering, every
+  // such piece got told to wait on "DemoForge / upload", which is both wrong and gives no
+  // path forward (no DemoForge job is ever queued for a social_graphic piece).
+  const payload = piece.content_payload;
+  if (payload && typeof payload === "object" && payload.needs_social_kit === true) {
+    const hasImage =
+      (typeof piece.image_url === "string" && piece.image_url.length > 0) ||
+      (typeof payload.image_url === "string" && payload.image_url.length > 0);
+    if (!hasImage) return "Social Kit graphic required — attach an image or use force";
+  }
   const status = piece.media_status ?? "none";
   if (status === "pending") return "Media is still pending (DemoForge / upload)";
   if (status === "failed") return "Media generation failed — fix media or use force";
-  const payload = piece.content_payload;
-  if (payload && typeof payload === "object" && payload.needs_social_kit === true) {
-    return "Social Kit graphic required — attach an image or use force";
-  }
   return "Media not ready";
 }
 
