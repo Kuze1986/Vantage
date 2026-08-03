@@ -5,6 +5,9 @@ import { auditContent } from "./ilita.js";
 import { pickNextTopic } from "./source.js";
 import { refreshTopicsFromPulse } from "./pulse.js";
 import { pollRedditEngagement } from "./reddit-engagement.js";
+import { pollBlueskyEngagement } from "./bluesky-engagement.js";
+import { pollThreadsEngagement } from "./threads-engagement.js";
+import { collectCompetitivePosts } from "./competitive-collector.js";
 import { loadSettings } from "../lib/settings.js";
 import { listAllWorkspaceIds } from "../lib/workspace.js";
 import { sendAlert } from "../lib/alert.js";
@@ -26,7 +29,18 @@ import { sendEmail } from "../adapters/email.js";
 const TICK_MS               = 60_000;            // check queue every 60 seconds
 const AUTO_GEN_TICK         = 300_000;           // check auto-generate every 5 minutes
 const PULSE_TICK_MS         = 30 * 60_000;       // pulse reactor every 30 minutes
-const REDDIT_ENGAGE_TICK_MS = 2  * 60 * 60_000;  // Reddit engagement poll every 2 hours
+const REDDIT_ENGAGE_TICK_MS  = 2 * 60 * 60_000;  // Reddit engagement poll every 2 hours
+// Bluesky's getPosts is unauthenticated and batched (25 posts/call), so it's cheap enough to
+// poll tighter than Reddit's own interval — no OAuth token budget is consumed at all.
+const BLUESKY_ENGAGE_TICK_MS = 1 * 60 * 60_000;  // Bluesky engagement poll every 1 hour
+// Threads Insights has no bulk endpoint — cost scales linearly with published-post count per
+// tick, and it's the poller most likely to need reconnect (see threads-engagement.ts), so it
+// gets the most conservative interval of the three.
+const THREADS_ENGAGE_TICK_MS = 3 * 60 * 60_000;  // Threads engagement poll every 3 hours
+// Lower urgency than engagement polling (competitive_posts is decision-support, not a
+// publish-blocking loop) and each new post costs an LLM analysis call, so this runs
+// infrequently — enough to keep the table from sitting empty, not enough to run up cost.
+const COMPETITIVE_COLLECT_TICK_MS = 4 * 60 * 60_000; // Competitive post collection every 4 hours
 
 type ChannelRow = {
   slug: string;
@@ -570,11 +584,46 @@ async function redditEngageTick(): Promise<void> {
   }
 }
 
+// ── Bluesky/Threads engagement polls: per workspace ──────────────────────────
+async function blueskyEngageTick(): Promise<void> {
+  for (const ws of await listAllWorkspaceIds()) {
+    try {
+      await pollBlueskyEngagement(ws);
+    } catch (e) {
+      console.error(`[bluesky-engage] ws ${ws} poll error:`, e instanceof Error ? e.message : e);
+    }
+  }
+}
+
+async function threadsEngageTick(): Promise<void> {
+  for (const ws of await listAllWorkspaceIds()) {
+    try {
+      await pollThreadsEngagement(ws);
+    } catch (e) {
+      console.error(`[threads-engage] ws ${ws} poll error:`, e instanceof Error ? e.message : e);
+    }
+  }
+}
+
+// ── Competitive post collection: per workspace ────────────────────────────────
+async function competitiveCollectTick(): Promise<void> {
+  for (const ws of await listAllWorkspaceIds()) {
+    try {
+      await collectCompetitivePosts(ws);
+    } catch (e) {
+      console.error(`[competitive-collect] ws ${ws} collect error:`, e instanceof Error ? e.message : e);
+    }
+  }
+}
+
 // ── Engine boot ───────────────────────────────────────────────────────────────
-let cadenceTimer:      ReturnType<typeof setInterval> | null = null;
-let autoGenTimer:      ReturnType<typeof setInterval> | null = null;
-let pulseTimer:        ReturnType<typeof setInterval> | null = null;
-let redditEngageTimer: ReturnType<typeof setInterval> | null = null;
+let cadenceTimer:            ReturnType<typeof setInterval> | null = null;
+let autoGenTimer:            ReturnType<typeof setInterval> | null = null;
+let pulseTimer:               ReturnType<typeof setInterval> | null = null;
+let redditEngageTimer:        ReturnType<typeof setInterval> | null = null;
+let blueskyEngageTimer:       ReturnType<typeof setInterval> | null = null;
+let threadsEngageTimer:       ReturnType<typeof setInterval> | null = null;
+let competitiveCollectTimer:  ReturnType<typeof setInterval> | null = null;
 
 export function startCadenceEngine(): void {
   if (cadenceTimer) return; // already running
@@ -606,12 +655,33 @@ export function startCadenceEngine(): void {
     void redditEngageTick().catch((e) => console.error("[reddit-engage] poll error:", e));
   }, REDDIT_ENGAGE_TICK_MS);
 
-  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | reddit-engage 2h | bioloop via edge function");
+  // Bluesky engagement poll every 1 hour (first run after startup)
+  void blueskyEngageTick().catch((e) => console.error("[bluesky-engage] initial poll error:", e));
+  blueskyEngageTimer = setInterval(() => {
+    void blueskyEngageTick().catch((e) => console.error("[bluesky-engage] poll error:", e));
+  }, BLUESKY_ENGAGE_TICK_MS);
+
+  // Threads engagement poll every 3 hours (first run after startup)
+  void threadsEngageTick().catch((e) => console.error("[threads-engage] initial poll error:", e));
+  threadsEngageTimer = setInterval(() => {
+    void threadsEngageTick().catch((e) => console.error("[threads-engage] poll error:", e));
+  }, THREADS_ENGAGE_TICK_MS);
+
+  // Competitive post collection every 4 hours (first run after startup)
+  void competitiveCollectTick().catch((e) => console.error("[competitive-collect] initial collect error:", e));
+  competitiveCollectTimer = setInterval(() => {
+    void competitiveCollectTick().catch((e) => console.error("[competitive-collect] collect error:", e));
+  }, COMPETITIVE_COLLECT_TICK_MS);
+
+  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | reddit-engage 2h | bluesky-engage 1h | threads-engage 3h | competitive-collect 4h | bioloop via edge function");
 }
 
 export function stopCadenceEngine(): void {
-  if (cadenceTimer)      { clearInterval(cadenceTimer);      cadenceTimer      = null; }
-  if (autoGenTimer)      { clearInterval(autoGenTimer);      autoGenTimer      = null; }
-  if (pulseTimer)        { clearInterval(pulseTimer);        pulseTimer        = null; }
-  if (redditEngageTimer) { clearInterval(redditEngageTimer); redditEngageTimer = null; }
+  if (cadenceTimer)           { clearInterval(cadenceTimer);           cadenceTimer           = null; }
+  if (autoGenTimer)           { clearInterval(autoGenTimer);           autoGenTimer           = null; }
+  if (pulseTimer)             { clearInterval(pulseTimer);             pulseTimer             = null; }
+  if (redditEngageTimer)      { clearInterval(redditEngageTimer);      redditEngageTimer      = null; }
+  if (blueskyEngageTimer)     { clearInterval(blueskyEngageTimer);     blueskyEngageTimer     = null; }
+  if (threadsEngageTimer)     { clearInterval(threadsEngageTimer);     threadsEngageTimer     = null; }
+  if (competitiveCollectTimer) { clearInterval(competitiveCollectTimer); competitiveCollectTimer = null; }
 }

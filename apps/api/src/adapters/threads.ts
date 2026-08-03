@@ -120,6 +120,12 @@ async function getAccessToken(workspaceId: string): Promise<{ token: string; use
   return { token: auth.access_token, userId: auth.user_id };
 }
 
+/** Reuses the same refresh-aware access token logic postThread() relies on, for callers
+ *  (e.g. the engagement poller) that need an authenticated Graph API token but don't post. */
+export async function getThreadsAccessToken(workspaceId: string): Promise<{ token: string; userId: string }> {
+  return getAccessToken(workspaceId);
+}
+
 export async function postThread(workspaceId: string, body: string): Promise<{ id: string }> {
   const { token, userId } = await getAccessToken(workspaceId);
   const text = body.slice(0, 500); // Threads post limit

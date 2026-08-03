@@ -124,6 +124,58 @@ function weightsToInstructions(raw: string): string {
   return instructions.join('\n')
 }
 
+function avoidWeightsToInstructions(raw: string): string {
+  // raw format from loadUnderperformingWeights(): "pattern_key: 0.62 (n=9)\n..."
+  const lines = raw.trim().split('\n')
+  const instructions: string[] = []
+  for (const line of lines) {
+    const match = line.match(/^(\S+):\s*([\d.]+)\s*\(n=(\d+)\)/)
+    if (!match) continue
+    const [, key, weight, n] = match
+    const instruction = PATTERN_INSTRUCTIONS[key]
+    if (instruction) {
+      // Labeled as a directive rather than grammatically negating the (positively-phrased)
+      // PATTERN_INSTRUCTIONS text, since prefixing "avoid " onto an imperative like "keep the
+      // content concise" doesn't parse as a negation. "AVOID —" as a label reads correctly
+      // regardless of the source phrase's verb form.
+      instructions.push(`- AVOID — this pattern underperforms: ${instruction}  [${parseFloat(weight).toFixed(2)}× lift, n=${n}]`)
+    }
+  }
+  return instructions.join('\n')
+}
+
+export interface ViralityPatternExtra {
+  pattern_name: string
+  pattern_description?: string | null
+  characteristics?: Record<string, unknown> | null
+  reproduction_success_rate?: number | null
+  confidence_score?: number | null
+  sample_size?: number | null
+}
+
+function viralityPatternsToInstructions(patterns: ViralityPatternExtra[]): string {
+  const lines: string[] = []
+  for (const p of patterns) {
+    const c = (p.characteristics ?? {}) as {
+      format?: string; hooks?: string[] | string; tone?: string
+      length?: string; call_to_action?: string; timing?: string
+    }
+    const bits: string[] = []
+    if (c.format) bits.push(`format: ${c.format}`)
+    if (c.hooks) bits.push(`hooks: ${Array.isArray(c.hooks) ? c.hooks.join(', ') : c.hooks}`)
+    if (c.tone) bits.push(`tone: ${c.tone}`)
+    if (c.length) bits.push(`length: ${c.length}`)
+    if (c.call_to_action) bits.push(`CTA style: ${c.call_to_action}`)
+    if (c.timing) bits.push(`timing: ${c.timing}`)
+    const detail = bits.length ? ` (${bits.join('; ')})` : ''
+    const rate = p.reproduction_success_rate != null ? `${Math.round(p.reproduction_success_rate * 100)}% reproduction rate` : null
+    const conf = p.confidence_score != null ? `confidence ${p.confidence_score.toFixed(2)}` : null
+    const stats = [rate, conf].filter(Boolean).join(', ')
+    lines.push(`- ${p.pattern_name}${detail}${stats ? `  [${stats}]` : ''}`)
+  }
+  return lines.join('\n')
+}
+
 export function kuzeUserPrompt(params: {
   format: ContentFormat
   topic_text: string
@@ -132,6 +184,8 @@ export function kuzeUserPrompt(params: {
   extras?: {
     subreddit?: string
     weights?: string
+    avoidWeights?: string
+    viralityPatterns?: ViralityPatternExtra[]
   }
 }): string {
   const parts: string[] = []
@@ -147,6 +201,22 @@ export function kuzeUserPrompt(params: {
     if (instructions) {
       parts.push(
         `High-performing content patterns (ranked by engagement lift — apply as many as naturally fit):\n${instructions}`
+      )
+    }
+  }
+  if (params.extras?.viralityPatterns?.length) {
+    const patternText = viralityPatternsToInstructions(params.extras.viralityPatterns)
+    if (patternText) {
+      parts.push(
+        `Proven viral patterns for this channel (draw on these characteristics where they fit naturally):\n${patternText}`
+      )
+    }
+  }
+  if (params.extras?.avoidWeights) {
+    const avoidInstructions = avoidWeightsToInstructions(params.extras.avoidWeights)
+    if (avoidInstructions) {
+      parts.push(
+        `Underperforming patterns — avoid these:\n${avoidInstructions}`
       )
     }
   }

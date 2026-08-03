@@ -4,7 +4,7 @@ import { createHmac } from "node:crypto";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import { recordGrowthEvent, engagementKind } from "../lib/growth.js";
-import { recordCampaignEngagement, resolveCampaignIdForPiece } from "../lib/campaign-kpi.js";
+import { recordCampaignEngagement, recordCampaignConversion, resolveCampaignIdForPiece } from "../lib/campaign-kpi.js";
 import { crcResponseToken } from "../adapters/x.js";
 
 async function afterEngagement(opts: {
@@ -122,13 +122,24 @@ webhooksRoutes.post("/x", async (c) => {
     ? `x_${eventType}_${tweetId}`
     : null;
 
+  // Best-effort — X's webhook payload shape varies by subscription/event type and has
+  // not been verified against real deliveries in this codebase. Extend/replace as real
+  // payloads are observed; never assume presence.
+  const actorExternalId =
+    typeof (payload as { user?: { id_str?: string } }).user?.id_str === "string"
+      ? (payload as { user: { id_str: string } }).user.id_str
+      : typeof (payload as { favorited_by?: { id_str?: string } }).favorited_by?.id_str === "string"
+        ? (payload as { favorited_by: { id_str: string } }).favorited_by.id_str
+        : null;
+
   const { error } = await sb.from("engagement_events").insert({
-    workspace_id:      workspaceId,
-    content_piece_id:  contentPieceId,
-    event_type:        eventType,
-    event_payload:     payload,
-    external_event_id: externalEventId,
-    occurred_at:       new Date().toISOString(),
+    workspace_id:       workspaceId,
+    content_piece_id:   contentPieceId,
+    event_type:         eventType,
+    event_payload:      payload,
+    external_event_id:  externalEventId,
+    actor_external_id:  actorExternalId,
+    occurred_at:        new Date().toISOString(),
   });
   // Ignore conflict on external_event_id (duplicate delivery)
   if (error && !error.message.includes("unique") && !error.message.includes("duplicate")) {
@@ -213,13 +224,20 @@ webhooksRoutes.post("/linkedin", async (c) => {
     ? `linkedin_${eventType}_${liEventId}`
     : shareId ? `linkedin_${eventType}_${shareId}` : null;
 
+  // Best-effort — unverified against real LinkedIn webhook deliveries.
+  const actorExternalId =
+    typeof (payload as { actor?: string }).actor === "string"
+      ? (payload as { actor: string }).actor
+      : null;
+
   await sb.from("engagement_events").insert({
-    workspace_id:      workspaceId,
-    content_piece_id:  contentPieceId,
-    event_type:        eventType,
-    event_payload:     payload,
-    external_event_id: externalEventId,
-    occurred_at:       new Date().toISOString(),
+    workspace_id:       workspaceId,
+    content_piece_id:   contentPieceId,
+    event_type:         eventType,
+    event_payload:      payload,
+    external_event_id:  externalEventId,
+    actor_external_id:  actorExternalId,
+    occurred_at:        new Date().toISOString(),
   });
 
   await logActivity({
@@ -342,13 +360,39 @@ webhooksRoutes.post("/email", async (c) => {
 
   if (!workspaceId) return c.json({ ok: true, skipped: "unmatched" });
 
-  await sb.from("engagement_events").insert({
-    workspace_id:     workspaceId,
-    content_piece_id: contentPieceId,
-    event_type: eventType,
-    event_payload: payload,
-    occurred_at: new Date().toISOString(),
+  // Previously missing entirely — this was the only engagement webhook handler with no
+  // dedup key, so a redelivered Resend webhook would double-insert.
+  const externalEventId = emailId ? `email_${eventType}_${emailId}` : null;
+
+  // Resend's payload exposes the recipient under data.to[] (array) or data.email
+  // depending on event type — extract if present, unverified beyond that.
+  const emailData = (payload as { data?: { to?: string[]; email?: string } }).data;
+  const actorExternalId =
+    Array.isArray(emailData?.to) && typeof emailData.to[0] === "string"
+      ? emailData.to[0]
+      : typeof emailData?.email === "string"
+        ? emailData.email
+        : null;
+
+  const { error: insErr } = await sb.from("engagement_events").insert({
+    workspace_id:       workspaceId,
+    content_piece_id:   contentPieceId,
+    event_type:         eventType,
+    event_payload:      payload,
+    external_event_id:  externalEventId,
+    actor_external_id:  actorExternalId,
+    occurred_at:        new Date().toISOString(),
   });
+  // Ignore conflict on external_event_id (duplicate delivery) — same posture as X/LinkedIn/Reddit.
+  if (insErr && !insErr.message.includes("unique") && !insErr.message.includes("duplicate")) {
+    await logActivity({
+      source: "adapter:email", source_type: "adapter",
+      event_type: "webhook_insert_error",
+      summary: insErr.message,
+      payload: { eventType },
+      workspace_id: workspaceId,
+    });
+  }
 
   await logActivity({
     source: "adapter:email", source_type: "adapter",
@@ -367,4 +411,64 @@ webhooksRoutes.post("/email", async (c) => {
   });
 
   return c.json({ ok: true });
+});
+
+// ── Conversion reporting (sibling products, e.g. Shift) ───────────────────────
+// tagUrls() (lib/utm.ts) embeds content_pieces.id as utm_content on every outbound link
+// Kuze generates, but nothing previously read that value back — this closes the loop by
+// giving any downstream product a way to report "this content piece led to a signup".
+// Attribution is by piece_id directly (our own primary key, not a platform post id), since
+// that's the identifier the downstream product actually received via the tagged URL.
+webhooksRoutes.post("/conversion", async (c) => {
+  const raw = await c.req.text();
+  const secret = process.env.CONVERSION_WEBHOOK_SECRET;
+
+  if (secret) {
+    const sig = c.req.header("x-conversion-signature") ?? "";
+    const expected = createHmac("sha256", secret).update(raw).digest("hex");
+    if (sig !== expected) throw new HTTPException(401, { message: "invalid conversion webhook signature" });
+  }
+
+  let payload: Record<string, unknown>;
+  try { payload = JSON.parse(raw) as Record<string, unknown>; }
+  catch { throw new HTTPException(400, { message: "invalid json" }); }
+
+  const pieceId = typeof payload.piece_id === "string" ? payload.piece_id : null;
+  if (!pieceId) throw new HTTPException(400, { message: "piece_id is required" });
+
+  const eventType = typeof payload.event_type === "string" ? payload.event_type : "signup";
+  const value = typeof payload.value === "number" ? payload.value : undefined;
+  const sourceSystem = typeof payload.source_system === "string" ? payload.source_system : "unknown";
+
+  const sb = getSupabaseAdmin();
+  const { data: piece } = await sb
+    .from("content_pieces")
+    .select("id, workspace_id, channel_slug")
+    .eq("id", pieceId)
+    .maybeSingle();
+
+  if (!piece) return c.json({ ok: true, skipped: "unmatched" });
+
+  const workspaceId = piece.workspace_id as string;
+  const channel = piece.channel_slug as string;
+
+  const campaignId = await recordCampaignConversion({ contentPieceId: pieceId, channel, value });
+
+  await recordGrowthEvent({
+    loop: "conversion",
+    kind: eventType,
+    channel,
+    value: value ?? null,
+    meta: { content_piece_id: pieceId, workspace_id: workspaceId, source_system: sourceSystem, ...(campaignId ? { campaign_id: campaignId } : {}) },
+  });
+
+  await logActivity({
+    source: `conversion:${sourceSystem}`, source_type: "adapter",
+    event_type: "conversion_reported",
+    summary: `Conversion reported for piece ${pieceId} (${eventType})`,
+    payload: { piece_id: pieceId, event_type: eventType, value: value ?? null, source_system: sourceSystem },
+    workspace_id: workspaceId,
+  });
+
+  return c.json({ ok: true, campaign_id: campaignId });
 });

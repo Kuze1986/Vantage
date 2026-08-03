@@ -163,6 +163,73 @@ export async function recordCampaignEngagement(opts: {
 }
 
 /**
+ * Increment conversions/conversion_value for one downstream conversion event
+ * (e.g. a signup reported by a sibling product via POST /v1/webhooks/conversion).
+ * Mirrors recordCampaignEngagement's upsert shape but tracks a separate counter —
+ * a conversion isn't a social-platform engagement type, so it doesn't go through
+ * bumpCounters()/ENGAGEMENT_TYPES.
+ */
+export async function recordCampaignConversion(opts: {
+  contentPieceId: string;
+  channel: string;
+  value?: number;
+  occurredAt?: string | Date;
+}): Promise<string | null> {
+  try {
+    const campaignId = await resolveCampaignIdForPiece(opts.contentPieceId);
+    if (!campaignId) return null;
+
+    const sb = getSupabaseAdmin();
+    const dateTracked = (opts.occurredAt ? new Date(opts.occurredAt) : new Date())
+      .toISOString()
+      .slice(0, 10);
+    const value = opts.value ?? 0;
+
+    const sources = KPI_SOURCES.has(opts.channel) ? [opts.channel, "all"] : ["all"];
+    for (const source of sources) {
+      const { data: existing } = await sb
+        .from("campaign_kpi_tracking")
+        .select("id, conversions, conversion_value")
+        .eq("campaign_id", campaignId)
+        .eq("date_tracked", dateTracked)
+        .eq("source", source)
+        .maybeSingle();
+
+      const next = {
+        conversions: (existing?.conversions ?? 0) + 1,
+        conversion_value: (existing?.conversion_value ?? 0) + value,
+      };
+
+      if (existing?.id) {
+        await sb
+          .from("campaign_kpi_tracking")
+          .update({ ...next, updated_at: new Date().toISOString() })
+          .eq("id", existing.id);
+      } else {
+        await sb.from("campaign_kpi_tracking").insert({
+          campaign_id: campaignId,
+          date_tracked: dateTracked,
+          source,
+          impressions: 0,
+          clicks: 0,
+          engagements: 0,
+          shares: 0,
+          follows: 0,
+          ...next,
+        });
+      }
+    }
+    return campaignId;
+  } catch (err) {
+    console.warn(
+      `[campaign-kpi] conversion record failed piece=${opts.contentPieceId}:`,
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}
+
+/**
  * Recompute KPI rows for a campaign from engagement_events (backfill).
  */
 export async function syncCampaignKpis(campaignId: string): Promise<number> {

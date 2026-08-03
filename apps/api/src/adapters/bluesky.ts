@@ -55,6 +55,13 @@ async function loadTokens(workspaceId: string): Promise<NonNullable<BlueskyAuthS
   return tokens;
 }
 
+/** The account's DID — needed to reconstruct AT URIs (at://{did}/app.bsky.feed.post/{rkey})
+ *  from the bare rkey stored as content_pieces.external_post_id. */
+export async function getBlueskyDid(workspaceId: string): Promise<string> {
+  const tokens = await loadTokens(workspaceId);
+  return tokens.did;
+}
+
 /** Refresh the access JWT using the (long-lived, rotating) refresh JWT. */
 async function refreshSession(workspaceId: string, tokens: NonNullable<BlueskyAuthState["tokens"]>): Promise<NonNullable<BlueskyAuthState["tokens"]>> {
   const res = await fetch(`${tokens.pds}/xrpc/com.atproto.server.refreshSession`, {

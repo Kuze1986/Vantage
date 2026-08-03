@@ -100,6 +100,7 @@ const kpiTargetsSchema = z.object({
   engagements: z.number().int().nonnegative().optional(),
   follows: z.number().int().nonnegative().optional(),
   viralityScore: z.number().nonnegative().optional(),
+  conversion: z.number().int().nonnegative().optional(),
 });
 
 const VISUAL_TYPES = ['demo_video', 'product_still', 'social_graphic', 'none'] as const;
