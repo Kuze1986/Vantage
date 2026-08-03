@@ -9,6 +9,7 @@ import { pollBlueskyEngagement } from "./bluesky-engagement.js";
 import { pollThreadsEngagement } from "./threads-engagement.js";
 import { collectCompetitivePosts } from "./competitive-collector.js";
 import { assignSegmentMembers } from "./segment-assignment.js";
+import { generateInsightsForWorkspace } from "./insights-generator.js";
 import { loadSettings } from "../lib/settings.js";
 import { listAllWorkspaceIds } from "../lib/workspace.js";
 import { sendAlert } from "../lib/alert.js";
@@ -45,6 +46,9 @@ const COMPETITIVE_COLLECT_TICK_MS = 4 * 60 * 60_000; // Competitive post collect
 // Decision-support, not publish-blocking — runs infrequently to keep segment_members from
 // sitting permanently empty without adding meaningful load.
 const SEGMENT_ASSIGN_TICK_MS = 6 * 60 * 60_000; // Segment assignment every 6 hours
+// One substantial LLM call per active campaign per run — daily is plenty for strategic
+// insights, which don't need to react faster than a campaign's own daily KPI rollup does.
+const INSIGHTS_GENERATE_TICK_MS = 24 * 60 * 60_000; // Insights generation every 24 hours
 
 type ChannelRow = {
   slug: string;
@@ -631,6 +635,17 @@ async function segmentAssignTick(): Promise<void> {
   }
 }
 
+// ── Insights generation: per workspace ────────────────────────────────────────
+async function insightsGenerateTick(): Promise<void> {
+  for (const ws of await listAllWorkspaceIds()) {
+    try {
+      await generateInsightsForWorkspace(ws);
+    } catch (e) {
+      console.error(`[insights-generate] ws ${ws} generation error:`, e instanceof Error ? e.message : e);
+    }
+  }
+}
+
 // ── Engine boot ───────────────────────────────────────────────────────────────
 let cadenceTimer:            ReturnType<typeof setInterval> | null = null;
 let autoGenTimer:            ReturnType<typeof setInterval> | null = null;
@@ -640,6 +655,7 @@ let blueskyEngageTimer:       ReturnType<typeof setInterval> | null = null;
 let threadsEngageTimer:       ReturnType<typeof setInterval> | null = null;
 let competitiveCollectTimer:  ReturnType<typeof setInterval> | null = null;
 let segmentAssignTimer:       ReturnType<typeof setInterval> | null = null;
+let insightsGenerateTimer:    ReturnType<typeof setInterval> | null = null;
 
 export function startCadenceEngine(): void {
   if (cadenceTimer) return; // already running
@@ -695,7 +711,13 @@ export function startCadenceEngine(): void {
     void segmentAssignTick().catch((e) => console.error("[segment-assign] assignment error:", e));
   }, SEGMENT_ASSIGN_TICK_MS);
 
-  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | reddit-engage 2h | bluesky-engage 1h | threads-engage 3h | competitive-collect 4h | segment-assign 6h | bioloop via edge function");
+  // Insights generation every 24 hours (first run after startup)
+  void insightsGenerateTick().catch((e) => console.error("[insights-generate] initial generation error:", e));
+  insightsGenerateTimer = setInterval(() => {
+    void insightsGenerateTick().catch((e) => console.error("[insights-generate] generation error:", e));
+  }, INSIGHTS_GENERATE_TICK_MS);
+
+  console.log("[cadence] engine started — tick 60s | auto-gen 5m | pulse 30m | reddit-engage 2h | bluesky-engage 1h | threads-engage 3h | competitive-collect 4h | segment-assign 6h | insights-generate 24h | bioloop via edge function");
 }
 
 export function stopCadenceEngine(): void {
@@ -707,4 +729,5 @@ export function stopCadenceEngine(): void {
   if (threadsEngageTimer)      { clearInterval(threadsEngageTimer);      threadsEngageTimer      = null; }
   if (competitiveCollectTimer) { clearInterval(competitiveCollectTimer); competitiveCollectTimer = null; }
   if (segmentAssignTimer)      { clearInterval(segmentAssignTimer);      segmentAssignTimer      = null; }
+  if (insightsGenerateTimer)   { clearInterval(insightsGenerateTimer);   insightsGenerateTimer   = null; }
 }

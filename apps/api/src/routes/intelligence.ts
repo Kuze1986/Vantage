@@ -292,6 +292,108 @@ intelligenceRoutes.get('/insights', async (c) => {
   return c.json({ insights: data ?? [] });
 });
 
+// POST /v1/intelligence/insights/:id/apply — append a campaign timeline day from an insight
+// The frontend has called this since it was documented in FEATURES.md, but it was never
+// implemented on the backend (404 until now).
+const applyInsightSchema = z.object({ campaign_id: z.string().min(1) });
+
+intelligenceRoutes.post('/insights/:id/apply', async (c) => {
+  const insightId = c.req.param('id');
+  const workspaceId = c.req.header('x-workspace-id');
+  if (!workspaceId) {
+    throw new HTTPException(400, { message: 'x-workspace-id header is required' });
+  }
+
+  const json = await c.req.json().catch(() => ({}));
+  const parsed = applyInsightSchema.safeParse(json);
+  if (!parsed.success) {
+    throw new HTTPException(400, { message: parsed.error.message });
+  }
+  const { campaign_id: campaignId } = parsed.data;
+
+  const sb = getSupabaseAdmin();
+
+  const { data: insight, error: insightErr } = await sb
+    .from('intelligence_insights')
+    .select('id, title, description')
+    .eq('id', insightId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle();
+  if (insightErr || !insight) {
+    throw new HTTPException(404, { message: 'Insight not found' });
+  }
+
+  const { data: campaign, error: campaignErr } = await sb
+    .from('campaigns')
+    .select('id, start_date')
+    .eq('id', campaignId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle();
+  if (campaignErr || !campaign) {
+    throw new HTTPException(404, { message: 'Campaign not found' });
+  }
+
+  // Same day_number/date_scheduled convention as POST /v1/campaigns/:id/apply-pack.
+  const { data: existing } = await sb
+    .from('campaign_timeline')
+    .select('day_number, date_scheduled')
+    .eq('campaign_id', campaignId)
+    .order('day_number', { ascending: false })
+    .limit(1);
+
+  const nextDay = (existing?.[0]?.day_number ?? -1) + 1;
+  const cursor = existing?.[0]?.date_scheduled
+    ? new Date(`${existing[0].date_scheduled}T12:00:00Z`)
+    : new Date(`${campaign.start_date}T12:00:00Z`);
+  if (existing?.[0]?.date_scheduled) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  const dateScheduled = cursor.toISOString().slice(0, 10);
+
+  const { data: inserted, error: insErr } = await sb
+    .from('campaign_timeline')
+    .insert({
+      campaign_id: campaignId,
+      day_number: nextDay,
+      date_scheduled: dateScheduled,
+      content_type: 'mixed',
+      primary_channel: 'x',
+      secondary_channels: [],
+      content_ideas: [
+        {
+          id: crypto.randomUUID(),
+          title: insight.title,
+          outline: insight.description,
+          visual_type: 'social_graphic',
+          notes: `From insight ${insight.id}`,
+        },
+      ],
+      published_pieces: [],
+    })
+    .select()
+    .single();
+
+  if (insErr) {
+    throw new HTTPException(500, { message: insErr.message });
+  }
+
+  await sb
+    .from('intelligence_insights')
+    .update({ status: 'actioned', actioned_at: new Date().toISOString() })
+    .eq('id', insightId);
+
+  await logActivity({
+    source: 'intelligence',
+    source_type: 'adapter',
+    event_type: 'insight_applied',
+    summary: `Applied insight "${insight.title}" to campaign ${campaignId} as day ${nextDay}`,
+    payload: { insight_id: insightId, campaign_id: campaignId, day_number: nextDay },
+    workspace_id: workspaceId,
+  });
+
+  return c.json({ day: inserted }, 201);
+});
+
 // ============================================================================
 // Benchmarks
 // ============================================================================
