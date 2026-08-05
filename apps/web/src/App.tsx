@@ -18,6 +18,8 @@ import CampaignBuilderPage from './pages/CampaignBuilderPage'
 import IntelligencePage from './pages/IntelligencePage'
 import AudiencePage from './pages/AudiencePage'
 import { LandingPage } from './landing/LandingPage'
+import { LegalPage } from './pages/legal/LegalPage'
+import { LegalEditorPage } from './pages/LegalEditorPage'
 
 const NAV = [
   { label: 'Dashboard', path: '/dashboard', icon: '◈' },
@@ -32,6 +34,7 @@ const NAV = [
   { label: 'Email Builder',  path: '/email-builder',  icon: '✉' },
   { label: 'Channels',  path: '/channels',   icon: '⊕' },
   { label: 'Voice',     path: '/voice',      icon: '◆' },
+  { label: 'Legal',     path: '/legal',      icon: '§' },
   { label: 'Settings',  path: '/settings',   icon: '⚙' },
 ]
 
@@ -125,6 +128,8 @@ export function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/landing" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/terms" element={<LegalPage slug="terms" />} />
+        <Route path="/privacy" element={<LegalPage slug="privacy" />} />
         <Route
           element={
             <RequireAuth>
@@ -144,6 +149,7 @@ export function App() {
           <Route path="/email-builder" element={<EmailBuilderPage />} />
           <Route path="/channels"   element={<ChannelsPage />} />
           <Route path="/voice"      element={<VoicePage />} />
+          <Route path="/legal"      element={<LegalEditorPage />} />
           <Route path="/settings"   element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

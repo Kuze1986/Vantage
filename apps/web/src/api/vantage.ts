@@ -728,4 +728,15 @@ export const vantageApi = {
 
   syncGA4: () =>
     vantageFetch("/v1/audience/ga4/sync", { method: "POST" }) as Promise<{ status: string; syncedAt: string }>,
+
+  // ── Legal pages (Terms & Conditions / Privacy Policy) ───────────────────────
+  getLegalPage: (slug: "terms" | "privacy") =>
+    vantageFetch(`/v1/legal/${slug}`) as Promise<{
+      page: { slug: string; title: string; content: string; updated_at: string };
+    }>,
+
+  updateLegalPage: (slug: "terms" | "privacy", patch: { title?: string; content?: string }) =>
+    vantageFetch(`/v1/legal/${slug}`, { method: "PATCH", body: JSON.stringify(patch) }) as Promise<{
+      page: { slug: string; title: string; content: string; updated_at: string };
+    }>,
 };

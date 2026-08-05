@@ -34,6 +34,8 @@ import { brandKitsRoutes } from "./routes/brand-kits.js";
 import { introOutroClipsRoutes } from "./routes/intro-outro-clips.js";
 import { mediaRoutes } from "./routes/media.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
+import { legalRoutes } from "./routes/legal.js";
+import { getLegalPage, isLegalSlug } from "./lib/legal-pages.js";
 import { startCadenceEngine } from "./services/scheduler.js";
 
 const app = new Hono();
@@ -56,6 +58,16 @@ app.get("/health", (c) => c.json({ ok: true }));
 
 app.route("/v1/webhooks", webhooksRoutes);
 app.get("/v1/channels/:slug/auth/callback", (c) => oauthCallbackGet(c));
+
+// Public — Terms & Conditions / Privacy Policy must be viewable without auth
+// (platform reviewers, e.g. TikTok's app review, need a live URL).
+app.get("/v1/legal/:slug", async (c) => {
+  const slug = c.req.param("slug");
+  if (!isLegalSlug(slug)) return c.json({ error: "Unknown legal page" }, 404);
+  const page = await getLegalPage(slug);
+  if (!page) return c.json({ error: "Not found" }, 404);
+  return c.json({ page });
+});
 
 const authedV1 = new Hono();
 authedV1.use("*", authMiddleware);
@@ -84,6 +96,7 @@ authedV1.route("/email-templates", emailTemplatesRoutes);
 authedV1.route("/brand-kits", brandKitsRoutes);
 authedV1.route("/intro-outro-clips", introOutroClipsRoutes);
 authedV1.route("/media", mediaRoutes);
+authedV1.route("/legal", legalRoutes);
 
 app.route("/v1", authedV1);
 
