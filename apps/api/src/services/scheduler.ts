@@ -28,6 +28,8 @@ import { postToSubreddit } from "../adapters/reddit.js";
 import { postThread } from "../adapters/threads.js";
 import { postBluesky } from "../adapters/bluesky.js";
 import { sendEmail } from "../adapters/email.js";
+import { postTikTokVideo } from "../adapters/tiktok.js";
+import { postInstagramMedia } from "../adapters/instagram.js";
 
 const TICK_MS               = 60_000;            // check queue every 60 seconds
 const AUTO_GEN_TICK         = 300_000;           // check auto-generate every 5 minutes
@@ -188,6 +190,31 @@ export async function publishPiece(workspaceId: string, piece: ContentPieceRow, 
       }
       case "bluesky": {
         const { id } = await postBluesky(workspaceId, String(payload.body ?? ""));
+        externalId = id;
+        break;
+      }
+      case "tiktok": {
+        const videoUrl = typeof payload.video_url === "string" ? payload.video_url : piece.video_url;
+        if (!videoUrl) throw new Error("TikTok post requires a video");
+        const title = String(payload.hook ?? payload.body ?? "").slice(0, 150);
+        const { id } = await postTikTokVideo(workspaceId, { videoUrl, title });
+        externalId = id;
+        break;
+      }
+      case "instagram": {
+        const videoUrl = typeof payload.video_url === "string" ? payload.video_url : piece.video_url;
+        const imageUrl = typeof payload.image_url === "string" ? payload.image_url : piece.image_url;
+        const mediaUrl = videoUrl || imageUrl;
+        if (!mediaUrl) throw new Error("Instagram post requires an image or video");
+        const hashtags = Array.isArray(payload.hashtags)
+          ? payload.hashtags.map((h) => `#${h}`).join(" ")
+          : "";
+        const caption = [String(payload.body ?? ""), hashtags].filter(Boolean).join("\n\n");
+        const { id } = await postInstagramMedia(workspaceId, {
+          mediaUrl,
+          mediaType: videoUrl ? "VIDEO" : "IMAGE",
+          caption,
+        });
         externalId = id;
         break;
       }

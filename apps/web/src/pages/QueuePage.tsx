@@ -55,7 +55,7 @@ function isAutopilotQueued(p: Piece): boolean {
   return p.status === 'queued' && Boolean(p.content_payload?.visual_type || p.content_payload?.campaign_id)
 }
 
-const MANUAL_CHANNELS = new Set(['tiktok', 'instagram', 'facebook'])
+const MANUAL_CHANNELS = new Set(['facebook'])
 const VIDEO_FORMATS   = new Set(['tiktok_script', 'instagram_caption', 'facebook_post'])
 
 const STATUS_FILTERS = ['all', 'auditing', 'approved', 'queued', 'published', 'rejected', 'failed'] as const

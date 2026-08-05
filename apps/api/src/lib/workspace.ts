@@ -13,8 +13,8 @@ const DEFAULT_CHANNELS = [
   { slug: "threads",   display_name: "Threads",     auth_method: "oauth",   cadence_config: { posts_per_day: 2, posting_hours: [9, 17] } },
   { slug: "bluesky",   display_name: "Bluesky",     auth_method: "api_key", cadence_config: { posts_per_day: 3, posting_hours: [9, 13, 18] } },
   { slug: "email",     display_name: "Email",       auth_method: "api_key", cadence_config: { newsletter_day: "tuesday" } },
-  { slug: "tiktok",    display_name: "TikTok",      auth_method: "manual",  cadence_config: {} },
-  { slug: "instagram", display_name: "Instagram",   auth_method: "manual",  cadence_config: {} },
+  { slug: "tiktok",    display_name: "TikTok",      auth_method: "oauth",   cadence_config: {} },
+  { slug: "instagram", display_name: "Instagram",   auth_method: "oauth",   cadence_config: {} },
   { slug: "facebook",  display_name: "Facebook",    auth_method: "manual",  cadence_config: {} },
 ] as const;
 

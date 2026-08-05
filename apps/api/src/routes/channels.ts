@@ -8,6 +8,8 @@ import { buildAuthorizeUrl as liAuthorizeUrl, savePendingOAuth as liSavePending 
 import { buildAuthorizeUrl as redditAuthorizeUrl, savePendingOAuth as redditSavePending } from "../adapters/reddit.js";
 import { buildAuthorizeUrl as threadsAuthorizeUrl, savePendingOAuth as threadsSavePending } from "../adapters/threads.js";
 import { connect as blueskyConnect } from "../adapters/bluesky.js";
+import { generatePkce as ttGeneratePkce, buildAuthorizeUrl as ttAuthorizeUrl, savePendingOAuth as ttSavePending } from "../adapters/tiktok.js";
+import { buildAuthorizeUrl as igAuthorizeUrl, savePendingOAuth as igSavePending } from "../adapters/instagram.js";
 
 const cadenceSchema = z.object({
   posts_per_day:   z.number().int().min(0).max(20).optional(),
@@ -146,6 +148,33 @@ channelsAuthedRoutes.post("/:slug/auth/start", async (c) => {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes("not configured")) {
           throw new HTTPException(503, { message: "Threads OAuth not configured. Set THREADS_CLIENT_ID, THREADS_CLIENT_SECRET, and THREADS_REDIRECT_URI in Railway." });
+        }
+        throw e;
+      }
+    }
+    case "tiktok": {
+      try {
+        const { verifier, challenge } = ttGeneratePkce();
+        await ttSavePending(ws, state, verifier);
+        const url = ttAuthorizeUrl({ state, code_challenge: challenge });
+        return c.json({ authorize_url: url, state });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("not configured")) {
+          throw new HTTPException(503, { message: "TikTok OAuth not configured. Set TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, and TIKTOK_REDIRECT_URI in Railway." });
+        }
+        throw e;
+      }
+    }
+    case "instagram": {
+      try {
+        await igSavePending(ws, state);
+        const url = igAuthorizeUrl(state);
+        return c.json({ authorize_url: url, state });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("not configured")) {
+          throw new HTTPException(503, { message: "Instagram OAuth not configured. Set INSTAGRAM_CLIENT_ID, INSTAGRAM_CLIENT_SECRET, and INSTAGRAM_REDIRECT_URI in Railway." });
         }
         throw e;
       }

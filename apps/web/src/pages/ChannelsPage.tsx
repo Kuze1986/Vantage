@@ -16,13 +16,13 @@ const CHANNEL_META: Record<string, {
   threads:   { icon: '@',  accent: 'cyan',  description: 'Publish text posts to Threads. Meta Graph API.', meta: ['OAuth 2.0', 'Text posts'], authMethod: 'oauth' },
   bluesky:   { icon: '🦋', accent: 'cyan',  description: 'Post to Bluesky via AT Protocol. App password.', meta: ['App password', 'AT Protocol'], authMethod: 'api_key' },
   email:     { icon: '✉',  accent: 'green', description: 'Newsletter via Resend. HTML email.', meta: ['Resend API', 'HTML email'], authMethod: 'api_key' },
-  tiktok:    { icon: '♪',  accent: 'red',   description: 'Script queue for one-click manual upload.', meta: ['Manual post', 'Video queue'], authMethod: 'manual' },
-  instagram: { icon: '◉',  accent: 'gold',  description: 'Caption queue for manual Instagram upload.', meta: ['Manual post', 'Reels queue'], authMethod: 'manual' },
+  tiktok:    { icon: '♪',  accent: 'red',   description: 'Publish videos via the Content Posting API.', meta: ['OAuth 2.0 PKCE', 'Content Posting API'], authMethod: 'oauth' },
+  instagram: { icon: '◉',  accent: 'gold',  description: 'Publish Reels and images via the Graph API.', meta: ['Facebook Login', 'Graph API'], authMethod: 'oauth' },
   facebook:  { icon: 'f',  accent: 'amber', description: 'Queue for manual Facebook Page publishing.', meta: ['Manual post'], authMethod: 'manual' },
 }
 
 const CHANNEL_ORDER = ['x', 'linkedin', 'reddit', 'threads', 'bluesky', 'email', 'tiktok', 'instagram', 'facebook']
-const OAUTH_CHANNELS = ['x', 'linkedin', 'reddit', 'threads']
+const OAUTH_CHANNELS = ['x', 'linkedin', 'reddit', 'threads', 'tiktok', 'instagram']
 
 function CadenceForm({ slug, config, onSave }: {
   slug: string

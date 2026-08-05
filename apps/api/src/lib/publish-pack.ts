@@ -1,12 +1,15 @@
 /**
- * Publish Pack — one-click export bundle for manual channels
- * (TikTok / Instagram / Facebook).
+ * Publish Pack — one-click export bundle for manual channels (Facebook).
+ * TikTok/Instagram post automatically now; packageTikTok/packageInstagram stay
+ * wired into buildPublishPack() below as a fallback/reference, but are
+ * unreachable via the API since queue.ts gates on MANUAL_PUBLISH_CHANNELS
+ * before ever calling this.
  */
 import { packageForManualPost as packageTikTok } from "../adapters/tiktok.js";
 import { packageForManualPost as packageInstagram } from "../adapters/instagram.js";
 import { packageForManualPost as packageFacebook } from "../adapters/facebook.js";
 
-export const MANUAL_PUBLISH_CHANNELS = new Set(["tiktok", "instagram", "facebook"]);
+export const MANUAL_PUBLISH_CHANNELS = new Set(["facebook"]);
 
 export type PublishPack = {
   content_piece_id: string;
