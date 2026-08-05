@@ -40,8 +40,20 @@ export async function connect(workspaceId: string, handle: string, appPassword: 
 
   const sb = getSupabaseAdmin();
   const auth_state: BlueskyAuthState = { tokens: { accessJwt, refreshJwt, did, handle: resolvedHandle, pds } };
-  const { error } = await sb.from("channels").update({ auth_state, enabled: true }).eq("workspace_id", workspaceId).eq("slug", "bluesky");
+  // .update() with no matching row succeeds with an empty result and no error —
+  // it previously reported "connected" even when the channels row didn't exist
+  // yet (e.g. a workspace pre-dating bluesky's addition to DEFAULT_CHANNELS),
+  // silently discarding the tokens. .select() forces a visible failure instead.
+  const { data, error } = await sb
+    .from("channels")
+    .update({ auth_state, enabled: true })
+    .eq("workspace_id", workspaceId)
+    .eq("slug", "bluesky")
+    .select("workspace_id");
   if (error) throw new Error(error.message);
+  if (!data?.length) {
+    throw new Error("Bluesky channel row not found for this workspace — refresh the Channels page and try again");
+  }
 
   await logActivity({ source: "adapter:bluesky", source_type: "adapter", event_type: "oauth_connected", summary: `Bluesky account @${resolvedHandle} connected`, payload: { did } });
   return { did, handle: resolvedHandle };
