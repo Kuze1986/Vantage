@@ -2570,7 +2570,8 @@ after the foundation.)
 
 ### 3C-6 — Email / Newsletter Template Builder
 
-**Status:** ✅ Shipped (builder + CRUD) · ⬜ **Pipeline integration not built**
+**Status:** ✅ Shipped · 🟡 Unverified (the email channel is `enabled: false` with 0 subscribers,
+so no wrapped newsletter has been sent)
 
 **Problem:** The Email channel sends Kuze's raw HTML `body` straight to Resend with no branded
 chrome — no header, hero, styled CTA button, or footer. There is no visual way to build a
@@ -2587,14 +2588,26 @@ is email-client-safe HTML, not a PNG, so the canvas engine does not apply.
   `PreviewModal`).
 - **Persistence:** new `vantage.email_templates` table (`id`, `name`, `blocks` JSONB,
   `created_at`) + `public.email_templates` view + CRUD routes; save/load named templates.
-- **Pipeline integration — ⬜ NOT BUILT.** The design was for a saved template to act as a
-  **wrapper**: a generated `email_newsletter` piece's Kuze `body` injected into the template's
-  text block so automated newsletters inherit branded chrome. In reality `adapters/email.ts`
-  imports only `tagUrls` and nothing anywhere reads `email_templates` outside its own CRUD
-  route — newsletters still send Kuze's raw HTML. The blocker is structural:
-  `serializeToHtml()` lives in `apps/web/src/creative/emailSerializer.ts`, browser-side, where
-  the API adapter cannot reach it. Closing this means promoting the serializer to a shared
-  workspace package and adding an `email_wrapper_template_id` setting.
+- **Pipeline integration — ✅ built.** A layout can be installed as the **wrapper** for
+  automated newsletters: **✉ Use as newsletter wrapper** in the builder serializes the blocks
+  and stores the HTML in the `email_wrapper_html` setting. `adapters/email.ts` splices the
+  generated body in at the `{{content}}` marker, **then** UTM-tags — that order matters, so the
+  wrapper's own logo/footer/unsubscribe links carry attribution too, not just Kuze's.
+
+  The operator marks the injection point with a text block containing exactly `{{content}}`;
+  the builder unwraps the `<p>` it serializes into, so the injected body's own block elements
+  aren't nested inside a paragraph.
+
+  **Why the HTML is stored rather than the serializer shared:** `serializeToHtml()` lives in
+  `apps/web/src/creative/emailSerializer.ts`, and the web app has no workspace-package
+  dependencies — Railway builds it with a bare `pnpm --filter @vantage/web build` that would
+  not build a shared package first (`docs/railway.md`). Promoting the serializer would break
+  that deploy. Storing the rendered result keeps exactly one serializer implementation and
+  needs no migration, since `settings.value` is JSONB.
+
+  Degrades safely: no wrapper configured, or a wrapper missing its marker, sends the
+  unwrapped body. The second case logs `email_wrapper_skipped`, because it means the operator
+  chose a wrapper and it silently did nothing.
 
 **Files to create/change:** `apps/web/src/pages/EmailBuilderPage.tsx` + block components (new),
 HTML serializer util, `apps/api/src/routes/email-templates.ts` (new),
@@ -2691,7 +2704,7 @@ engine already has it).
 
 **Status:** ✅ Shipped
 
-Vitest harness in `@vantage/api` with **250 tests across 31 files** (all passing) covering the
+Vitest harness in `@vantage/api` with **257 tests across 32 files** (all passing) covering the
 highest-risk paths: publish state
 machine (success / retry-backoff / exhausted-fail+alert / rate-limit), cadence claim lock,
 auto-generate audit gating (pass→queued, fail→regen→approved/rejected), membership/IDOR guard,
@@ -2886,14 +2899,13 @@ pieces), DemoForge (63 jobs / 36 rendered), Campaign Builder (2 campaigns), acti
 OAuth tokens, Social Kit + the seven-item Creative Studio, and the full Phase 4
 SaaS-readiness stack — multi-tenancy, tenant-aware
 scheduler, membership/roles, per-tenant credentials, claim-based publish lock, pluggable LLM
-providers across five vendors, and Threads + Bluesky. **250 tests across 31 files, plus CI.**
+providers across five vendors, and Threads + Bluesky. **257 tests across 32 files, plus CI.**
 
 **Built but never exercised:** everything downstream of publishing — engagement ingestion,
 BioLoop weight learning, Strategic Intelligence, the Audience Model, and Virality Signals.
 Complete, tested, and sitting at zero rows.
 
-**Not built:** Billing & Plans (4-7), GA4 sync (4-8's sibling in Feature 24), and the 3C-6
-email-wrapper pipeline integration.
+**Not built:** Billing & Plans (4-7) and GA4 sync (Feature 24).
 
 **Broken:** the `legal_pages` migration — `/terms` and `/privacy` serve an error to the public
 until it is applied. See [Known Gaps](#known-gaps).

@@ -22,6 +22,12 @@ export interface PipelineSettings {
   llm_model_audit:       string;
   // When false, a task uses only its head slot — no failover to other providers.
   llm_failover_enabled:  boolean;
+  // 3C-6: branded newsletter chrome. Serialized HTML from the Email Builder,
+  // containing the {{content}} marker where the generated body is spliced in.
+  // "" = send Kuze's raw HTML, the pre-wrapper behaviour. Stored here rather
+  // than on email_templates because settings.value is JSONB and needs no
+  // migration — see lib/email-wrapper.ts for why the serializer can't be shared.
+  email_wrapper_html:    string;
 }
 
 const DEFAULTS: PipelineSettings = {
@@ -36,6 +42,7 @@ const DEFAULTS: PipelineSettings = {
   llm_model_generate:    "",
   llm_model_audit:       "",
   llm_failover_enabled:  true,
+  email_wrapper_html:    "",
 };
 
 export async function loadSettings(workspaceId: string): Promise<PipelineSettings> {
@@ -59,6 +66,7 @@ export async function loadSettings(workspaceId: string): Promise<PipelineSetting
       llm_model_generate:     typeof map.llm_model_generate     === "string"  ? map.llm_model_generate     : DEFAULTS.llm_model_generate,
       llm_model_audit:        typeof map.llm_model_audit        === "string"  ? map.llm_model_audit        : DEFAULTS.llm_model_audit,
       llm_failover_enabled:   typeof map.llm_failover_enabled   === "boolean" ? map.llm_failover_enabled   : DEFAULTS.llm_failover_enabled,
+      email_wrapper_html:     typeof map.email_wrapper_html     === "string"  ? map.email_wrapper_html     : DEFAULTS.email_wrapper_html,
     };
   } catch {
     return { ...DEFAULTS };

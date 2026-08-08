@@ -9,6 +9,9 @@ import { Panel } from '../ds'
 import { vantageApi } from '../api/vantage'
 import { serializeToHtml, type Block, type BlockType } from '../creative/emailSerializer'
 
+/** Mirrors CONTENT_MARKER in apps/api/src/lib/email-wrapper.ts. */
+const CONTENT_MARKER = '{{content}}'
+
 // ─────────────────────────────────────────────────────────────────────
 // Block defaults
 // ─────────────────────────────────────────────────────────────────────
@@ -127,6 +130,43 @@ export function EmailBuilderPage() {
     if (navigator.clipboard) void navigator.clipboard.writeText(serializeToHtml(blocks))
   }
 
+  /**
+   * 3C-6: install this layout as the wrapper for automated newsletters.
+   *
+   * The operator marks the injection point with a text block containing exactly
+   * {{content}}. We serialize here — the builder owns the only serializer — and
+   * store the finished HTML in settings, which the email adapter splices the
+   * generated body into at send time.
+   */
+  const useAsWrapper = async () => {
+    const marked = blocks.some(
+      (b) => b.type === 'text' && String(b.props.content ?? '').trim() === CONTENT_MARKER,
+    )
+    if (!marked) {
+      setErr(`Add a text block containing exactly ${CONTENT_MARKER} to mark where the generated newsletter goes.`)
+      return
+    }
+    setSaving(true); setErr(null)
+    try {
+      // The marker serializes inside a <p>; unwrap it so the injected body's own
+      // block elements (h1, tables) aren't nested in a paragraph.
+      const html = serializeToHtml(blocks)
+        .replace(/<p[^>]*>\s*\{\{content\}\}\s*<\/p>/g, CONTENT_MARKER)
+      await vantageApi.patchSettings({ email_wrapper_html: html })
+      setMsg('Installed as the newsletter wrapper — automated email sends now use this chrome')
+    } catch (e) { setErr(String((e as Error).message)) }
+    finally { setSaving(false) }
+  }
+
+  const clearWrapper = async () => {
+    setSaving(true); setErr(null)
+    try {
+      await vantageApi.patchSettings({ email_wrapper_html: '' })
+      setMsg('Wrapper cleared — newsletters send unwrapped')
+    } catch (e) { setErr(String((e as Error).message)) }
+    finally { setSaving(false) }
+  }
+
   const saveTemplate = async () => {
     setSaving(true); setErr(null)
     try {
@@ -231,6 +271,33 @@ export function EmailBuilderPage() {
               {saving ? '…' : activeId ? '↑ Update' : '↑ Save'}
             </button>
           </div>
+
+          {/* 3C-6: install as the wrapper automated newsletters are sent inside */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button
+              type="button"
+              onClick={() => void useAsWrapper()}
+              disabled={saving}
+              className="nx-btn"
+              title={`Requires a text block containing exactly ${CONTENT_MARKER}`}
+              style={{ flex: 2, justifyContent: 'center', fontSize: 11, letterSpacing: '0.14em', padding: '9px', color: 'var(--nx-accent)', borderColor: 'var(--nx-accent)', opacity: saving ? 0.6 : 1 }}
+            >
+              ✉ Use as newsletter wrapper
+            </button>
+            <button
+              type="button"
+              onClick={() => void clearWrapper()}
+              disabled={saving}
+              className="nx-btn"
+              style={{ flex: 1, justifyContent: 'center', fontSize: 11, letterSpacing: '0.14em', padding: '9px', color: 'var(--nx-text-4)', opacity: saving ? 0.6 : 1 }}
+            >
+              Clear
+            </button>
+          </div>
+          <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginTop: 6, lineHeight: 1.6, letterSpacing: '0.04em' }}>
+            Mark the injection point with a text block containing exactly <code>{CONTENT_MARKER}</code>.
+            Generated newsletters are spliced in there before links are UTM-tagged.
+          </p>
         </div>
 
         {/* ── Sidebar (right) ── */}

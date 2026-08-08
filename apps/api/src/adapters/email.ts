@@ -1,6 +1,8 @@
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import { tagUrls } from "../lib/utm.js";
+import { loadSettings } from "../lib/settings.js";
+import { applyEmailWrapper, CONTENT_MARKER } from "../lib/email-wrapper.js";
 
 const RESEND_BASE = "https://api.resend.com";
 
@@ -38,10 +40,24 @@ export async function sendEmail(workspaceId: string, params: {
     throw new Error("No active email subscribers — add subscribers to vantage.newsletter_subscribers");
   }
 
-  // 3A-2: Apply UTM tags to all links in the HTML body if a pieceId is provided
+  // 3C-6: wrap the generated body in the workspace's branded chrome, then 3A-2:
+  // UTM-tag every link. Order matters — wrapping first means the wrapper's own
+  // links (logo, footer, unsubscribe) get tagged too, not just Kuze's.
+  const { email_wrapper_html } = await loadSettings(workspaceId);
+  const wrap = applyEmailWrapper(email_wrapper_html, params.html);
+  if (wrap.skippedReason === "no_marker") {
+    await logActivity({
+      source: "adapter:email", source_type: "adapter",
+      event_type: "email_wrapper_skipped",
+      summary: `Newsletter wrapper is configured but has no ${CONTENT_MARKER} marker — sent unwrapped`,
+      payload: { piece_id: params.pieceId ?? null },
+      workspace_id: workspaceId,
+    });
+  }
+
   const html = params.pieceId
-    ? tagUrls(params.html, "email", params.pieceId)
-    : params.html;
+    ? tagUrls(wrap.html, "email", params.pieceId)
+    : wrap.html;
 
   // Resend supports batch sends via /emails/batch or individual sends.
   // For lists < 100 we'll use the batch endpoint.
@@ -72,7 +88,8 @@ export async function sendEmail(workspaceId: string, params: {
     source_type: "adapter",
     event_type: "send_success",
     summary: `Email batch sent to ${recipients.length} recipients`,
-    payload: { recipient_count: recipients.length, first_id: firstId },
+    payload: { recipient_count: recipients.length, first_id: firstId, wrapped: wrap.wrapped },
+    workspace_id: workspaceId,
   });
 
   return { id: firstId, recipient_count: recipients.length };
