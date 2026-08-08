@@ -117,10 +117,12 @@ generateRoutes.post("/:channel", async (c) => {
     if (generate_image && IMAGE_CHANNELS.has(channel)) {
       try {
         imageUrl = await generateImage({
-          topic_text: topic.topic_text as string,
-          vertical:   (topic.vertical as string | null) ?? null,
+          topic_text:   topic.topic_text as string,
+          vertical:     (topic.vertical as string | null) ?? null,
           channel,
-          brand_name: (voice.name as string | undefined) ?? "NEXUS",
+          brand_name:   (voice.name as string | undefined) ?? "NEXUS",
+          workspace_id: ws,
+          piece_id:     piece.id,
         });
         taggedPayload.image_url = imageUrl;
       } catch (imgErr) {
