@@ -17,6 +17,7 @@ import { EmailBuilderPage } from './pages/EmailBuilderPage'
 import CampaignBuilderPage from './pages/CampaignBuilderPage'
 import IntelligencePage from './pages/IntelligencePage'
 import AudiencePage from './pages/AudiencePage'
+import MediaGalleryPage from './pages/MediaGalleryPage'
 import { LandingPage } from './landing/LandingPage'
 import { LegalPage } from './pages/legal/LegalPage'
 import { LegalEditorPage } from './pages/LegalEditorPage'
@@ -30,6 +31,7 @@ const NAV = [
   { label: 'Intelligence', path: '/intelligence',  icon: '🔍' },
   { label: 'Audience', path: '/audience',  icon: '👥' },
   { label: 'DemoForge', path: '/demoforge',  icon: '⬡' },
+  { label: 'Media',     path: '/media',      icon: '▣' },
   { label: 'Social Kit',     path: '/social-kit',     icon: '◧' },
   { label: 'Email Builder',  path: '/email-builder',  icon: '✉' },
   { label: 'Channels',  path: '/channels',   icon: '⊕' },
@@ -145,6 +147,7 @@ export function App() {
           <Route path="/intelligence"  element={<IntelligencePage />} />
           <Route path="/audience"  element={<AudiencePage />} />
           <Route path="/demoforge"  element={<DemoForgePage />} />
+          <Route path="/media"      element={<MediaGalleryPage />} />
           <Route path="/social-kit"    element={<SocialKitPage />} />
           <Route path="/email-builder" element={<EmailBuilderPage />} />
           <Route path="/channels"   element={<ChannelsPage />} />

@@ -47,6 +47,19 @@ export type BrandKitRecord = {
   updated_at?: string;
 };
 
+/** One asset in the media gallery. Mirrors MediaItem in api/src/lib/media-gallery.ts. */
+export type MediaGalleryItem = {
+  id: string;
+  kind: 'image' | 'video';
+  url: string;
+  thumbnail_url: string | null;
+  label: string;
+  source: 'piece' | 'demoforge' | 'brand_kit' | 'clip';
+  piece_id: string | null;
+  job_id: string | null;
+  created_at: string | null;
+};
+
 export type ChannelStatus = {
   slug: string;
   enabled: boolean;
@@ -60,6 +73,10 @@ export type ChannelStatus = {
     newsletter_day?: string;
   };
   connected_at: string | null;
+  /** Derived server-side from MANUAL_PUBLISH_CHANNELS — see api/src/lib/channel-auth.ts. */
+  auth_method: 'oauth' | 'api_key' | 'manual';
+  /** True when the operator can start an OAuth flow for this channel. */
+  supports_oauth: boolean;
 };
 
 export type ChannelBreakdownEntry = {
@@ -233,6 +250,22 @@ export const vantageApi = {
   // ── Dashboard ─────────────────────────────────────────────────────────────
   dashboardOverview: () =>
     vantageFetch("/v1/dashboard/overview") as Promise<DashboardOverview>,
+
+  // ── Media gallery ─────────────────────────────────────────────────────────
+  mediaGallery: (opts?: { source?: string; kind?: string; limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams();
+    if (opts?.source) qs.set("source", opts.source);
+    if (opts?.kind) qs.set("kind", opts.kind);
+    if (opts?.limit != null) qs.set("limit", String(opts.limit));
+    if (opts?.offset != null) qs.set("offset", String(opts.offset));
+    const q = qs.toString();
+    return vantageFetch(`/v1/media/gallery${q ? `?${q}` : ""}`) as Promise<{
+      items: MediaGalleryItem[];
+      total: number;
+      next_offset: number | null;
+      scan_limit: number;
+    }>;
+  },
 
   // ── Channels ──────────────────────────────────────────────────────────────
   listChannels: () =>
