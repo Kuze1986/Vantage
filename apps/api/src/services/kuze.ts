@@ -3,16 +3,9 @@ import type { ChannelSlug, ContentFormat, ViralityPatternExtra } from "@vantage/
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { tagUrls } from "../lib/utm.js";
 import { resolveProvider } from "../lib/llm.js";
+import { extractJsonArray, extractJsonObject, LlmJsonError } from "../lib/llm-json.js";
 
 export type { ChannelSlug, ContentFormat };
-
-function extractJson(text: string): Record<string, unknown> {
-  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const start = trimmed.indexOf("{");
-  const end   = trimmed.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error(`Kuze returned non-JSON: ${trimmed.slice(0, 200)}`);
-  return JSON.parse(trimmed.slice(start, end + 1)) as Record<string, unknown>;
-}
 
 async function loadWeights(workspaceId: string, channel: ChannelSlug): Promise<string> {
   try {
@@ -140,24 +133,56 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
   ]);
   const provider = await resolveProvider("generate", input.workspace_id, "kuze.generateContent");
 
-  const rawText = (await provider.generateCompletion(
-    kuzeUserPrompt({
-      format,
-      topic_text:  input.topic_text,
-      vertical:    input.vertical,
-      brand_voice: input.brand_voice,
-      extras: {
-        subreddit: input.extras?.subreddit,
-        weights: weights || undefined,
-        avoidWeights: avoidWeights || undefined,
-        viralityPatterns: viralityPatterns.length ? viralityPatterns : undefined,
-        rejectionCategories: rejectionCategories || undefined,
-      },
-    }),
-    { system_prompt: kuzeSystemPrompt(format), max_tokens: 1400 },
-  )).trim();
+  const userPrompt = kuzeUserPrompt({
+    format,
+    topic_text:  input.topic_text,
+    vertical:    input.vertical,
+    brand_voice: input.brand_voice,
+    extras: {
+      subreddit: input.extras?.subreddit,
+      weights: weights || undefined,
+      avoidWeights: avoidWeights || undefined,
+      viralityPatterns: viralityPatterns.length ? viralityPatterns : undefined,
+      rejectionCategories: rejectionCategories || undefined,
+    },
+  });
+  const genOptions = { system_prompt: kuzeSystemPrompt(format), max_tokens: 1400 };
 
-  const parsed = extractJson(rawText);
+  const rawText = (await provider.generateCompletion(userPrompt, genOptions)).trim();
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = extractJsonObject(rawText, "Kuze");
+  } catch (err) {
+    if (!(err instanceof LlmJsonError)) throw err;
+    // The safe repairs could not rescue it. Rather than fail a campaign launch on
+    // one malformed response, hand the model its own broken output and the parser
+    // error and let it correct itself — the same regenerate-with-feedback shape the
+    // Ilita audit loop already uses. One retry only: a model that cannot emit valid
+    // JSON twice is a prompt or provider problem, and retrying forever would just
+    // burn tokens hiding it.
+    console.warn(
+      `[kuze] malformed JSON for ${input.channel}/${format}, retrying once. ` +
+      `${err.message}${err.position != null ? ` near: ${err.context}` : ""}`,
+    );
+    const retryText = (await provider.generateCompletion(
+      `${userPrompt}\n\nYour previous response could not be parsed as JSON (${err.message}). ` +
+      `Return the same content as a single valid JSON object and nothing else — no prose, no ` +
+      `markdown fence. Escape every double quote and newline inside string values.`,
+      genOptions,
+    )).trim();
+    try {
+      parsed = extractJsonObject(retryText, "Kuze");
+    } catch (retryErr) {
+      if (!(retryErr instanceof LlmJsonError)) throw retryErr;
+      // Surface what the model actually said. The old extractor discarded it,
+      // which is why the first production occurrence left nothing to debug.
+      throw new Error(
+        `Kuze returned unparseable JSON twice for ${input.channel}/${format}. ` +
+        `${retryErr.message}. Near: ${retryErr.context}`,
+      );
+    }
+  }
 
   // Tweet-specific length guard
   if (format === "tweet") {
@@ -229,15 +254,11 @@ Generate ${countHint} caption variants for ${channelLabel}. Return a JSON array 
   const raw = (await provider.generateCompletion(userContent, {
     system_prompt: systemPrompt,
     max_tokens: 1200,
-  }))
-    .trim()
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/, '')
-    .trim();
+  })).trim();
 
-  const parsed = JSON.parse(raw) as unknown;
-  if (!Array.isArray(parsed)) throw new Error('Kuze returned non-array for captions');
-  return (parsed as unknown[]).map((s) => String(s));
+  // Same tolerant path as generateContent — fences, trailing commas and raw
+  // newlines in captions were all reachable here too.
+  return extractJsonArray<unknown>(raw, "Kuze captions").map((s) => String(s));
 }
 
 // ── Legacy shim ────────────────────────────────────────────────────────────────

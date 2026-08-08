@@ -42,6 +42,15 @@ describe("auditContent", () => {
 
   it("throws on non-JSON responses", async () => {
     h.response = "not json at all";
-    await expect(auditContent({ content: "hi", format: "tweet", brand_voice: "{}" })).rejects.toThrow(/non-JSON/);
+    await expect(auditContent({ content: "hi", format: "tweet", brand_voice: "{}" }))
+      .rejects.toThrow(/Ilita returned no JSON/);
+  });
+
+  it("tolerates the malformed JSON a model actually emits", async () => {
+    // Ilita shared Kuze's fragile extractor, so the missing comma that broke a
+    // campaign launch would have failed an audit the same way.
+    h.response = '{"verdict": "pass"\n "feedback": "on brand"}';
+    const out = await auditContent({ content: "hi", format: "tweet", brand_voice: "{}" });
+    expect(out.verdict).toBe("pass");
   });
 });

@@ -1,14 +1,10 @@
 import { ilitaAuditSystemPrompt, ilitaAuditUserPrompt, ILITA_REJECTION_CATEGORIES } from "@vantage/prompts";
 import type { ContentFormat, IlitaRejectionCategory } from "@vantage/prompts";
 import { resolveProvider } from "../lib/llm.js";
+import { extractJsonObject } from "../lib/llm-json.js";
 
-function extractJson(text: string): Record<string, unknown> {
-  const trimmed = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-  const start = trimmed.indexOf("{");
-  const end   = trimmed.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error(`Ilita returned non-JSON: ${trimmed.slice(0, 200)}`);
-  return JSON.parse(trimmed.slice(start, end + 1)) as Record<string, unknown>;
-}
+/** Shared tolerant parser — Ilita carried a byte-identical copy of the fragile one. */
+const extractJson = (text: string): Record<string, unknown> => extractJsonObject(text, "Ilita");
 
 const CATEGORY_SET = new Set<string>(ILITA_REJECTION_CATEGORIES);
 
