@@ -53,14 +53,56 @@ export function periodStart(sub: SubscriptionRow, now: Date = new Date()): strin
   return start.toISOString().slice(0, 10);
 }
 
+/**
+ * Raised when the billing schema cannot be read at all — a missing table, a
+ * revoked grant, a dead connection.
+ *
+ * This exists because the alternative is worse than an outage. Swallowing the
+ * error makes every read return null, which resolves every workspace to the
+ * trial plan with usage permanently reading zero: metering looks like it is
+ * working, the UI shows a tidy "0 / 10", and nothing is ever counted or
+ * enforced. A paid product silently not billing is a failure you discover from
+ * the bank statement. A 503 you discover in the first minute.
+ */
+export class BillingUnavailableError extends HTTPException {
+  readonly detail: string;
+  constructor(what: string, detail: string) {
+    // 503, deliberately not 402: the caller has not hit a limit, the server
+    // cannot tell whether they have. Conflating the two would show a customer
+    // an upgrade prompt for our own broken deployment.
+    super(503, {
+      message: `Billing is temporarily unavailable (${what}). This is a server-side fault, not a quota limit.`,
+    });
+    this.name = "BillingUnavailableError";
+    this.detail = detail;
+    console.error(`[billing] ${what} failed: ${detail}`);
+  }
+}
+
+/**
+ * PostgREST reports a missing table/view as PGRST205, Postgres as 42P01. Both
+ * mean the billing migration has not been applied — worth naming explicitly,
+ * because it is by far the likeliest cause and the fix is not "retry".
+ */
+function describeError(err: { code?: string; message?: string } | null): string {
+  const code = err?.code ?? "";
+  if (code === "PGRST205" || code === "42P01") {
+    return `${err?.message ?? "relation not found"} — the billing migration (20260808120000_billing.sql) is not applied`;
+  }
+  return err?.message ?? "unknown error";
+}
+
 /** Load the workspace's subscription row, or null when it has never subscribed. */
 export async function loadSubscription(workspaceId: string): Promise<SubscriptionRow> {
   const sb = getSupabaseAdmin();
-  const { data } = await sb
+  const { data, error } = await sb
     .from("billing_subscriptions")
     .select("plan_key, status, current_period_end")
     .eq("workspace_id", workspaceId)
     .maybeSingle();
+  // maybeSingle() reports "no rows" as data:null with error:null, so a populated
+  // error here is a real fault rather than a workspace that has not subscribed.
+  if (error) throw new BillingUnavailableError("subscription lookup", describeError(error));
   return (data as SubscriptionRow) ?? null;
 }
 
@@ -89,11 +131,15 @@ export async function getUsage(workspaceId: string, sub?: SubscriptionRow): Prom
   const period = periodStart(subscription);
 
   const sb = getSupabaseAdmin();
-  const { data } = await sb
+  const { data, error } = await sb
     .from("usage_counters")
     .select("metric, count")
     .eq("workspace_id", workspaceId)
     .eq("period_start", period);
+
+  // An unreadable counter table would otherwise report 0 used against every
+  // limit — quota that can never trip, presented as quota that is fine.
+  if (error) throw new BillingUnavailableError("usage counters", describeError(error));
 
   const used: Record<UsageMetric, number> = { generations: 0, videos: 0 };
   for (const row of (data ?? []) as { metric: string; count: number }[]) {
@@ -179,10 +225,14 @@ export async function recordUsage(
       p_period_start: period,
       p_amount: amount,
     });
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(describeError(error));
   } catch (err) {
-    console.warn(
-      `[usage] failed to record ${metric} for workspace ${workspaceId}:`,
+    // Deliberately still fail-soft: this runs *after* the work succeeded, and
+    // refusing a piece the customer already has would be worse than an
+    // uncounted one. But it is logged at error level, not warn — an
+    // undercounted meter is revenue quietly leaking, not a curiosity.
+    console.error(
+      `[billing] failed to record ${metric} for workspace ${workspaceId} — usage is undercounted:`,
       err instanceof Error ? err.message : err,
     );
   }

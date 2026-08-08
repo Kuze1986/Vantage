@@ -144,3 +144,49 @@ describe("usage / recording", () => {
     await expect(recordUsage("ws-1", "generations")).resolves.toBeUndefined();
   });
 });
+
+describe("usage / unreadable billing schema", () => {
+  // The failure this pins: swallowing these errors made every read return null,
+  // which resolved every workspace to trial with usage permanently at 0 —
+  // metering that looks healthy and counts nothing.
+  const MISSING_TABLE = { code: "PGRST205", message: "Could not find the table 'public.usage_counters'" };
+
+  it("refuses with 503, not a silent trial fallback, when the subscription table is missing", async () => {
+    maybeSingleMock.mockResolvedValue({ data: null, error: MISSING_TABLE });
+    await expect(assertQuota("ws-1", "generations")).rejects.toMatchObject({ status: 503 });
+  });
+
+  it("refuses with 503 when the counter table is missing", async () => {
+    maybeSingleMock.mockResolvedValue({ data: null, error: null });
+    selectEqMock.mockResolvedValue({ data: null, error: MISSING_TABLE });
+    await expect(getUsage("ws-1")).rejects.toMatchObject({ status: 503 });
+  });
+
+  it("names the unapplied migration in the detail, since that is the likeliest cause", async () => {
+    maybeSingleMock.mockResolvedValue({ data: null, error: MISSING_TABLE });
+    await expect(getUsage("ws-1")).rejects.toMatchObject({
+      detail: expect.stringContaining("20260808120000_billing.sql"),
+    });
+  });
+
+  it("does not dress a server fault up as a quota limit", async () => {
+    maybeSingleMock.mockResolvedValue({ data: null, error: MISSING_TABLE });
+    // 402 would show the customer an upgrade prompt for our broken deployment.
+    await expect(assertQuota("ws-1", "generations")).rejects.not.toMatchObject({ status: 402 });
+  });
+
+  it("still lets the exempt operator account through — it never reads billing at all", async () => {
+    process.env.BILLING_EXEMPT_WORKSPACES = "ws-owner";
+    maybeSingleMock.mockResolvedValue({ data: null, error: MISSING_TABLE });
+    selectEqMock.mockResolvedValue({ data: null, error: MISSING_TABLE });
+    await expect(assertQuota("ws-owner", "generations")).resolves.toMatchObject({
+      plan: { key: "internal" },
+    });
+  });
+
+  it("treats 'no rows' as a workspace that has not subscribed, not a fault", async () => {
+    maybeSingleMock.mockResolvedValue({ data: null, error: null });
+    selectEqMock.mockResolvedValue({ data: [], error: null });
+    await expect(getUsage("ws-1")).resolves.toMatchObject({ plan: { key: "trial" } });
+  });
+});

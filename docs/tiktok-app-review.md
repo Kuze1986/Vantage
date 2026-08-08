@@ -1,7 +1,13 @@
 # TikTok App Review — readiness design
 
-Status as of 2026-08-08. Scope: what Vantage must build, configure, write, and film
-before submitting for first-time TikTok app review.
+Scope: what Vantage must build, configure, write, and film before submitting for first-time
+TikTok app review.
+
+**Repo state this was written against (re-verified 2026-08-08):** `main` @ `760af12`, clean
+tree. The TikTok adapter's last substantive change is `40faaf9` ("real TikTok and Instagram
+posting integrations"); nothing has touched it since. The newest branch carrying relevant
+architecture is `origin/cursor/portfolio-marketing-91e2` (2026-07-31, **unmerged**, 3 commits)
+— see §1, which is written against it.
 
 Source of truth for requirements (fetched, not from memory):
 - [App Review Guidelines](https://developers.tiktok.com/doc/app-review-guidelines/)
@@ -26,7 +32,7 @@ item; everything else is paperwork.
 
 | # | Blocker | Where |
 |---|---------|-------|
-| B1 | Portfolio is commercial, but brands aren't separated into workspaces, so only one TikTok account can be connected — the multi-brand claim isn't demonstrable | Workspace setup, submission copy, landing page |
+| B1 | `channels` PK is `(workspace_id, slug)`, so only one TikTok account can be connected across all six products — the multi-brand claim isn't demonstrable | Migration + `adapters/tiktok.ts`, submission copy, landing page |
 | B2 | Direct Post UX guidelines almost entirely unimplemented | `ChannelsPage`, `QueuePage`, adapter |
 | B3 | `creator_info/query` is never called | `adapters/tiktok.ts` |
 | B4 | `user.info.basic` is requested but never used — unused scopes delay review | `adapters/tiktok.ts:43` |
@@ -69,23 +75,49 @@ The code corroborates it: `workspaces` are first-class with members and owner/ad
 (`channels.auth_state` scoped by `workspace_id`), so five brands genuinely means five
 independent TikTok connections.
 
-### One decision this forces — brands must be workspaces
+### One decision this forces — `channels` must become product-scoped
 
-Right now brands are modelled **two different ways**, and only one of them supports five
-TikTok accounts:
+The portfolio is already a first-class concept in the codebase, but **not in the one table
+that matters for TikTok.**
 
-- `workspaces` — real tenancy, per-workspace `channels` rows, per-workspace OAuth tokens
-- `BRAND_OPTIONS = ['shift','keystone','scripta','demoforge','crucible','vantage']`
-  (`CampaignBuilderPage.tsx:29`) — a *field on campaigns inside a single workspace*
+The `cursor/portfolio-marketing-91e2` branch (unmerged, 3 commits) establishes the intended
+architecture: products are a **`product_slug` column inside a single workspace**, added to
+`brand_voice` (unique per `workspace_id, product_slug`), `content_pieces`, `topics`, and a new
+`marketing_assets` table, with slugs `shift | keystone | scripta | demoforge | crucible |
+vantage` (`lib/products.ts`). It also ships `GET /v1/marketing` — an API that serves brand
+packs and approved pieces to sibling apps.
 
-Because `channels` is unique per `(workspace_id, slug)`, a single workspace can hold exactly
-**one** TikTok connection. If all five brands live in one workspace with a brand dropdown,
-you cannot connect five TikTok accounts, and the multi-brand story falls apart on camera.
+That branch does **not** touch `channels`. And `vantage.channels` is declared
+`PRIMARY KEY (workspace_id, slug)` (`20260702000000_core_tenancy.sql:72`), so a workspace can
+hold exactly **one** TikTok connection — on `main` and on the portfolio branch alike.
 
-**Recommendation:** one workspace per brand. It is already supported end to end and needs no
-schema work. It also gives the demo video its strongest beat — switch workspace, show a
-different connected TikTok account. Keep `BRAND_OPTIONS` for campaign labelling if useful,
-but it must not be the thing that separates TikTok accounts.
+So the multi-brand story is blocked at the schema level: six products, one TikTok account.
+The Channels screen will show a single connection no matter which product is selected, and
+that is exactly the screen a reviewer scrutinises.
+
+**Recommendation (revised): add `product_slug` to `channels` rather than splitting brands into
+workspaces.** An earlier draft of this doc recommended one workspace per brand; that is the
+wrong grain now that the portfolio direction is established — it would fight the
+`product_slug` architecture everywhere else and orphan the marketing API.
+
+Concretely:
+
+- Migration: add `product_slug` to `vantage.channels`, repoint the PK to
+  `(workspace_id, slug, product_slug)`, backfill existing rows to `'vantage'`.
+- Every TikTok adapter query currently does
+  `.eq("workspace_id", ws).eq("slug", "tiktok").single()` — five call sites in
+  `adapters/tiktok.ts` (`savePendingOAuth`, `exchangeCodeForTokens`, `getAccessToken`,
+  `refreshAccessToken`, and the revoke path from §3h). All must take a product slug.
+  Note `exchangeCodeForTokens` resolves the workspace by scanning for a matching pending
+  `state`; it must resolve the **product** the same way, or a reconnect for one brand will
+  overwrite another brand's tokens.
+- `resolveOrCreateWorkspace`'s default-channel seeding (`lib/workspace.ts`) needs to seed per
+  product, or seed lazily on first connect.
+- The Channels page needs a product selector, and the compose modal (§3b) must post to the
+  channel row for the piece's `product_slug`.
+
+This is the single most important structural change in this document, because it is what
+makes the non-personal-use claim visible on camera.
 
 ### Required before submission
 
@@ -280,7 +312,7 @@ domain, address bar visible. Sign in to Vantage → Channels → click Connect o
 show the TikTok consent screen with the scope list → return to Vantage → show the connected
 account card rendering avatar + display name (this is the `user.info.basic` proof, and the
 reason §2 says to actually call it) → show the Disconnect button. **Then switch to a second
-brand workspace and show its Channels screen with a different TikTok account connected.**
+product and show its Channels screen with a different TikTok account connected.**
 That single beat is what proves the app is a multi-brand operations platform and not one
 person posting to their own account — it is the cheapest possible answer to B1, so do not
 skip it.
@@ -303,19 +335,19 @@ selected product and scope must appear; UI and interactions must be legible. Kee
 
 > **What Vantage is.** Vantage is the marketing operations platform we use to run organic
 > social media for our portfolio of commercial software products — The Shift, Keystone,
-> Scripta, DemoForge, and Vantage itself. Each product has its own workspace in Vantage, its
-> own connected social accounts, and its own content pipeline: we draft short-form video and
+> Scripta, DemoForge, and Vantage itself. Each product has its own brand voice, its own
+> connected social accounts, and its own content pipeline: we draft short-form video and
 > written posts for that brand, a team member reviews and approves each one, and Vantage
 > publishes the approved post to that brand's connected accounts on the schedule the team
-> sets. Workspaces are isolated — credentials and content are never shared between brands.
+> sets. Each product's credentials and content are kept separate from the others'.
 >
 > **Login Kit — `user.info.basic`.** Used solely so a team member can connect a brand's TikTok
-> account to that brand's workspace and obtain the access token required for posting. We read
+> account to that brand in Vantage and obtain the access token required for posting. We read
 > `open_id`, `display_name`, and `avatar_url` and display them on the Channels screen, so that
-> before anyone publishes it is unambiguous which TikTok account is linked to which brand
-> workspace — this matters specifically because we operate several accounts and must not post
-> one brand's content to another brand's profile. The screen also offers a Disconnect action
-> that revokes the token. We do not request or read follower data, video lists, or analytics.
+> before anyone publishes it is unambiguous which TikTok account is linked to which brand —
+> this matters specifically because we operate several accounts and must not post one brand's
+> content to another brand's profile. The screen also offers a Disconnect action that revokes
+> the token. We do not request or read follower data, video lists, or analytics.
 >
 > **Content Posting API (Direct Post) — `video.publish`.** This is the core of the
 > integration. A brand's vertical short-form video is produced and approved in Vantage, and
@@ -348,8 +380,8 @@ not name a product whose TikTok account the reviewer cannot see in the video.
 ## 6. Portal + config checklist
 
 - [ ] App name, icon, description filled; no social-brand references
-- [ ] Brands separated into their own workspaces, with at least two TikTok accounts connected
-      (§1) — this is the evidence for the non-personal-use claim
+- [ ] `channels` product-scoped, with at least two products' TikTok accounts connected (§1) —
+      this is the evidence for the non-personal-use claim
 - [ ] Website URL live, with visible Terms and Privacy links in the footer
 - [ ] Website describes the platform and names the products it manages; no pricing or signup
       promises that cannot be honoured
@@ -369,8 +401,11 @@ not name a product whose TikTok account the reviewer cannot see in the video.
 
 ## 7. Sequencing
 
-1. **Split brands into workspaces and connect ≥2 TikTok accounts** (§1) — gates the landing
-   page, the submission copy, and the strongest beat in Video 1.
+0. **Decide the fate of `cursor/portfolio-marketing-91e2`** — land it or discard it. Every
+   product-scoping decision below assumes its `product_slug` model. Doing this review's work
+   on top of an architecture that then changes is wasted effort.
+1. **Product-scope `channels` and connect ≥2 TikTok accounts** (§1) — gates the landing page,
+   the submission copy, and the strongest beat in Video 1.
 2. **Adapter work**: `creator_info`, `user/info`, revoke, full `post_info`, chunking (§3a, 3d, 3f, 3h).
 3. **Compose modal** (§3b) — largest item, and nothing can be filmed before it exists.
 4. **Scheduler settings persistence** (§3c) and progress UI (§3g).

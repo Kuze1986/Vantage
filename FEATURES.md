@@ -1917,7 +1917,8 @@ Early boost signals suggest which segments to target for amplification.
 
 ### 26. Legal Pages
 
-**Status:** ✅ Shipped (code) · 🔴 **Broken in production — the migration is not applied.**
+**Status:** ✅ Shipped · 🟢 Verified — migration applied, table seeded with the `terms` and
+`privacy` rows, public view and RLS in place.
 
 **What it does:**
 Serves the platform's Terms & Conditions and Privacy Policy. These are **global**, not
@@ -1932,11 +1933,9 @@ without credentials. That makes this feature a hard dependency of channel app re
 - `/terms` and `/privacy` — public React routes, linked from the landing page footer
 - `/legal` — the authenticated editor page
 
-**Current defect:** `supabase/migrations/20260805000000_legal_pages.sql` has **never been
-applied** — `to_regclass('vantage.legal_pages')` returns null on the live project. `GET
-/v1/legal/:slug` therefore fails and `LegalPage.tsx` renders the raw error string to any
-visitor. Applying the migration is the whole fix; it is additive and idempotent
-(`CREATE TABLE IF NOT EXISTS` + view + trigger + two empty seed rows).
+**Content is empty until edited.** The two rows seed with a title and a blank body; `/terms`
+and `/privacy` render but say nothing until someone fills them in via `/legal`. Platform
+reviewers will read whatever is there, so write them before submitting for app review.
 
 **Files:**
 - `apps/api/src/lib/legal-pages.ts` — `isLegalSlug`, `getLegalPage`, `updateLegalPage`
@@ -2714,7 +2713,7 @@ engine already has it).
 
 **Status:** ✅ Shipped
 
-Vitest harness in `@vantage/api` with **305 tests across 36 files** (all passing) covering the
+Vitest harness in `@vantage/api` with **311 tests across 36 files** (all passing) covering the
 highest-risk paths: publish state
 machine (success / retry-backoff / exhausted-fail+alert / rate-limit), cadence claim lock,
 auto-generate audit gating (pass→queued, fail→regen→approved/rejected), membership/IDOR guard,
@@ -2727,8 +2726,10 @@ utilities. A GitHub Actions workflow runs typecheck + tests + build on every pus
 
 ### 4-7 — Billing & Plans
 
-**Status:** ✅ Shipped · 🟡 Unverified — **the migration is not yet applied** and no Stripe keys
-are configured, so nothing has run against live Stripe. Logic is covered by 48 tests.
+**Status:** ✅ Shipped · ◐ Partially verified — schema applied and the atomic counter verified
+in production (`increment_usage_counter` returns 1 then 5 on a repeat call, so the `ON CONFLICT`
+accumulate path is correct). No Stripe keys configured yet, so nothing has run against live
+Stripe. Logic is covered by 54 tests.
 
 Stripe subscriptions, per-workspace quota, and hard-block enforcement.
 
@@ -2755,7 +2756,20 @@ A/B variants each count.
 **Enforcement is a hard block.** `assertQuota()` runs *before* any model call and refuses with
 **402** plus an upgrade prompt; `recordUsage()` runs *after* success, so a failed generation
 never consumes allowance. No overage is billed, so there is no path to a surprise invoice.
-Metering fails soft — it must never take down the pipeline it measures.
+
+**An unreadable billing schema fails loud, with 503.** If `billing_subscriptions` or
+`usage_counters` cannot be read, `BillingUnavailableError` is raised rather than the error
+being swallowed. The alternative is worse than an outage: ignoring it makes every read return
+null, which resolves *every* workspace to trial with usage permanently at zero — metering that
+looks healthy in the UI, counts nothing, and enforces nothing. A paid product silently not
+billing is a fault you find on the bank statement; a 503 is one you find in the first minute.
+Deliberately **not** 402, which would show a customer an upgrade prompt for our own broken
+deployment. The error names the unapplied migration when the cause is a missing relation
+(`PGRST205` / `42P01`), because that is the likeliest cause and the fix is not "retry".
+
+`recordUsage()` stays fail-soft — it runs after the work succeeded, and refusing a piece the
+customer already has would be worse than an uncounted one — but logs at **error** level, since
+an undercounted meter is revenue quietly leaking.
 
 **Operator exemption.** Workspaces listed in `BILLING_EXEMPT_WORKSPACES` (comma-separated ids)
 resolve to the **Internal** plan: uncapped, never counted, and short-circuited before any
@@ -2877,9 +2891,21 @@ Threads; Bluesky needs no app credentials (per-user app passwords; optional `BLU
 > Defects and honest caveats that live nowhere else. Each is real, reproduced, and small
 > enough to state plainly. Ordered by impact.
 
-### 🔴 `legal_pages` migration unapplied
-`/terms` and `/privacy` render an error string to the public. Blocks TikTok/Meta app review,
-which is in turn what gates the three newest channels. See [Feature 26](#26-legal-pages).
+### 🟠 Migration history can lie — verify objects, not versions
+`supabase_migrations.schema_migrations` recorded `legal_pages`, `facebook_oauth` and `billing`
+as applied while **none of their objects existed** — the version rows were stamped without the
+SQL running (the signature of `migration repair --status applied`, or a push whose history
+synced against a different target).
+
+This is worse than a pending migration: `supabase db push` skips anything the history claims is
+done, so a phantom row means the migration can *never* run until it is reverted. Both DDL
+migrations have since been applied for real and verified by object existence, but the lesson
+stands — **`db push` reporting success is not evidence.** Check `to_regclass`, not the version
+table.
+
+One phantom row remains harmless: `facebook_oauth` (2026-08-08) is recorded but never ran —
+`channels.facebook.auth_method` is still `manual`, dated 2026-05-27. It has no effect, because
+the column is deliberately unread (auth method is derived from `MANUAL_PUBLISH_CHANNELS`).
 
 ### ✅ DALL·E image URLs expired — fixed
 **Was:** `services/imageGen.ts` requested `response_format: "url"` and stored OpenAI's hosted
@@ -2925,11 +2951,13 @@ warnings about "flipping the Connect button live" no longer describe anything. D
 and both files when convenient.
 
 ### 🟠 Live schema has drifted from the repo
-Two migrations are applied on the live project with no corresponding file in
-`supabase/migrations/`: `demoforge_baseline` and `saas_schema_reconciliation` (both
-2026-08-06). The latter is what added `workspace_id` to `email_templates` — the repo's
-`20260609000000_email_templates.sql` still describes the table without it. A clean rebuild
-from the repo would not reproduce production.
+Four migrations are applied on the live project with no corresponding file in
+`supabase/migrations/`: `demoforge_baseline` and `saas_schema_reconciliation` (both 2026-08-06),
+plus `legal_pages_repair` and `billing_repair` (2026-08-08 — the re-application described
+above, since the original versions were already stamped in history and would be skipped).
+`saas_schema_reconciliation` is what added `workspace_id` to `email_templates` — the repo's
+`20260609000000_email_templates.sql` still describes the table without it. A clean rebuild from
+the repo would not reproduce production.
 
 ### ✅ DemoForge failure corpus — mostly historical, typos now caught
 27 of 63 jobs failed, but the raw 43% badly overstates it. By cause: 8 × missing
@@ -2979,7 +3007,7 @@ pieces), DemoForge (63 jobs / 36 rendered), Campaign Builder (2 campaigns), acti
 OAuth tokens, Social Kit + the seven-item Creative Studio, and the full Phase 4
 SaaS-readiness stack — multi-tenancy, tenant-aware
 scheduler, membership/roles, per-tenant credentials, claim-based publish lock, pluggable LLM
-providers across five vendors, and Threads + Bluesky. **305 tests across 36 files, plus CI.**
+providers across five vendors, and Threads + Bluesky. **311 tests across 36 files, plus CI.**
 
 **Built but never exercised:** everything downstream of publishing — engagement ingestion,
 BioLoop weight learning, Strategic Intelligence, the Audience Model, and Virality Signals.
