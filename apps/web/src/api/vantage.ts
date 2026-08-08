@@ -360,10 +360,18 @@ export const vantageApi = {
       body: JSON.stringify({ campaign_id }),
     }) as Promise<{ day: unknown }>,
 
-  setDemoForgeThumbnail: (jobId: string, frame_index: number, content_piece_id?: string) =>
+  /**
+   * Set a job's cover: either promote an extracted keyframe by index, or point
+   * at a composed cover card already uploaded to vantage-media. Exactly one of
+   * frame_index / thumbnail_url. Also mirrors the cover onto the linked piece.
+   */
+  setDemoForgeThumbnail: (
+    jobId: string,
+    body: { frame_index?: number; thumbnail_url?: string; content_piece_id?: string },
+  ) =>
     vantageFetch(`/v1/demoforge/jobs/${jobId}/set-thumbnail`, {
       method: "POST",
-      body: JSON.stringify({ frame_index, content_piece_id }),
+      body: JSON.stringify(body),
     }) as Promise<{ thumbnail_url: string; frame_index: number }>,
 
   // ── Analytics ─────────────────────────────────────────────────────────────
@@ -578,7 +586,7 @@ export const vantageApi = {
   getDemoForgeJob: (jobId: string) =>
     vantageFetch(`/v1/demoforge/jobs/${jobId}`) as Promise<{
       id: string; status: string; target_format: string; output_url: string | null;
-      thumbnail_url?: string | null; extracted_frames?: Array<{ url?: string }> | null;
+      thumbnail_url?: string | null; extracted_frames?: Array<{ url?: string; mode?: string; timestamp_sec?: number }> | null;
       content_piece_id?: string | null; error_message: string | null; updated_at: string
     }>,
 
@@ -587,7 +595,7 @@ export const vantageApi = {
       jobs: {
         id: string; content_piece_id: string | null; status: string; target_format: string;
         output_url: string | null; thumbnail_url?: string | null;
-        extracted_frames?: Array<{ url?: string }> | null;
+        extracted_frames?: Array<{ url?: string; mode?: string; timestamp_sec?: number }> | null;
         error_message: string | null; created_at: string; updated_at?: string
       }[]
     }>,

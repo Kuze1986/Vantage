@@ -10,6 +10,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
+import { maybeAutoQueuePiece } from "../lib/auto-queue.js";
 import {
   buildDemoForgePayload,
   DEFAULT_TEMPLATE_BY_CHANNEL,
@@ -282,10 +283,115 @@ demoforgeRoutes.get("/jobs", async (c) => {
   const sb = getSupabaseAdmin();
   const { data, error } = await sb
     .from("demoforge_jobs")
-    .select("id, content_piece_id, status, target_format, output_url, error_message, created_at, updated_at")
+    // thumbnail_url / extracted_frames are what let the UI show a poster and a
+    // cover-frame picker. They were being dropped here even though the worker
+    // populates them and the web client's types already declare them.
+    .select("id, content_piece_id, status, target_format, output_url, thumbnail_url, extracted_frames, error_message, created_at, updated_at")
     .eq("workspace_id", ws)
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw new HTTPException(500, { message: error.message });
   return c.json({ jobs: data ?? [] });
+});
+
+const setThumbnailSchema = z
+  .object({
+    frame_index: z.number().int().min(0).optional(),
+    thumbnail_url: z.string().url().optional(),
+    content_piece_id: z.string().uuid().optional(),
+  })
+  .refine((v) => (v.frame_index === undefined) !== (v.thumbnail_url === undefined), {
+    message: "Provide exactly one of frame_index or thumbnail_url",
+  });
+
+/**
+ * POST /v1/demoforge/jobs/:id/set-thumbnail — choose the cover for a rendered job.
+ *
+ * The manual counterpart to the automatic pick in the DemoForge worker
+ * (apps/demoforge/src/jobs/queue.ts): either promote one of the extracted
+ * keyframes by index, or point at a composed cover card already uploaded to
+ * vantage-media. Reads straight from Supabase rather than proxying to the
+ * DemoForge service — the worker writes this data, it doesn't serve it.
+ */
+demoforgeRoutes.post("/jobs/:id/set-thumbnail", async (c) => {
+  const id = c.req.param("id");
+  const ws = c.get("workspaceId");
+  const json = await c.req.json().catch(() => ({}));
+  const parsed = setThumbnailSchema.safeParse(json);
+  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+
+  const sb = getSupabaseAdmin();
+  const { data: job } = await sb
+    .from("demoforge_jobs")
+    .select("id, content_piece_id, extracted_frames")
+    .eq("workspace_id", ws)
+    .eq("id", id)
+    .maybeSingle();
+  if (!job) throw new HTTPException(404, { message: "Job not found" });
+
+  let thumbnailUrl: string;
+  let frameIndex: number | null = null;
+
+  if (parsed.data.thumbnail_url) {
+    // Never let a job row point at an arbitrary host — only our own bucket.
+    if (!parsed.data.thumbnail_url.includes("/storage/v1/object/")) {
+      throw new HTTPException(400, {
+        message: "thumbnail_url must be a vantage-media Storage URL",
+      });
+    }
+    thumbnailUrl = parsed.data.thumbnail_url;
+  } else {
+    const frames = (job.extracted_frames as Array<{ url?: string }> | null) ?? [];
+    const usable = frames.filter((f) => typeof f?.url === "string");
+    if (!usable.length) {
+      throw new HTTPException(400, { message: "Job has no extracted frames to choose from" });
+    }
+    // Clamp rather than reject, matching the worker's behaviour for an
+    // out-of-range thumbnail_frame_index.
+    frameIndex = Math.min(Math.floor(parsed.data.frame_index!), usable.length - 1);
+    thumbnailUrl = String(usable[frameIndex]!.url);
+  }
+
+  const { error: jobErr } = await sb
+    .from("demoforge_jobs")
+    .update({ thumbnail_url: thumbnailUrl, updated_at: new Date().toISOString() })
+    .eq("workspace_id", ws)
+    .eq("id", id);
+  if (jobErr) throw new HTTPException(500, { message: jobErr.message });
+
+  const pieceId = parsed.data.content_piece_id ?? (job.content_piece_id as string | null);
+  if (pieceId) {
+    const { data: piece } = await sb
+      .from("content_pieces")
+      .select("id, content_payload")
+      .eq("workspace_id", ws)
+      .eq("id", pieceId)
+      .maybeSingle();
+    if (piece) {
+      const payload =
+        piece.content_payload && typeof piece.content_payload === "object" && !Array.isArray(piece.content_payload)
+          ? { ...(piece.content_payload as Record<string, unknown>) }
+          : {};
+      payload.image_url = thumbnailUrl;
+      if (frameIndex !== null) payload.thumbnail_frame_index = frameIndex;
+
+      const { error: pieceErr } = await sb
+        .from("content_pieces")
+        .update({
+          image_url: thumbnailUrl,
+          media_status: "ready",
+          content_payload: payload,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("workspace_id", ws)
+        .eq("id", pieceId);
+      if (pieceErr) throw new HTTPException(500, { message: pieceErr.message });
+
+      // Mirrors PATCH /v1/queue/:id — a manual cover pick should auto-queue an
+      // approved+scheduled piece exactly like the automatic pick does.
+      await maybeAutoQueuePiece(ws, pieceId);
+    }
+  }
+
+  return c.json({ thumbnail_url: thumbnailUrl, frame_index: frameIndex ?? -1 });
 });

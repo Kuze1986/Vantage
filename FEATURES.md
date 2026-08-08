@@ -507,8 +507,10 @@ app password via `POST /v1/channels/:slug/connect`; the AT Protocol session is s
 email channel row in `vantage.channels` tracks `enabled` and `cadence_config` but has no
 stored token.
 
-**Manual channels** (TikTok, Instagram, Facebook): No authentication. Channel exists in
-`vantage.channels` to hold cadence config. Content is generated but posted manually.
+**Manual channel** (Reddit): OAuth is implemented but posting is manual — Reddit's API
+refuses cloud egress, so content is generated and handed to a human via the Publish Pack.
+See the Reddit section above. TikTok, Instagram and Facebook were manual historically; they
+now post automatically over OAuth.
 
 **Cadence config** (per channel):
 - `posts_per_day` — target daily volume for auto-generate
@@ -886,6 +888,10 @@ The DemoForge job submission UI lives at `/demoforge` in the web app (`DemoForge
 Creative studio panels render in order: Overlays → Captions → Color Grade → Intro/Outro → Timeline → Audio Mixer.
 Brand kit CRUD + logo upload lives on **Settings → Brand Kits**.
 
+**Reviewing a finished render:** the Job Status panel plays the video inline (poster = the
+job's cover) with **⤢ Full size** opening the shared media viewer, and Recent Jobs rows show
+a clickable poster tile. Downloading is no longer the only way to watch a render.
+
 **Core files:**
 - `apps/demoforge/src/index.ts` — Hono server + job schema validation
 - `apps/demoforge/src/jobs/queue.ts` — in-process job queue + all payload types
@@ -968,7 +974,14 @@ dispatch pieces from this page.
   title, and body — plus caption/hashtags and media download links on video channels —
   Copy all, and step-by-step posting instructions
   (`GET /v1/queue/:id/publish-pack`). Shown for all statuses on manual channels; warns when
-  media is not ready. The served slugs are derived from `MANUAL_PUBLISH_CHANNELS`.
+  media is not ready. The served slugs are derived from `MANUAL_PUBLISH_CHANNELS`. The body
+  is labelled "Body" and hashtags are suppressed for Reddit, matching `copy_all`. Attached
+  media renders as clickable tiles that open the full-size viewer.
+- **Carousel** — opens the carousel builder seeded from the piece body, and saves the
+  rendered slides straight to Storage (`creative/carousel/<pieceId>/NN.png`) and onto the
+  piece as `content_payload.carousel_urls`, with slide 01 mirrored to `image_url`. No
+  export-then-reupload round trip. Publishing is still single-image, so an auto-posted piece
+  sends slide 01 only — the builder says so inline.
 - **Manual channels** — paste post URL → mark published after manual upload
 - **Dismiss** — soft-reject (`POST /v1/queue/:id/reject`); piece moves to Rejected and will
   not publish
@@ -980,14 +993,26 @@ dispatch pieces from this page.
 - Ilita audit notes
 - A/B variant badge (if `variant_group_id` is set)
 - Image / video preview and media_status badges
-- **Mode stills strip** (product_still) — labeled Queue-mode thumbnails; click to set hero image
+- **Media viewer** (`apps/web/src/ds/MediaLightbox.tsx`) — every thumbnail, still, carousel
+  slide and video opens full-screen: fit-to-viewport or 100% zoom, ←/→ across everything
+  attached to the piece, Escape/backdrop to close, download and open-original. Sits at
+  `zIndex 1100` so it stacks above the 1000-level modals. Video plays here instead of in a
+  new tab.
+- **Mode stills strip** (product_still) — labeled Queue-mode thumbnails; click enlarges the
+  still, and **Use as thumbnail** in the viewer promotes it to the hero image. (Clicking a
+  tile used to overwrite the piece image immediately, with no way to see it first.)
+- **Carousel strip** — numbered slides from `content_payload.carousel_urls`, opening in the
+  same viewer
 - **Preview modal** — all formats including Threads/Bluesky; shows piece `image_url` /
-  `video_url` and mode gallery
+  `video_url` (both, when both are present) plus the carousel and mode galleries, all
+  click-to-expand
 - **Video script panel** (TikTok / Instagram / Facebook only): expandable section showing
   hook, script, on-screen text, hashtags, and upload instructions. One-click copy-to-clipboard.
 
 **Files:**
 - `apps/web/src/pages/QueuePage.tsx` — Publish Pack modal, Dismiss/Remove, manual Mark Published
+- `apps/web/src/ds/MediaLightbox.tsx` — shared full-screen media viewer
+- `apps/web/src/ds/PreviewModal.tsx` — per-format preview + media block
 - `apps/api/src/routes/queue.ts` — `GET /v1/queue`, publish-pack, reject, delete, calendar
 - `apps/api/src/lib/publish-pack.ts` — pack builder (reuses channel adapters)
 
@@ -2041,11 +2066,24 @@ ordered 2–10 slide set and export it as a numbered image sequence.
   each; (b) generate from a topic via the Caption Studio endpoint (3C-2) extended to return
   `N` slide bodies. Cover + CTA slides are auto-added.
 - **Export:** loop `exportCanvasNode()` over each slide node → numbered PNGs
-  (`<brand>-carousel-01.png` … `-NN.png`), zipped client-side, **or** assembled into one
-  multi-page PDF via `jspdf` (each page = one 1080² image). Offer both.
+  (`<brand>-carousel-01.png` … `-NN.png`), one browser download each. ZIP and multi-page PDF
+  bundling were designed but never shipped — `jszip`/`jspdf` are not dependencies.
+- **Save to a piece:** when the builder is opened from a Queue row it takes `pieceId` and
+  `onAttached`, renders each slide with `renderNodeToDataUrl()` and uploads via
+  `uploadDataUrl()` to `creative/carousel/<pieceId>/NN.png`, then patches the piece with
+  `content_payload.carousel_urls` (slide 01 also mirrored to `image_url` to satisfy the media
+  gate). Uploads cap at 2× regardless of the 1×/2×/3× toggle, because a 3× 3240² PNG can
+  exceed the 8 MB limit on `POST /v1/media/upload`; a size rejection retries once at 1×.
+- Standalone on the Social Kit tab there is no piece to attach to, so only the download
+  buttons appear.
 
-**Files to create/change:** `apps/web/src/pages/socialkit/carousel.tsx` (new), slide-type
-components, `SocialKitPage.tsx` (tab), optionally add `jspdf` + `jszip` deps.
+**Known limitation:** publishing reads a single `image_url`, so an auto-posted carousel sends
+slide 01 only. True multi-image posting (Instagram carousel containers) is not implemented;
+the builder warns about this inline.
+
+**Files:** `apps/web/src/creative/CarouselBuilder.tsx`, `apps/web/src/pages/SocialKitPage.tsx`
+(tab), `apps/web/src/pages/QueuePage.tsx` (▦ Carousel action + modal),
+`apps/web/src/pages/socialkit/primitives.tsx` (`renderNodeToDataUrl`).
 
 **Configuration:** None (client-side). New optional deps: `jspdf`, `jszip`.
 
@@ -2128,15 +2166,29 @@ art**. A muted autoplay feed needs a strong branded thumbnail; right now there i
   TikTok/Instagram, 1920×1080 landscape for LinkedIn), reusing the shared canvas furniture:
   a brand wordmark, an editable title, and a `KitImageSlot` for the background frame.
 - Seed the title from the job (or its linked `content_piece`), and let the operator drop a
-  captured frame as the background. (Auto-extracting a frame from the rendered MP4 is deferred —
-  cross-origin canvas capture from the Storage URL needs CORS config; v1 uses a dropped image.)
-- Entry point: a **"Thumbnail"** action on each row of the DemoForge job history in
-  `DemoForgePage.tsx`. Export PNG locally; optionally `uploadDataUrl(...)` and store on the job
-  (new `demoforge_jobs.thumbnail_url` column + a proxy patch endpoint).
+  captured frame as the background.
+- Entry point: a **"▦ Thumbnail"** action on each row of the DemoForge job history in
+  `DemoForgePage.tsx`. **↓ EXPORT PNG** downloads locally; **⬆ SAVE TO JOB** uploads to
+  `thumbnails/<jobId>.png` and stores it on the job — no export-then-reupload.
 
-**Files to create/change:** `apps/web/src/pages/creative/Thumbnail.tsx` (new),
-`apps/web/src/pages/DemoForgePage.tsx` (action), optional migration for
-`demoforge_jobs.thumbnail_url` + `apps/api/src/routes/demoforge.ts`.
+Two distinct covers, both live:
+- **Composed card** — the branded template above, saved via `POST /v1/media/upload` then
+  `POST /v1/demoforge/jobs/:id/set-thumbnail` with `thumbnail_url`.
+- **Extracted keyframe** — a **"▣ Cover frame"** action opens the shared media viewer over
+  `demoforge_jobs.extracted_frames`; **Use as cover** calls the same route with
+  `frame_index`. This is the manual override of the worker's automatic pick
+  (`apps/demoforge/src/jobs/queue.ts`) and shares its clamping: an out-of-range index snaps
+  to the last frame. It also mirrors the cover onto the linked piece's `image_url` /
+  `content_payload.thumbnail_frame_index` and re-runs `maybeAutoQueuePiece`, so a manual pick
+  auto-queues exactly where the automatic one does.
+
+`GET /v1/demoforge/jobs` and the worker's `GET /jobs/:id` return `thumbnail_url` and
+`extracted_frames`; both used to strip them, which is why the job list had no poster data.
+
+**Files:** `apps/web/src/creative/Thumbnail.tsx`, `apps/web/src/pages/DemoForgePage.tsx`,
+`apps/api/src/routes/demoforge.ts` (`POST /jobs/:id/set-thumbnail`), `apps/demoforge/src/index.ts`,
+migrations `20260729120000_demoforge_thumbnail_and_product_profile.sql` and
+`20260625000000_demoforge_frame_extraction.sql`.
 
 **Configuration:** Supabase Storage (existing).
 

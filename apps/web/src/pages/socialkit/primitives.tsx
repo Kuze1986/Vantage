@@ -8,6 +8,35 @@ import * as htmlToImage from 'html-to-image'
 // ─────────────────────────────────────────────────────────────────────
 // EXPORT — DOM node → PNG at native resolution
 // ─────────────────────────────────────────────────────────────────────
+/**
+ * Rasterise a canvas node to a PNG data URL at its native resolution.
+ *
+ * The `kit-exporting` class hides editing affordances and the double
+ * requestAnimationFrame lets that style settle before html-to-image walks the
+ * DOM — without it the capture can include edit outlines. `transform: none`
+ * cancels the preview's scale() so the capture is at true w×h.
+ *
+ * Throws on failure; callers decide whether to alert or surface inline.
+ */
+export async function renderNodeToDataUrl(
+  node: HTMLElement,
+  w: number,
+  h: number,
+  scale = 2,
+): Promise<string> {
+  node.classList.add('kit-exporting')
+  await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
+  try {
+    return await htmlToImage.toPng(node, {
+      width: w, height: h, pixelRatio: scale, cacheBust: true,
+      backgroundColor: '#050C14',
+      style: { transform: 'none', transformOrigin: 'top left', margin: '0' },
+    })
+  } finally {
+    node.classList.remove('kit-exporting')
+  }
+}
+
 export async function exportCanvasNode(
   node: HTMLElement | null,
   w: number,
@@ -19,14 +48,8 @@ export async function exportCanvasNode(
     alert('Export engine still loading — try again in a moment.')
     return
   }
-  node.classList.add('kit-exporting')
-  await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())))
   try {
-    const dataUrl = await htmlToImage.toPng(node, {
-      width: w, height: h, pixelRatio: scale, cacheBust: true,
-      backgroundColor: '#050C14',
-      style: { transform: 'none', transformOrigin: 'top left', margin: '0' },
-    })
+    const dataUrl = await renderNodeToDataUrl(node, w, h, scale)
     const a = document.createElement('a')
     a.download = filename
     a.href = dataUrl
@@ -34,8 +57,6 @@ export async function exportCanvasNode(
   } catch (e) {
     console.error('Export failed', e)
     alert('Export failed — see console.')
-  } finally {
-    node.classList.remove('kit-exporting')
   }
 }
 

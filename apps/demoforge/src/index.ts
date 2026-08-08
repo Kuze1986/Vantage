@@ -142,7 +142,9 @@ app.get("/jobs/:id", async (c) => {
 
   const { data, error } = await sb
     .from("demoforge_jobs")
-    .select("id, status, target_format, output_url, error_message, created_at, updated_at")
+    // thumbnail_url / extracted_frames feed the poster and cover-frame picker
+    // in the Vantage UI, which polls this endpoint through the API proxy.
+    .select("id, content_piece_id, status, target_format, output_url, thumbnail_url, extracted_frames, error_message, created_at, updated_at")
     .eq("id", id)
     .single();
 

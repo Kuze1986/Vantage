@@ -1,13 +1,15 @@
 // CarouselBuilder.tsx — multi-slide carousel composer (2–10 slides).
 // Slide types: cover / point / stat / quote / cta.
 // Exports numbered PNGs (brand-id-carousel-01.png … -NN.png) via the shared
-// exportCanvasNode engine.
+// exportCanvasNode engine, and — when opened against a content piece — uploads
+// the slides straight to Storage so there's no export-then-reupload round trip.
 
 import { useRef, useState } from 'react'
-import { exportCanvasNode } from '../pages/socialkit/primitives'
+import { exportCanvasNode, renderNodeToDataUrl } from '../pages/socialkit/primitives'
 import { CanvasMark } from '../pages/socialkit/CanvasMark'
 import { EditableText } from '../pages/socialkit/primitives'
 import { CanvasBG, CanvasCorners } from './canvasFurniture'
+import { uploadDataUrl } from '../lib/storage'
 import { BRANDS, BRAND_ORDER } from './index'
 import type { Brand, BrandId } from './index'
 import '../pages/socialkit/socialkit.css'
@@ -183,16 +185,50 @@ function SlideThumbnail({ slide, brand, index, total, selected, onClick }: { sli
 // ─────────────────────────────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────────────────────────────
-export function CarouselBuilder({ initialBrandId = 'vantage', exportScale = 2 }: { initialBrandId?: BrandId; exportScale?: number }) {
-  const [activeBrand, setActiveBrand] = useState<BrandId>(initialBrandId)
-  const [slides, setSlides] = useState<Slide[]>([
+/** Turn a piece's body into one point slide per line, wrapped with cover + CTA. */
+export function seedSlidesFromText(lines: string[]): Slide[] {
+  const cleaned = lines
+    .map((l) => l.replace(/^[\d.\-*•]+\s*/, '').trim())
+    .filter(Boolean)
+    .slice(0, 8)
+  if (!cleaned.length) return []
+  return [
     makeSlide('cover', 1),
-    makeSlide('point', 1),
-    makeSlide('point', 2),
-    makeSlide('cta', 4),
-  ])
+    ...cleaned.map((l, i) => ({ ...makeSlide('point', i + 1), heading: l.slice(0, 60).toUpperCase(), body: l })),
+    makeSlide('cta', cleaned.length + 2),
+  ]
+}
+
+export function CarouselBuilder({
+  initialBrandId = 'vantage',
+  exportScale = 2,
+  pieceId,
+  initialSlideText,
+  onAttached,
+}: {
+  initialBrandId?: BrandId
+  exportScale?: number
+  /** When set, the builder can save slides straight onto this content piece. */
+  pieceId?: string
+  /** Seed lines (usually the piece body) — one point slide per line. */
+  initialSlideText?: string[]
+  onAttached?: (urls: string[]) => Promise<void> | void
+}) {
+  const [activeBrand, setActiveBrand] = useState<BrandId>(initialBrandId)
+  const [slides, setSlides] = useState<Slide[]>(() => {
+    const seeded = initialSlideText ? seedSlidesFromText(initialSlideText) : []
+    return seeded.length ? seeded : [
+      makeSlide('cover', 1),
+      makeSlide('point', 1),
+      makeSlide('point', 2),
+      makeSlide('cta', 4),
+    ]
+  })
   const [selected, setSelected]   = useState(0)
   const [exporting, setExporting] = useState(false)
+  const [saving, setSaving]       = useState(false)
+  const [saveNote, setSaveNote]   = useState<string | null>(null)
+  const [saveErr, setSaveErr]     = useState<string | null>(null)
   const slideRefs = useRef<Map<string, HTMLDivElement>>(new Map())
 
   const brand = BRANDS[activeBrand]
@@ -230,6 +266,43 @@ export function CarouselBuilder({ initialBrandId = 'vantage', exportScale = 2 }:
       await exportCanvasNode(node, 1080, 1080, `${brand.id}-carousel-${num}.png`, exportScale)
     }
     setExporting(false)
+  }
+
+  /**
+   * Render every slide and upload it, skipping the download-then-reupload trip.
+   *
+   * POST /v1/media/upload rejects decoded images over 8 MB, and a 3× 3240²
+   * PNG can clear that, so uploads cap at 2× regardless of the export toggle
+   * and fall back to 1× if the cap is still hit.
+   */
+  const saveToPiece = async () => {
+    if (!pieceId || saving) return
+    setSaving(true); setSaveErr(null); setSaveNote(null)
+    const uploadScale = Math.min(exportScale, 2)
+    try {
+      const urls: string[] = []
+      for (let i = 0; i < slides.length; i++) {
+        const node = slideRefs.current.get(slides[i].id)
+        if (!node) throw new Error(`Slide ${i + 1} is not ready to render yet — try again in a moment.`)
+        const num  = String(i + 1).padStart(2, '0')
+        const path = `creative/carousel/${pieceId}/${num}.png`
+        setSaveNote(`Uploading slide ${i + 1} of ${slides.length}…`)
+        try {
+          urls.push(await uploadDataUrl(path, await renderNodeToDataUrl(node, 1080, 1080, uploadScale)))
+        } catch (e) {
+          if (uploadScale <= 1 || !/8MB|too large|smaller/i.test(String((e as Error).message))) throw e
+          urls.push(await uploadDataUrl(path, await renderNodeToDataUrl(node, 1080, 1080, 1)))
+        }
+      }
+      setSaveNote('Saving to piece…')
+      await onAttached?.(urls)
+      setSaveNote(`Saved ${urls.length} slide${urls.length === 1 ? '' : 's'} to the piece.`)
+    } catch (e) {
+      setSaveNote(null)
+      setSaveErr(String((e as Error).message))
+    } finally {
+      setSaving(false)
+    }
   }
 
   const cur = slides[selected]
@@ -282,6 +355,24 @@ export function CarouselBuilder({ initialBrandId = 'vantage', exportScale = 2 }:
                     {exporting ? 'EXPORTING…' : `↓ ALL ${slides.length} SLIDES`}
                   </button>
                 </div>
+                {pieceId && (
+                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <button
+                      onClick={() => void saveToPiece()}
+                      disabled={saving}
+                      className="nx-btn nx-btn--primary"
+                      style={{ justifyContent: 'center', padding: '10px', fontSize: 10, letterSpacing: '0.16em', color: '#000', background: brand.accent, borderColor: brand.accent, opacity: saving ? 0.6 : 1 }}
+                    >
+                      {saving ? 'SAVING…' : `⬆ SAVE ${slides.length} SLIDE${slides.length === 1 ? '' : 'S'} TO PIECE`}
+                    </button>
+                    {saveNote && <div className="nx-mono" style={{ fontSize: 9, color: 'var(--nx-text-3)' }}>{saveNote}</div>}
+                    {saveErr && <div className="vg-error" style={{ fontSize: 11 }}>{saveErr}</div>}
+                    <div className="nx-mono" style={{ fontSize: 8, color: 'var(--nx-amber)', lineHeight: 1.6 }}>
+                      ⚠ Publishing is single-image today — an auto-posted piece sends slide 01 only.
+                      All slides are stored on the piece and reviewable here.
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })()}
@@ -339,13 +430,11 @@ export function CarouselBuilder({ initialBrandId = 'vantage', exportScale = 2 }:
           )}
 
           {/* Paste outline seed */}
+          {/* Shares seedSlidesFromText with the piece-seeded path, so both respect
+              the 10-slide cap instead of silently overshooting it. */}
           <PasteSeed onSeed={(lines) => {
-            const newSlides: Slide[] = [
-              makeSlide('cover', 1),
-              ...lines.map((l, i) => ({ ...makeSlide('point', i + 1), heading: l.slice(0, 60).toUpperCase(), body: l })),
-              makeSlide('cta', lines.length + 2),
-            ]
-            setSlides(newSlides); setSelected(0)
+            const newSlides = seedSlidesFromText(lines)
+            if (newSlides.length) { setSlides(newSlides); setSelected(0) }
           }} />
         </div>
       </div>

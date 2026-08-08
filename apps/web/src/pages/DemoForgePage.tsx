@@ -1,6 +1,7 @@
 import React from 'react'
 import { vantageApi } from '../api/vantage'
-import { Panel, Button, Badge } from '../ds'
+import { Panel, Button, Badge, MediaLightbox } from '../ds'
+import type { LightboxItem } from '../ds'
 import { ThumbnailStudio } from '../creative/Thumbnail'
 import { AudioMixer } from '../components/AudioMixer'
 
@@ -19,7 +20,31 @@ type ScriptStep = {
 }
 type MusicTrack = { id: string; title: string; artist: string | null; mood: string; use_case: string }
 type SoundEffect = { id: string; title: string; category: string; duration_ms: number | null; storage_path: string; use_case: string; created_at: string }
-type JobStatus = { id: string; status: string; target_format?: string; output_url: string | null; error_message: string | null; updated_at: string }
+type JobStatus = {
+  id: string; status: string; target_format?: string; output_url: string | null
+  thumbnail_url?: string | null
+  extracted_frames?: Array<{ url?: string; mode?: string; timestamp_sec?: number }> | null
+  content_piece_id?: string | null
+  error_message: string | null; updated_at: string
+}
+
+/** Keyframes the worker pulled out of the render, as lightbox items. */
+function frameItems(job: JobStatus): LightboxItem[] {
+  return (job.extracted_frames ?? [])
+    .filter((f): f is { url: string; mode?: string; timestamp_sec?: number } => typeof f?.url === 'string')
+    .map((f, i) => ({
+      kind: 'image' as const,
+      url: f.url,
+      label: f.mode
+        ? f.mode.replace(/_/g, ' ')
+        : `Frame ${String(i + 1).padStart(2, '0')}${typeof f.timestamp_sec === 'number' ? ` · ${f.timestamp_sec.toFixed(1)}s` : ''}`,
+    }))
+}
+
+/** Poster for a job tile: the chosen cover, else the first extracted frame. */
+function jobPoster(job: JobStatus): string | null {
+  return job.thumbnail_url ?? frameItems(job)[0]?.url ?? null
+}
 
 const ACTIONS = ['navigate', 'click', 'fill', 'scroll', 'narrate']
 const FORMATS: Format[] = ['tiktok', 'linkedin', 'instagram']
@@ -321,6 +346,7 @@ export function DemoForgePage() {
   const [job, setJob]           = React.useState<JobStatus | null>(null)
   const [history, setHistory]   = React.useState<JobStatus[]>([])
   const [thumbJob, setThumbJob] = React.useState<JobStatus | null>(null)
+  const [lightbox, setLightbox] = React.useState<{ items: LightboxItem[]; index: number; job?: JobStatus } | null>(null)
   const [submitting, setSubmitting]     = React.useState(false)
   const [polling, setPolling]           = React.useState(false)
   const [err, setErr]                   = React.useState<string | null>(null)
@@ -338,6 +364,46 @@ export function DemoForgePage() {
   }, [])
 
   React.useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
+
+  const refreshHistory = React.useCallback(
+    () => vantageApi.listDemoForgeJobs().then((r) => setHistory(r.jobs as unknown as JobStatus[])).catch(() => {}),
+    [],
+  )
+
+  /**
+   * Promote an extracted keyframe to the job's cover (and the linked piece's
+   * image). The lightbox list can lead with the video, so resolve the frame's
+   * position within extracted_frames by URL rather than trusting its slot.
+   */
+  const useAsCover = async (target: JobStatus, item: LightboxItem) => {
+    const frameIndex = frameItems(target).findIndex((f) => f.url === item.url)
+    if (frameIndex < 0) return
+    setLightbox(null)
+    setErr(null)
+    try {
+      await vantageApi.setDemoForgeThumbnail(target.id, { frame_index: frameIndex })
+      setMsg('Cover frame set')
+      await refreshHistory()
+      if (job?.id === target.id) {
+        const fresh = await vantageApi.getDemoForgeJob(target.id)
+        setJob(fresh as unknown as JobStatus)
+      }
+    } catch (e) {
+      setErr(String((e as Error).message))
+    }
+  }
+
+  const openVideo = (job: JobStatus) => {
+    if (!job.output_url) return
+    setLightbox({
+      items: [
+        { kind: 'video', url: job.output_url, label: `${job.target_format ?? 'video'} render`, poster: jobPoster(job) ?? undefined },
+        ...frameItems(job),
+      ],
+      index: 0,
+      job,
+    })
+  }
 
   const startPolling = (jobId: string) => {
     setPolling(true)
@@ -453,6 +519,16 @@ export function DemoForgePage() {
 
   return (
     <>
+      {/* Full-size media viewer for renders and extracted frames */}
+      {lightbox && (
+        <MediaLightbox
+          items={lightbox.items}
+          startIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
+          actionLabel={(item) => (lightbox.job && item.kind === 'image' ? '★ Use as cover' : null)}
+          onAction={(item) => { if (lightbox.job) return useAsCover(lightbox.job, item) }}
+        />
+      )}
       {/* 3C-4: Thumbnail modal */}
       {thumbJob && (
         <div onClick={() => setThumbJob(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>
@@ -465,6 +541,7 @@ export function DemoForgePage() {
               jobId={thumbJob.id}
               format={(thumbJob.target_format as 'tiktok' | 'instagram' | 'linkedin') ?? 'tiktok'}
               brandId="vantage"
+              onAttached={() => { setMsg('Cover saved to job'); void refreshHistory() }}
             />
           </div>
         </div>
@@ -946,10 +1023,30 @@ export function DemoForgePage() {
               })}
               {job.output_url && (
                 <div style={{ marginTop: 12 }}>
-                  <a href={job.output_url} target="_blank" rel="noopener noreferrer"
-                    style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-cyan)', textDecoration: 'underline' }}>
-                    ↓ Download video
-                  </a>
+                  {/* Watch it here rather than sending people off to a new tab. */}
+                  <video
+                    src={job.output_url}
+                    poster={jobPoster(job) ?? undefined}
+                    controls
+                    playsInline
+                    style={{ width: '100%', maxHeight: 320, borderRadius: 6, border: '1px solid var(--nx-border)', background: '#000', display: 'block' }}
+                  />
+                  <div style={{ display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <button type="button" onClick={() => openVideo(job)}
+                      style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, letterSpacing: '0.1em', padding: '4px 10px', cursor: 'pointer', background: 'none', border: '1px solid var(--nx-border)', borderRadius: 3, color: 'var(--nx-text-2)' }}>
+                      ⤢ Full size
+                    </button>
+                    {frameItems(job).length > 0 && (
+                      <button type="button" onClick={() => setLightbox({ items: frameItems(job), index: 0, job })}
+                        style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, letterSpacing: '0.1em', padding: '4px 10px', cursor: 'pointer', background: 'none', border: '1px solid var(--nx-border)', borderRadius: 3, color: 'var(--nx-text-2)' }}>
+                        ▣ Cover frame
+                      </button>
+                    )}
+                    <a href={job.output_url} target="_blank" rel="noopener noreferrer"
+                      style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-cyan)', textDecoration: 'underline' }}>
+                      ↓ Download video
+                    </a>
+                  </div>
                 </div>
               )}
               {job.error_message && (
@@ -969,11 +1066,23 @@ export function DemoForgePage() {
                     padding: '6px 8px',
                     background: 'var(--nx-surface-2)', border: '1px solid var(--nx-border)', borderRadius: 6,
                   }}>
-                    <div>
-                      <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginBottom: 2 }}>
-                        {j.id.slice(0, 8)}…
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      {/* Poster tile — click to watch in place instead of downloading */}
+                      {j.output_url && (
+                        <button type="button" onClick={() => openVideo(j)} title="Play full size"
+                          style={{ padding: 0, border: '1px solid var(--nx-border)', borderRadius: 4, overflow: 'hidden', background: '#000', cursor: 'pointer', position: 'relative', width: 72, height: 44, flexShrink: 0 }}>
+                          {jobPoster(j)
+                            ? <img src={jobPoster(j)!} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: 0.75 }} loading="lazy" />
+                            : <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(160deg, #0b1a2a, #050c14)' }} />}
+                          <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#fff', textShadow: '0 0 10px rgba(0,0,0,0.8)' }}>▶</span>
+                        </button>
+                      )}
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginBottom: 2 }}>
+                          {j.id.slice(0, 8)}…
+                        </div>
+                        <Badge label={j.status} variant={j.status === 'done' ? 'active' : j.status === 'failed' ? 'critical' : 'pending'} />
                       </div>
-                      <Badge label={j.status} variant={j.status === 'done' ? 'active' : j.status === 'failed' ? 'critical' : 'pending'} />
                     </div>
                     <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
                       {j.output_url ? (
@@ -985,6 +1094,13 @@ export function DemoForgePage() {
                         <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)' }}>
                           {new Date(j.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
+                      )}
+                      {frameItems(j).length > 0 && (
+                        <button type="button" onClick={() => setLightbox({ items: frameItems(j), index: 0, job: j })}
+                          title="Pick which extracted frame becomes the cover"
+                          style={{ fontFamily: 'var(--nx-mono)', fontSize: 8, letterSpacing: '0.1em', padding: '2px 7px', cursor: 'pointer', background: 'none', border: '1px solid var(--nx-border)', borderRadius: 3, color: 'var(--nx-text-4)' }}>
+                          ▣ Cover frame
+                        </button>
                       )}
                       {/* 3C-4: Thumbnail button */}
                       <button type="button" onClick={() => setThumbJob(j)}

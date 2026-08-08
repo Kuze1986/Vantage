@@ -1,4 +1,5 @@
 import React from 'react'
+import { MediaLightbox, type LightboxItem } from './MediaLightbox'
 
 type ContentPayload = Record<string, unknown>
 
@@ -37,31 +38,96 @@ function CharCount({ text, limit }: { text: string; limit: number }) {
   )
 }
 
+const expandHint: React.CSSProperties = {
+  position: 'absolute', top: 6, right: 6,
+  fontFamily: 'var(--nx-mono)', fontSize: 9, letterSpacing: '0.08em',
+  background: 'rgba(5,12,20,0.8)', border: '1px solid var(--nx-border)',
+  borderRadius: 3, padding: '2px 6px', color: 'var(--nx-text-2)',
+  pointerEvents: 'none',
+}
+
 function MediaBlock({
   imageUrl,
   videoUrl,
   modeStills,
+  carouselUrls,
+  onExpand,
 }: {
   imageUrl?: string | null
   videoUrl?: string | null
   modeStills?: Array<{ mode: string; url: string }>
+  carouselUrls?: string[]
+  onExpand: (items: LightboxItem[], index: number) => void
 }) {
-  if (!imageUrl && !videoUrl && !modeStills?.length) return null
+  if (!imageUrl && !videoUrl && !modeStills?.length && !carouselUrls?.length) return null
+
+  // One flat list so ←/→ in the lightbox walks everything attached to the piece.
+  const items: LightboxItem[] = [
+    ...(videoUrl ? [{ kind: 'video' as const, url: videoUrl, label: 'Video', poster: imageUrl ?? undefined }] : []),
+    ...(imageUrl ? [{ kind: 'image' as const, url: imageUrl, label: 'Attached image' }] : []),
+    ...(carouselUrls ?? []).map((url, i) => ({
+      kind: 'image' as const, url, label: `Slide ${String(i + 1).padStart(2, '0')}`,
+    })),
+    ...(modeStills ?? []).map((m) => ({
+      kind: 'image' as const, url: m.url, label: m.mode.replace(/_/g, ' '),
+    })),
+  ]
+  const indexOf = (url: string) => Math.max(0, items.findIndex((it) => it.url === url))
+
   return (
     <div style={{ marginTop: 14 }}>
       {videoUrl && (
-        <video
-          src={videoUrl}
-          controls
-          style={{ width: '100%', maxHeight: 360, borderRadius: 8, border: '1px solid var(--nx-border)', background: '#000' }}
-        />
+        <button
+          type="button"
+          onClick={() => onExpand(items, indexOf(videoUrl))}
+          title="Expand to full size"
+          style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'none', cursor: 'zoom-in', position: 'relative' }}
+        >
+          <video
+            src={videoUrl}
+            poster={imageUrl ?? undefined}
+            controls
+            style={{ width: '100%', maxHeight: 360, borderRadius: 8, border: '1px solid var(--nx-border)', background: '#000' }}
+          />
+          <span style={expandHint}>⤢ FULL SIZE</span>
+        </button>
       )}
-      {!videoUrl && imageUrl && (
-        <img
-          src={imageUrl}
-          alt="Attached media"
-          style={{ width: '100%', borderRadius: 8, border: '1px solid var(--nx-border)' }}
-        />
+      {imageUrl && (
+        <button
+          type="button"
+          onClick={() => onExpand(items, indexOf(imageUrl))}
+          title="Expand to full size"
+          style={{ display: 'block', width: '100%', padding: 0, marginTop: videoUrl ? 10 : 0, border: 'none', background: 'none', cursor: 'zoom-in', position: 'relative' }}
+        >
+          <img
+            src={imageUrl}
+            alt="Attached media"
+            style={{ width: '100%', borderRadius: 8, border: '1px solid var(--nx-border)', display: 'block' }}
+          />
+          <span style={expandHint}>⤢ FULL SIZE</span>
+        </button>
+      )}
+      {carouselUrls && carouselUrls.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', letterSpacing: '0.1em', marginBottom: 6 }}>
+            CAROUSEL · {carouselUrls.length} SLIDES
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8 }}>
+            {carouselUrls.map((url, i) => (
+              <button
+                key={url}
+                type="button"
+                onClick={() => onExpand(items, indexOf(url))}
+                style={{ padding: 0, border: '1px solid var(--nx-border)', borderRadius: 6, overflow: 'hidden', background: 'none', cursor: 'zoom-in' }}
+              >
+                <img src={url} alt={`Slide ${i + 1}`} style={{ width: '100%', aspectRatio: '1/1', objectFit: 'cover', display: 'block' }} />
+                <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-3)', padding: '4px 6px' }}>
+                  {String(i + 1).padStart(2, '0')}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
       {modeStills && modeStills.length > 0 && (
         <div style={{ marginTop: 12 }}>
@@ -70,12 +136,17 @@ function MediaBlock({
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8 }}>
             {modeStills.map((m) => (
-              <div key={`${m.mode}-${m.url}`} style={{ border: '1px solid var(--nx-border)', borderRadius: 6, overflow: 'hidden' }}>
+              <button
+                key={`${m.mode}-${m.url}`}
+                type="button"
+                onClick={() => onExpand(items, indexOf(m.url))}
+                style={{ padding: 0, border: '1px solid var(--nx-border)', borderRadius: 6, overflow: 'hidden', background: 'none', cursor: 'zoom-in', textAlign: 'left' }}
+              >
                 <img src={m.url} alt={m.mode} style={{ width: '100%', aspectRatio: '16/10', objectFit: 'cover', display: 'block' }} />
                 <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-3)', padding: '4px 6px', textTransform: 'uppercase' }}>
                   {m.mode.replace(/_/g, ' ')}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -234,6 +305,12 @@ function parseModeStills(cp: ContentPayload): Array<{ mode: string; url: string 
     )
 }
 
+export function parseCarouselUrls(cp: ContentPayload): string[] {
+  const raw = cp.carousel_urls
+  if (!Array.isArray(raw)) return []
+  return raw.filter((u): u is string => typeof u === 'string' && u.length > 0)
+}
+
 // ── Modal wrapper ─────────────────────────────────────────────────────────────
 export function PreviewModal({
   piece,
@@ -250,14 +327,19 @@ export function PreviewModal({
   const videoUrl =
     piece.video_url
     || (typeof cp.video_url === 'string' ? cp.video_url : null)
-  const modeStills = parseModeStills(cp)
+  const modeStills   = parseModeStills(cp)
+  const carouselUrls = parseCarouselUrls(cp)
 
-  // Close on Escape
+  const [lightbox, setLightbox] = React.useState<{ items: LightboxItem[]; index: number } | null>(null)
+
+  // Close on Escape — but only when the lightbox isn't stacked on top, or a
+  // single Escape would dismiss both layers at once.
   React.useEffect(() => {
+    if (lightbox) return
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onClose])
+  }, [onClose, lightbox])
 
   let preview: React.ReactNode
   switch (format) {
@@ -293,6 +375,14 @@ export function PreviewModal({
   }
 
   return (
+    <>
+    {lightbox && (
+      <MediaLightbox
+        items={lightbox.items}
+        startIndex={lightbox.index}
+        onClose={() => setLightbox(null)}
+      />
+    )}
     <div
       onClick={onClose}
       style={{
@@ -339,8 +429,15 @@ export function PreviewModal({
         </div>
 
         {preview}
-        <MediaBlock imageUrl={imageUrl} videoUrl={videoUrl} modeStills={modeStills} />
+        <MediaBlock
+          imageUrl={imageUrl}
+          videoUrl={videoUrl}
+          modeStills={modeStills}
+          carouselUrls={carouselUrls}
+          onExpand={(items, index) => setLightbox({ items, index })}
+        />
       </div>
     </div>
+    </>
   )
 }

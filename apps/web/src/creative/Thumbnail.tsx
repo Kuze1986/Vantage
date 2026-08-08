@@ -4,10 +4,12 @@
 // frame dropped by the operator.
 
 import { useRef, useState } from 'react'
-import { exportCanvasNode } from '../pages/socialkit/primitives'
+import { exportCanvasNode, renderNodeToDataUrl } from '../pages/socialkit/primitives'
 import { CanvasMark } from '../pages/socialkit/CanvasMark'
 import { EditableText, KitImageSlot } from '../pages/socialkit/primitives'
 import { CanvasCorners } from './canvasFurniture'
+import { uploadDataUrl } from '../lib/storage'
+import { vantageApi } from '../api/vantage'
 import { BRANDS } from './index'
 import type { Brand, BrandId } from './index'
 import '../pages/socialkit/socialkit.css'
@@ -78,14 +80,20 @@ export function ThumbnailStudio({
   format = 'tiktok',
   brandId = 'vantage',
   exportScale = 2,
+  onAttached,
 }: {
   jobId?: string
   format?: Format
   brandId?: BrandId
   exportScale?: number
+  /** Called with the public URL once the cover is stored on the job. */
+  onAttached?: (url: string) => void
 }) {
   const [title, setTitle]   = useState('YOUR DEMO TITLE')
   const [sub, setSub]       = useState('Watch how it works in under 90 seconds.')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved]   = useState<string | null>(null)
+  const [err, setErr]       = useState<string | null>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
 
   const brand = BRANDS[brandId]
@@ -94,6 +102,27 @@ export function ThumbnailStudio({
   const displayH = Math.round(h * scale)
 
   const doExport = () => exportCanvasNode(canvasRef.current, w, h, `${brand.id}-thumb-${jobId ?? format}.png`, exportScale)
+
+  /**
+   * Upload the composed cover and point the job at it, so it never has to be
+   * exported to disk and re-uploaded. Capped at 2× to stay under the 8 MB
+   * limit on POST /v1/media/upload.
+   */
+  const doSave = async () => {
+    if (!canvasRef.current || !jobId || saving) return
+    setSaving(true); setErr(null); setSaved(null)
+    try {
+      const dataUrl = await renderNodeToDataUrl(canvasRef.current, w, h, Math.min(exportScale, 2))
+      const url = await uploadDataUrl(`thumbnails/${jobId}.png`, dataUrl)
+      await vantageApi.setDemoForgeThumbnail(jobId, { thumbnail_url: url })
+      setSaved(url)
+      onAttached?.(url)
+    } catch (e) {
+      setErr(String((e as Error).message))
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className={`vg-socialkit ${brand.theme}`} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -117,6 +146,18 @@ export function ThumbnailStudio({
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minWidth: 120 }}>
           <span className="nx-mono" style={{ fontSize: 9, color: 'var(--nx-text-muted)', letterSpacing: '0.14em' }}>{w}×{h} · {format.toUpperCase()}</span>
           <button onClick={doExport} className="nx-btn" style={{ justifyContent: 'center', padding: '8px', fontSize: 10, letterSpacing: '0.14em', color: brand.accent, borderColor: brand.accent }}>↓ EXPORT PNG</button>
+          {jobId && (
+            <button
+              onClick={() => void doSave()}
+              disabled={saving}
+              className="nx-btn nx-btn--primary"
+              style={{ justifyContent: 'center', padding: '8px', fontSize: 10, letterSpacing: '0.14em', color: '#000', background: brand.accent, borderColor: brand.accent, opacity: saving ? 0.6 : 1 }}
+            >
+              {saving ? 'SAVING…' : '⬆ SAVE TO JOB'}
+            </button>
+          )}
+          {saved && <span className="nx-mono" style={{ fontSize: 9, color: 'var(--nx-green, #22c55e)' }}>✓ Saved as the job cover</span>}
+          {err && <div className="vg-error" style={{ fontSize: 11 }}>{err}</div>}
         </div>
       </div>
     </div>

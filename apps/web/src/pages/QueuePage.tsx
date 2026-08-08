@@ -1,12 +1,12 @@
 import React from 'react'
 import { vantageApi } from '../api/vantage'
-import { Panel, Badge, DataTable } from '../ds'
-import { PreviewModal } from '../ds/PreviewModal'
+import { Panel, Badge, DataTable, PreviewModal, MediaLightbox } from '../ds'
 import { QuoteCardStudio } from '../creative/QuoteCard'
 import { OgCardStudio } from '../creative/OgCard'
+import { CarouselBuilder } from '../creative/CarouselBuilder'
 import { BRANDS } from '../creative'
 import type { BrandId } from '../creative'
-import type { BadgeVariant } from '../ds'
+import type { BadgeVariant, LightboxItem } from '../ds'
 import type { ReactNode } from 'react'
 
 export type Piece = {
@@ -146,16 +146,94 @@ function VideoScriptPanel({ piece }: { piece: Piece }) {
   )
 }
 
+// ── Media helpers ─────────────────────────────────────────────────────────────
+function parseModeStills(cp: Record<string, unknown>): Array<{ mode: string; url: string }> {
+  const raw = cp?.mode_stills
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((m): m is { mode?: string; url: string } => !!m && typeof m === 'object' && typeof (m as { url?: unknown }).url === 'string')
+    .map((m) => ({ mode: String(m.mode ?? 'mode'), url: m.url }))
+}
+
+/**
+ * Seed lines for the carousel builder: prefer an existing outline/bullet list,
+ * otherwise split the body into sentences so each becomes one point slide.
+ */
+function seedLinesFromPiece(p: Piece): string[] {
+  const cp = p.content_payload ?? {}
+  const outline = cp.outline ?? cp.key_points ?? cp.bullets
+  if (Array.isArray(outline)) {
+    const lines = outline.filter((l): l is string => typeof l === 'string' && l.trim().length > 0)
+    if (lines.length) return lines
+  }
+  const body = String(cp.body ?? cp.text ?? cp.script ?? '')
+  if (!body.trim()) return []
+  const byLine = body.split('\n').map((l) => l.trim()).filter(Boolean)
+  if (byLine.length > 1) return byLine
+  return body.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean)
+}
+
+/** Which DemoForge mode a still came from, for the thumbnail_mode payload field. */
+function modeOfStill(pieces: Piece[], pieceId: string, url: string): string | undefined {
+  const p = pieces.find((x) => x.id === pieceId)
+  return p ? parseModeStills(p.content_payload).find((m) => m.url === url)?.mode : undefined
+}
+
+function parseCarouselUrls(cp: Record<string, unknown>): string[] {
+  const raw = cp?.carousel_urls
+  if (!Array.isArray(raw)) return []
+  return raw.filter((u): u is string => typeof u === 'string' && u.length > 0)
+}
+
+function pieceVideoUrl(p: Piece): string | null {
+  if (p.video_url) return p.video_url
+  const fromPayload = p.content_payload?.video_url
+  return typeof fromPayload === 'string' && fromPayload ? fromPayload : null
+}
+
+/**
+ * Everything attached to a piece as one ordered list, so ←/→ in the lightbox
+ * walks the whole set. Order matches how the row renders them.
+ */
+function pieceMediaItems(p: Piece): LightboxItem[] {
+  const videoUrl = pieceVideoUrl(p)
+  const stills   = parseModeStills(p.content_payload)
+  return [
+    ...(videoUrl ? [{ kind: 'video' as const, url: videoUrl, label: 'Rendered video', poster: p.image_url ?? stills[0]?.url }] : []),
+    ...(p.image_url ? [{ kind: 'image' as const, url: p.image_url, label: 'Attached image' }] : []),
+    ...parseCarouselUrls(p.content_payload).map((url, i) => ({
+      kind: 'image' as const, url, label: `Slide ${String(i + 1).padStart(2, '0')}`,
+    })),
+    ...stills.map((m) => ({ kind: 'image' as const, url: m.url, label: m.mode.replace(/_/g, ' ') })),
+  ]
+}
+
+const expandHint: React.CSSProperties = {
+  position: 'absolute', top: 4, right: 4,
+  fontFamily: 'var(--nx-mono)', fontSize: 8, letterSpacing: '0.08em',
+  background: 'rgba(5,12,20,0.82)', border: '1px solid var(--nx-border)',
+  borderRadius: 3, padding: '1px 5px', color: 'var(--nx-text-2)',
+  pointerEvents: 'none',
+}
+
 // ── Image preview ─────────────────────────────────────────────────────────────
-function ImagePreview({ url }: { url: string }) {
+function ImagePreview({ url, onOpen }: { url: string; onOpen: () => void }) {
   return (
     <div style={{ marginTop: 6 }}>
-      <img
-        src={url}
-        alt="Generated"
-        style={{ width: '100%', maxWidth: 200, borderRadius: 4, border: '1px solid var(--nx-border)' }}
-        loading="lazy"
-      />
+      <button
+        type="button"
+        onClick={onOpen}
+        title="Expand to full size"
+        style={{ display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'zoom-in', position: 'relative', width: '100%', maxWidth: 260 }}
+      >
+        <img
+          src={url}
+          alt="Generated"
+          style={{ width: '100%', borderRadius: 4, border: '1px solid var(--nx-border)', display: 'block' }}
+          loading="lazy"
+        />
+        <span style={expandHint}>⤢</span>
+      </button>
     </div>
   )
 }
@@ -170,7 +248,22 @@ function PublishPackModal({
   onClose: () => void
 }) {
   const [copied, setCopied] = React.useState<string | null>(null)
-  const captionWithTags = [pack.caption, pack.hashtags].filter(Boolean).join('\n\n')
+  const [lightbox, setLightbox] = React.useState<{ items: LightboxItem[]; index: number } | null>(null)
+
+  // Reddit is title + body on a submit form; hashtags are meaningless there and
+  // the API deliberately leaves them empty. Mirror copy_all's labelling.
+  const isReddit  = pack.channel === 'reddit'
+  const bodyLabel = isReddit ? 'Body' : 'Caption'
+  const subreddit = pack.fields?.subreddit
+  const title     = pack.fields?.title
+  const captionWithTags = isReddit
+    ? pack.caption
+    : [pack.caption, pack.hashtags].filter(Boolean).join('\n\n')
+
+  const mediaItems: LightboxItem[] = [
+    ...(pack.video_url ? [{ kind: 'video' as const, url: pack.video_url, label: 'Rendered video', poster: pack.thumbnail_url ?? undefined }] : []),
+    ...(pack.thumbnail_url ? [{ kind: 'image' as const, url: pack.thumbnail_url, label: 'Thumbnail / still' }] : []),
+  ]
 
   const copy = (key: string, text: string) => {
     void navigator.clipboard.writeText(text).then(() => {
@@ -194,6 +287,10 @@ function PublishPackModal({
   }
 
   return (
+    <>
+    {lightbox && (
+      <MediaLightbox items={lightbox.items} startIndex={lightbox.index} onClose={() => setLightbox(null)} />
+    )}
     <div
       onClick={onClose}
       style={{
@@ -222,10 +319,33 @@ function PublishPackModal({
           </div>
         )}
 
+        {subreddit && (
+          <div style={{ marginBottom: 14, padding: '10px 12px', border: '1px solid var(--nx-border)', borderRadius: 6, background: 'var(--nx-surface-2)' }}>
+            <div style={monoLabel}>Post to</div>
+            <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 15, color: 'var(--nx-accent)', letterSpacing: '0.04em' }}>
+              {subreddit}
+            </div>
+          </div>
+        )}
+
+        {title && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={monoLabel}>Title</div>
+            <div style={{ ...body, fontWeight: 700 }}>{title}</div>
+            <button
+              type="button"
+              style={{ ...ghostBtn, marginTop: 8, color: copied === 'title' ? 'var(--nx-green, #22c55e)' : ghostBtn.color }}
+              onClick={() => copy('title', title)}
+            >
+              {copied === 'title' ? '✓ Copied' : '⎘ Copy title'}
+            </button>
+          </div>
+        )}
+
         <div style={{ marginBottom: 14 }}>
-          <div style={monoLabel}>Caption</div>
+          <div style={monoLabel}>{bodyLabel}</div>
           <div style={body}>{pack.caption || '—'}</div>
-          {pack.hashtags ? (
+          {!isReddit && pack.hashtags ? (
             <div style={{ marginTop: 8, fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-cyan)' }}>
               {pack.hashtags}
             </div>
@@ -236,7 +356,7 @@ function PublishPackModal({
               style={{ ...ghostBtn, color: copied === 'caption' ? 'var(--nx-green, #22c55e)' : ghostBtn.color }}
               onClick={() => copy('caption', captionWithTags)}
             >
-              {copied === 'caption' ? '✓ Copied' : '⎘ Copy caption'}
+              {copied === 'caption' ? '✓ Copied' : `⎘ Copy ${bodyLabel.toLowerCase()}`}
             </button>
             <button
               type="button"
@@ -255,9 +375,40 @@ function PublishPackModal({
           </div>
         )}
 
-        {(pack.video_url || pack.thumbnail_url) && (
+        {mediaItems.length > 0 && (
           <div style={{ marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={monoLabel}>Media</div>
+            <div style={monoLabel}>Media — click to review full size</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {mediaItems.map((item, i) => (
+                <button
+                  key={item.url}
+                  type="button"
+                  onClick={() => setLightbox({ items: mediaItems, index: i })}
+                  title={item.label}
+                  style={{
+                    padding: 0, border: '1px solid var(--nx-border)', borderRadius: 4, overflow: 'hidden',
+                    background: '#000', cursor: 'pointer', position: 'relative', width: 148, height: 90,
+                  }}
+                >
+                  {(item.poster ?? (item.kind === 'image' ? item.url : null)) ? (
+                    <img
+                      src={item.poster ?? item.url}
+                      alt={item.label ?? 'Media'}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: item.kind === 'video' ? 0.75 : 1 }}
+                    />
+                  ) : (
+                    <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(160deg, #0b1a2a, #050c14)' }} />
+                  )}
+                  {item.kind === 'video' && (
+                    <span style={{
+                      position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 22, color: '#fff', textShadow: '0 0 12px rgba(0,0,0,0.8)',
+                    }}>▶</span>
+                  )}
+                </button>
+              ))}
+            </div>
+            {/* A manual post needs the file on disk, so the download links stay. */}
             {pack.video_url && (
               <a href={pack.video_url} target="_blank" rel="noreferrer" download style={{ fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-cyan)' }}>
                 ↓ Download video
@@ -277,6 +428,7 @@ function PublishPackModal({
         </div>
       </div>
     </div>
+    </>
   )
 }
 
@@ -291,6 +443,8 @@ export function QueuePage() {
   const [previewPiece, setPreviewPiece] = React.useState<Piece | null>(null)
   const [quotifyPiece, setQuotifyPiece] = React.useState<Piece | null>(null)
   const [ogPiece, setOgPiece]           = React.useState<Piece | null>(null)
+  const [carouselPiece, setCarouselPiece] = React.useState<Piece | null>(null)
+  const [lightbox, setLightbox]         = React.useState<{ pieceId: string; items: LightboxItem[]; index: number } | null>(null)
   const [publishPack, setPublishPack]   = React.useState<PublishPack | null>(null)
   const [packBusy, setPackBusy]         = React.useState<string | null>(null)
   const [selected, setSelected]         = React.useState<Set<string>>(new Set())
@@ -329,6 +483,26 @@ export function QueuePage() {
       next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
+
+  const openLightbox = (p: Piece, index: number) =>
+    setLightbox({ pieceId: p.id, items: pieceMediaItems(p), index })
+
+  /**
+   * Promote the visible still to the piece's thumbnail. This used to fire on a
+   * single click of a 72px tile — now it's an explicit action taken after
+   * looking at the image full size.
+   */
+  const useAsThumbnail = async (pieceId: string, url: string) => {
+    setLightbox(null)
+    await action(
+      () => vantageApi.patchQueuePiece(pieceId, {
+        image_url: url,
+        media_status: 'ready',
+        content_payload_patch: { image_url: url, thumbnail_mode: modeOfStill(pieces, pieceId, url) },
+      }),
+      'Thumbnail updated',
+    )
+  }
 
   const counts: Record<string, number> = {}
   for (const p of pieces) counts[p.status] = (counts[p.status] ?? 0) + 1
@@ -412,58 +586,91 @@ export function QueuePage() {
             {isMediaGated(p) && <Badge label="gated" variant="pending" />}
           </div>
         )}
-        {p.image_url && <ImagePreview url={p.image_url} />}
-        {Array.isArray(p.content_payload?.mode_stills) && (p.content_payload.mode_stills as unknown[]).length > 0 && (
-          <div style={{ marginTop: 8 }}>
-            <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 8, color: 'var(--nx-text-4)', letterSpacing: '0.08em', marginBottom: 4 }}>
-              MODE STILLS
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {(p.content_payload.mode_stills as Array<{ mode?: string; url?: string }>)
-                .filter((m) => typeof m?.url === 'string')
-                .map((m) => (
+        {(() => {
+          const items = pieceMediaItems(p)
+          if (!items.length) return null
+          const videoUrl   = pieceVideoUrl(p)
+          const stills     = parseModeStills(p.content_payload)
+          const slides     = parseCarouselUrls(p.content_payload)
+          const openAt     = (url: string) => openLightbox(p, Math.max(0, items.findIndex((it) => it.url === url)))
+          const posterUrl  = p.image_url ?? stills[0]?.url ?? null
+          return (
+            <>
+              {videoUrl && (
+                <div style={{ marginTop: 6 }}>
                   <button
-                    key={`${m.mode}-${m.url}`}
                     type="button"
-                    title={m.mode ?? 'mode'}
-                    onClick={() => {
-                      void vantageApi.patchQueuePiece(p.id, {
-                        image_url: m.url!,
-                        media_status: 'ready',
-                        content_payload_patch: { image_url: m.url, thumbnail_mode: m.mode },
-                      }).then(() => load())
-                    }}
+                    onClick={() => openAt(videoUrl)}
+                    title="Play full size"
                     style={{
-                      padding: 0, border: '1px solid var(--nx-border)', borderRadius: 4,
-                      overflow: 'hidden', background: 'none', cursor: 'pointer', width: 72,
+                      padding: 0, border: '1px solid var(--nx-border)', borderRadius: 4, overflow: 'hidden',
+                      background: '#000', cursor: 'pointer', position: 'relative', width: 160, height: 90, display: 'block',
                     }}
                   >
-                    <img src={m.url} alt={m.mode ?? 'mode'} style={{ width: 72, height: 44, objectFit: 'cover', display: 'block' }} />
-                    <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 7, color: 'var(--nx-text-3)', padding: '2px 3px', textTransform: 'uppercase' }}>
-                      {(m.mode ?? 'mode').replace(/_/g, ' ')}
-                    </div>
+                    {posterUrl
+                      ? <img src={posterUrl} alt="Video poster" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', opacity: 0.75 }} loading="lazy" />
+                      : <span style={{ position: 'absolute', inset: 0, background: 'linear-gradient(160deg, #0b1a2a, #050c14)' }} />}
+                    <span style={{
+                      position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 22, color: '#fff', textShadow: '0 0 12px rgba(0,0,0,0.8)',
+                    }}>▶</span>
+                    <span style={expandHint}>VIDEO</span>
                   </button>
-                ))}
-            </div>
-          </div>
-        )}
-        {(p.video_url || (typeof p.content_payload?.video_url === 'string' && p.content_payload.video_url)) && (
-          <div style={{ marginTop: 6 }}>
-            <video
-              src={String(p.video_url ?? p.content_payload.video_url)}
-              controls
-              style={{ width: '100%', maxWidth: 220, borderRadius: 4, border: '1px solid var(--nx-border)' }}
-            />
-            <a
-              href={String(p.video_url ?? p.content_payload.video_url)}
-              target="_blank"
-              rel="noreferrer"
-              style={{ display: 'block', marginTop: 4, fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-cyan)' }}
-            >
-              Open video
-            </a>
-          </div>
-        )}
+                </div>
+              )}
+              {p.image_url && <ImagePreview url={p.image_url} onOpen={() => openAt(p.image_url!)} />}
+              {slides.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 8, color: 'var(--nx-text-4)', letterSpacing: '0.08em', marginBottom: 4 }}>
+                    CAROUSEL · {slides.length} SLIDES
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {slides.map((url, i) => (
+                      <button
+                        key={url}
+                        type="button"
+                        title={`Slide ${i + 1}`}
+                        onClick={() => openAt(url)}
+                        style={{ padding: 0, border: '1px solid var(--nx-border)', borderRadius: 4, overflow: 'hidden', background: 'none', cursor: 'zoom-in', width: 64 }}
+                      >
+                        <img src={url} alt={`Slide ${i + 1}`} style={{ width: 64, height: 64, objectFit: 'cover', display: 'block' }} loading="lazy" />
+                        <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 7, color: 'var(--nx-text-3)', padding: '2px 3px' }}>
+                          {String(i + 1).padStart(2, '0')}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {stills.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 8, color: 'var(--nx-text-4)', letterSpacing: '0.08em', marginBottom: 4 }}>
+                    MODE STILLS — click to enlarge
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {stills.map((m) => (
+                      <button
+                        key={`${m.mode}-${m.url}`}
+                        type="button"
+                        title={m.mode}
+                        onClick={() => openAt(m.url)}
+                        style={{
+                          padding: 0, border: '1px solid var(--nx-border)', borderRadius: 4,
+                          overflow: 'hidden', background: 'none', cursor: 'zoom-in', width: 96,
+                        }}
+                      >
+                        <img src={m.url} alt={m.mode} style={{ width: 96, height: 60, objectFit: 'cover', display: 'block' }} loading="lazy" />
+                        <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 7, color: 'var(--nx-text-3)', padding: '2px 3px', textTransform: 'uppercase' }}>
+                          {m.mode.replace(/_/g, ' ')}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )
+        })()}
         {/* Video script expand */}
         {VIDEO_FORMATS.has(p.format) && (
           <>
@@ -521,6 +728,15 @@ export function QueuePage() {
           title="Create a branded Open Graph share card for this piece"
         >
           ◫ Share card
+        </button>
+        {/* Carousel — builds slides and saves them onto the piece directly */}
+        <button
+          type="button"
+          className="nx-btn nx-btn--ghost nx-btn--sm"
+          onClick={() => setCarouselPiece(p)}
+          title="Build a multi-slide carousel and save it to this piece"
+        >
+          ▦ Carousel
         </button>
         {(p.media_status === 'pending' || p.media_status === 'failed' || Boolean(p.content_payload?.needs_social_kit)) && (
           <button
@@ -733,6 +949,16 @@ export function QueuePage() {
 
   return (
     <>
+      {/* Full-size media viewer — shared by thumbnails, stills, carousels and video */}
+      {lightbox && (
+        <MediaLightbox
+          items={lightbox.items}
+          startIndex={lightbox.index}
+          onClose={() => setLightbox(null)}
+          actionLabel={(item) => (item.kind === 'image' ? '★ Use as thumbnail' : null)}
+          onAction={(item) => useAsThumbnail(lightbox.pieceId, item.url)}
+        />
+      )}
       {/* 3B-5: Preview modal */}
       {previewPiece && (
         <PreviewModal piece={previewPiece} onClose={() => setPreviewPiece(null)} />
@@ -762,6 +988,32 @@ export function QueuePage() {
                   content_payload_patch: { needs_social_kit: false, image_url: url },
                 })
                 setMsg('Share card attached to piece')
+                await load()
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {carouselPiece && (
+        <div onClick={() => setCarouselPiece(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 24, overflowY: 'auto' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--nx-bg)', border: '1px solid var(--nx-border)', borderRadius: 10, padding: 24, width: '100%', maxWidth: 1000 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <span className="nx-mono" style={{ fontSize: 11, color: 'var(--nx-accent)', letterSpacing: '0.18em' }}>▦ CAROUSEL</span>
+              <button type="button" onClick={() => setCarouselPiece(null)} style={{ background: 'none', border: '1px solid var(--nx-border)', borderRadius: 4, padding: '4px 10px', cursor: 'pointer', fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-text-3)' }}>✕ Close</button>
+            </div>
+            <CarouselBuilder
+              pieceId={carouselPiece.id}
+              initialBrandId={pieceBrandId(carouselPiece)}
+              initialSlideText={seedLinesFromPiece(carouselPiece)}
+              onAttached={async (urls) => {
+                await vantageApi.patchQueuePiece(carouselPiece.id, {
+                  // image_url satisfies the media gate; the full set lives in the payload.
+                  image_url: urls[0],
+                  media_status: 'ready',
+                  content_payload_patch: { carousel_urls: urls, needs_social_kit: false },
+                })
+                setMsg(`Carousel saved to piece (${urls.length} slides)`)
                 await load()
               }}
             />
