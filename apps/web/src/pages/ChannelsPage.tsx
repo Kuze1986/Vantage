@@ -18,11 +18,11 @@ const CHANNEL_META: Record<string, {
   email:     { icon: '✉',  accent: 'green', description: 'Newsletter via Resend. HTML email.', meta: ['Resend API', 'HTML email'], authMethod: 'api_key' },
   tiktok:    { icon: '♪',  accent: 'red',   description: 'Publish videos via the Content Posting API.', meta: ['OAuth 2.0 PKCE', 'Content Posting API'], authMethod: 'oauth' },
   instagram: { icon: '◉',  accent: 'gold',  description: 'Publish Reels and images via the Graph API.', meta: ['Facebook Login', 'Graph API'], authMethod: 'oauth' },
-  facebook:  { icon: 'f',  accent: 'amber', description: 'Queue for manual Facebook Page publishing.', meta: ['Manual post'], authMethod: 'manual' },
+  facebook:  { icon: 'f',  accent: 'amber', description: 'Publish to your Facebook Page via the Graph API.', meta: ['Facebook Login', 'Graph API'], authMethod: 'oauth' },
 }
 
 const CHANNEL_ORDER = ['x', 'linkedin', 'reddit', 'threads', 'bluesky', 'email', 'tiktok', 'instagram', 'facebook']
-const OAUTH_CHANNELS = ['x', 'linkedin', 'reddit', 'threads', 'tiktok', 'instagram']
+const OAUTH_CHANNELS = ['x', 'linkedin', 'reddit', 'threads', 'tiktok', 'instagram', 'facebook']
 
 function CadenceForm({ slug, config, onSave }: {
   slug: string

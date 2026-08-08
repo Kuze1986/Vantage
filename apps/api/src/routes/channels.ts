@@ -10,6 +10,7 @@ import { buildAuthorizeUrl as threadsAuthorizeUrl, savePendingOAuth as threadsSa
 import { connect as blueskyConnect } from "../adapters/bluesky.js";
 import { generatePkce as ttGeneratePkce, buildAuthorizeUrl as ttAuthorizeUrl, savePendingOAuth as ttSavePending } from "../adapters/tiktok.js";
 import { buildAuthorizeUrl as igAuthorizeUrl, savePendingOAuth as igSavePending } from "../adapters/instagram.js";
+import { buildAuthorizeUrl as fbAuthorizeUrl, savePendingOAuth as fbSavePending } from "../adapters/facebook.js";
 
 const cadenceSchema = z.object({
   posts_per_day:   z.number().int().min(0).max(20).optional(),
@@ -175,6 +176,19 @@ channelsAuthedRoutes.post("/:slug/auth/start", async (c) => {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes("not configured")) {
           throw new HTTPException(503, { message: "Instagram OAuth not configured. Set INSTAGRAM_CLIENT_ID, INSTAGRAM_CLIENT_SECRET, and INSTAGRAM_REDIRECT_URI in Railway." });
+        }
+        throw e;
+      }
+    }
+    case "facebook": {
+      try {
+        await fbSavePending(ws, state);
+        const url = fbAuthorizeUrl(state);
+        return c.json({ authorize_url: url, state });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("not configured")) {
+          throw new HTTPException(503, { message: "Facebook OAuth not configured. Set FACEBOOK_CLIENT_ID, FACEBOOK_CLIENT_SECRET, and FACEBOOK_REDIRECT_URI in Railway." });
         }
         throw e;
       }

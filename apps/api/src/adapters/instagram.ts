@@ -6,11 +6,13 @@ import { RateLimitError, parseRetryAfter } from "../lib/rate-limit-error.js";
 // Instagram Graph API via Facebook Login. This is a Meta/Facebook developer
 // app under the hood (INSTAGRAM_CLIENT_ID/SECRET are the Meta app's id/secret)
 // — the same app could later back a real facebook.ts adapter too.
-// NOTE: the Graph API version pinned below, exact scope names, and the media
-// container status field/enum values are written from general API knowledge,
-// not a fresh docs fetch — verify against Meta's current docs before relying
-// on this in production. Feed video posts were deprecated in favor of Reels;
-// confirm whether media_type: "REELS" is still required for video uploads.
+// NOTE: scope names below are confirmed against the live Meta console ("API
+// setup with Facebook login" screen, 2026-08-08). The Graph API version
+// pinned below and the media container status field/enum values are still
+// written from general API knowledge, not a fresh docs fetch — verify those
+// against Meta's current docs before relying on this in production. Feed
+// video posts were deprecated in favor of Reels; confirm whether
+// media_type: "REELS" is still required for video uploads.
 const GRAPH_VERSION = "v21.0";
 const FB_AUTH  = `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`;
 const FB_GRAPH = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -36,7 +38,15 @@ export function buildAuthorizeUrl(stateToken: string): string {
   u.searchParams.set("client_id", clientId);
   u.searchParams.set("redirect_uri", redirect);
   u.searchParams.set("state", stateToken);
-  u.searchParams.set("scope", "instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement");
+  // Matches the exact permission set Meta's "Manage content on Instagram" /
+  // API setup with Facebook login" screen requires — confirmed against the
+  // live console, not just general API knowledge (instagram_content_publish
+  // was wrong; it's instagram_content_publishing, and business_management
+  // was missing entirely).
+  u.searchParams.set(
+    "scope",
+    "instagram_basic,instagram_content_publishing,pages_read_engagement,business_management,pages_show_list",
+  );
   return u.toString();
 }
 

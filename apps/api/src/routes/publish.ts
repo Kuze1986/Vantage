@@ -16,6 +16,7 @@ import { postBluesky } from "../adapters/bluesky.js";
 import { sendEmail } from "../adapters/email.js";
 import { postTikTokVideo } from "../adapters/tiktok.js";
 import { postInstagramMedia } from "../adapters/instagram.js";
+import { postFacebook } from "../adapters/facebook.js";
 
 const bodySchema = z.object({
   content_piece_id: z.string().uuid(),
@@ -32,7 +33,9 @@ publishRoutes.post("/:channel", async (c) => {
   const parsed  = bodySchema.safeParse(json);
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
-  const { content_piece_id, external_post_url, force } = parsed.data;
+  // external_post_url stays in the schema for API-compat but is no longer read —
+  // no channel dispatches through the manual record-a-URL path anymore.
+  const { content_piece_id, force } = parsed.data;
   const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
 
@@ -88,40 +91,10 @@ publishRoutes.post("/:channel", async (c) => {
   const slug = piece.channel_slug as string;
   const campaignId = await resolveCampaignIdForPiece(content_piece_id).catch(() => null);
 
-  // Manual-post channels: just record the external URL
-  if (["facebook"].includes(slug)) {
-    if (!external_post_url) {
-      throw new HTTPException(400, {
-        message: `${slug} requires manual posting. Post the content, then submit the external_post_url.`,
-      });
-    }
-    const now = new Date().toISOString();
-    await sb.from("content_pieces").update({
-      status:           "published",
-      published_at:     now,
-      external_post_id: external_post_url,
-      locked_at:        null,
-      updated_at:       now,
-    }).eq("workspace_id", ws).eq("id", content_piece_id);
-    await logActivity({
-      source: `adapter:${slug}`, source_type: "adapter",
-      event_type: "published_manual",
-      summary: `Manual publish recorded for ${slug} piece ${content_piece_id}`,
-      payload: { content_piece_id, external_post_url, channel: slug },
-      workspace_id: ws,
-    });
-    // Growth OS — Loop A: a published piece is an acquisition impression.
-    await recordGrowthEvent({
-      loop: "acquisition", kind: "impression", channel: slug,
-      meta: {
-        content_piece_id, external_post_id: external_post_url, manual: true, workspace_id: ws,
-        ...(campaignId ? { campaign_id: campaignId } : {}),
-      },
-    });
-    return c.json({ ok: true, external_post_id: external_post_url, manual: true });
-  }
-
-  // Automated channels
+  // Automated channels — no manual-post channels dispatch through this route
+  // anymore now that tiktok/instagram/facebook all post for real. A workspace
+  // that hasn't connected a channel yet still gets a clear "not connected"
+  // error from the adapter itself, same as any other unconnected OAuth channel.
   let externalId: string;
   try {
     switch (slug) {
@@ -193,6 +166,14 @@ publishRoutes.post("/:channel", async (c) => {
           mediaUrl,
           mediaType: videoUrl ? "VIDEO" : "IMAGE",
           caption,
+        }));
+        break;
+      }
+      case "facebook": {
+        const imageUrl = typeof payload.image_url === "string" ? payload.image_url : piece.image_url;
+        ({ id: externalId } = await postFacebook(ws, {
+          message: String(payload.body ?? ""),
+          imageUrl: imageUrl || undefined,
         }));
         break;
       }

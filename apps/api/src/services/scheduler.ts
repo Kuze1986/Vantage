@@ -30,6 +30,7 @@ import { postBluesky } from "../adapters/bluesky.js";
 import { sendEmail } from "../adapters/email.js";
 import { postTikTokVideo } from "../adapters/tiktok.js";
 import { postInstagramMedia } from "../adapters/instagram.js";
+import { postFacebook } from "../adapters/facebook.js";
 
 const TICK_MS               = 60_000;            // check queue every 60 seconds
 const AUTO_GEN_TICK         = 300_000;           // check auto-generate every 5 minutes
@@ -214,6 +215,15 @@ export async function publishPiece(workspaceId: string, piece: ContentPieceRow, 
           mediaUrl,
           mediaType: videoUrl ? "VIDEO" : "IMAGE",
           caption,
+        });
+        externalId = id;
+        break;
+      }
+      case "facebook": {
+        const imageUrl = typeof payload.image_url === "string" ? payload.image_url : piece.image_url;
+        const { id } = await postFacebook(workspaceId, {
+          message: String(payload.body ?? ""),
+          imageUrl: imageUrl || undefined,
         });
         externalId = id;
         break;

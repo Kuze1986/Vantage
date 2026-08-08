@@ -15,7 +15,7 @@ const DEFAULT_CHANNELS = [
   { slug: "email",     display_name: "Email",       auth_method: "api_key", cadence_config: { newsletter_day: "tuesday" } },
   { slug: "tiktok",    display_name: "TikTok",      auth_method: "oauth",   cadence_config: {} },
   { slug: "instagram", display_name: "Instagram",   auth_method: "oauth",   cadence_config: {} },
-  { slug: "facebook",  display_name: "Facebook",    auth_method: "manual",  cadence_config: {} },
+  { slug: "facebook",  display_name: "Facebook",    auth_method: "oauth",   cadence_config: {} },
 ] as const;
 
 /**

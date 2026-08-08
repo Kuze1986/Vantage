@@ -6,6 +6,7 @@ import { exchangeCodeForTokens as exchangeReddit } from "../adapters/reddit.js";
 import { exchangeCodeForTokens as exchangeThreads } from "../adapters/threads.js";
 import { exchangeCodeForTokens as exchangeTikTok } from "../adapters/tiktok.js";
 import { exchangeCodeForTokens as exchangeInstagram } from "../adapters/instagram.js";
+import { exchangeCodeForTokens as exchangeFacebook } from "../adapters/facebook.js";
 
 // OAuth redirect channels and their token-exchange handlers. Credential channels
 // (e.g. Bluesky) connect via POST /v1/channels/:slug/connect, not this callback.
@@ -16,6 +17,7 @@ const EXCHANGERS: Record<string, (code: string, state: string) => Promise<void>>
   threads:   exchangeThreads,
   tiktok:    exchangeTikTok,
   instagram: exchangeInstagram,
+  facebook:  exchangeFacebook,
 };
 
 /**
