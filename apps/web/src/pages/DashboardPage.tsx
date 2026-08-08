@@ -383,7 +383,12 @@ export function DashboardPage() {
           <Panel title="Vertical Breakdown — 7d" titleAccent="amber">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 8 }}>
               {Object.entries(verticalBreakdown)
-                .sort(([, a], [, b]) => b.published_7d - a.published_7d)
+                // Published first, then engagement, then pipeline depth — so a
+                // vertical with nothing published but work in flight still ranks.
+                .sort(([, a], [, b]) =>
+                  b.published_7d - a.published_7d ||
+                  b.engagement_7d - a.engagement_7d ||
+                  (b.queued + b.auditing) - (a.queued + a.auditing))
                 .map(([vertical, stats]) => (
                   <div
                     key={vertical}
@@ -397,12 +402,27 @@ export function DashboardPage() {
                     <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {vertical}
                     </div>
-                    <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 18, color: 'var(--nx-amber)', fontWeight: 700 }}>
-                      {stats.published_7d}
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                      <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 18, color: 'var(--nx-amber)', fontWeight: 700 }}>
+                        {stats.published_7d}
+                      </span>
+                      {stats.engagement_7d > 0 && (
+                        <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-cyan)' }}>
+                          ♥{stats.engagement_7d}
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)' }}>
                       {stats.published_today > 0 ? `+${stats.published_today} today` : 'posts 7d'}
                     </div>
+                    {(stats.queued > 0 || stats.auditing > 0) && (
+                      <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginTop: 2 }}>
+                        {[
+                          stats.queued > 0 ? `${stats.queued} queued` : null,
+                          stats.auditing > 0 ? `${stats.auditing} auditing` : null,
+                        ].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
                   </div>
                 ))}
             </div>

@@ -97,6 +97,9 @@ export type TopPiece = {
 export type VerticalBreakdownEntry = {
   published_7d: number;
   published_today: number;
+  queued: number;
+  auditing: number;
+  engagement_7d: number;
 };
 
 export type DashboardOverview = {

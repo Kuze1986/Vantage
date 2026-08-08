@@ -1,6 +1,11 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { getSupabaseAdmin } from "../lib/supabase.js";
+import {
+  buildVerticalBreakdown,
+  type VerticalEngagementRow,
+  type VerticalPieceRow,
+} from "../lib/vertical-breakdown.js";
 
 export const dashboardRoutes = new Hono();
 
@@ -42,12 +47,16 @@ dashboardRoutes.get("/overview", async (c) => {
       .order("published_at", { ascending: false })
       .limit(100),
 
-    // 3A-8: Per-vertical breakdown — join content_pieces → topics
+    // 3A-8: Per-vertical breakdown — join content_pieces → topics.
+    // Deliberately NOT filtered by published_at: queued and auditing pieces have
+    // a null published_at, so a date filter here would silently zero those two
+    // counts. The 7d window is applied per-status in the accumulator instead.
     sb.from("content_pieces")
       .select("id, status, published_at, topics!inner(vertical)")
       .eq("workspace_id", ws)
       .not("topics.vertical", "is", null)
-      .gte("published_at", since7d),
+      .order("created_at", { ascending: false })
+      .limit(2000),
   ]);
 
   if (activityRes.error)   throw new HTTPException(500, { message: activityRes.error.message });
@@ -141,20 +150,13 @@ dashboardRoutes.get("/overview", async (c) => {
     }]),
   );
 
-  // 3A-8: Per-vertical breakdown — aggregate published counts by vertical for last 7d
-  type VerticalStats = { published_7d: number; published_today: number };
-  const verticalBreakdown: Record<string, VerticalStats> = {};
-  for (const row of (verticalRes.data ?? []) as unknown as { status: string; published_at: string | null; topics: { vertical: string }[] }[]) {
-    const vertical = row.topics?.[0]?.vertical;
-    if (!vertical) continue;
-    if (!verticalBreakdown[vertical]) verticalBreakdown[vertical] = { published_7d: 0, published_today: 0 };
-    if (row.status === "published") {
-      verticalBreakdown[vertical].published_7d += 1;
-      if (row.published_at && row.published_at >= todayStart) {
-        verticalBreakdown[vertical].published_today += 1;
-      }
-    }
-  }
+  // 3A-8: Per-vertical breakdown — publish counts, pipeline depth, and engagement.
+  // Counting rules live in lib/vertical-breakdown.ts so they can be unit-tested.
+  const verticalBreakdown = buildVerticalBreakdown(
+    (verticalRes.data ?? []) as unknown as VerticalPieceRow[],
+    (engagementRes.data ?? []) as VerticalEngagementRow[],
+    { since7d, todayStart },
+  );
 
   return c.json({
     activityLast24h:   activityRes.data ?? [],

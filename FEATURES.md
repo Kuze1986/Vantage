@@ -2141,9 +2141,20 @@ the Reddit channel and weights never update.
 
 ### 3A-8 — Per-Vertical Dashboard Breakdown
 
-**Status:** ◐ Partial — what shipped is `{published_7d, published_today}` per vertical
-(`routes/dashboard.ts`). The `queued` / `auditing` counts and the engagement-by-vertical
-aggregation described below were **not** built; the `engagement_events` join is absent.
+**Status:** ✅ Shipped · 🟡 Unverified (the engagement figure needs `engagement_events`, which
+is empty)
+
+Per vertical: `published_7d`, `published_today`, `queued`, `auditing`, `engagement_7d`.
+
+The window is applied **per status, not in the query**. Filtering on
+`published_at >= since7d` in SQL — which is what the first implementation did — silently drops
+`queued` and `auditing` pieces, because their `published_at` is null. That is why this
+breakdown reported publish counts only for so long. The route now fetches without a date
+filter and `lib/vertical-breakdown.ts` applies the window while counting. Engagement is
+attributed through a piece→vertical map built in the same pass, so no second join is needed.
+
+**Files:** `apps/api/src/lib/vertical-breakdown.ts` (+ 8 tests),
+`apps/api/src/routes/dashboard.ts`, `apps/web/src/pages/DashboardPage.tsx`.
 
 **Problem:** The spec says "Dashboard shows per-channel *and per-vertical* breakdown of
 activity and engagement." The dashboard currently has per-channel stats but never
@@ -2680,7 +2691,7 @@ engine already has it).
 
 **Status:** ✅ Shipped
 
-Vitest harness in `@vantage/api` with **242 tests across 30 files** (all passing) covering the
+Vitest harness in `@vantage/api` with **250 tests across 31 files** (all passing) covering the
 highest-risk paths: publish state
 machine (success / retry-backoff / exhausted-fail+alert / rate-limit), cadence claim lock,
 auto-generate audit gating (pass→queued, fail→regen→approved/rejected), membership/IDOR guard,
@@ -2875,7 +2886,7 @@ pieces), DemoForge (63 jobs / 36 rendered), Campaign Builder (2 campaigns), acti
 OAuth tokens, Social Kit + the seven-item Creative Studio, and the full Phase 4
 SaaS-readiness stack — multi-tenancy, tenant-aware
 scheduler, membership/roles, per-tenant credentials, claim-based publish lock, pluggable LLM
-providers across five vendors, and Threads + Bluesky. **242 tests across 30 files, plus CI.**
+providers across five vendors, and Threads + Bluesky. **250 tests across 31 files, plus CI.**
 
 **Built but never exercised:** everything downstream of publishing — engagement ingestion,
 BioLoop weight learning, Strategic Intelligence, the Audience Model, and Virality Signals.
