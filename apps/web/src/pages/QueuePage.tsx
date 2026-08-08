@@ -1004,6 +1004,7 @@ export function QueuePage() {
             </div>
             <CarouselBuilder
               pieceId={carouselPiece.id}
+              channelSlug={carouselPiece.channel_slug}
               initialBrandId={pieceBrandId(carouselPiece)}
               initialSlideText={seedLinesFromPiece(carouselPiece)}
               onAttached={async (urls) => {

@@ -4,6 +4,8 @@
  * are blocked unless force=true (which stamps content_payload.force_media).
  */
 
+import { parseCarouselUrls } from "./carousel.js";
+
 export type MediaGatePiece = {
   media_status?: string | null;
   image_url?: string | null;
@@ -26,7 +28,11 @@ export function isMediaGated(piece: MediaGatePiece): boolean {
   if (payload && typeof payload === "object" && payload.needs_social_kit === true) {
     const hasImage =
       (typeof piece.image_url === "string" && piece.image_url.length > 0) ||
-      (typeof payload.image_url === "string" && payload.image_url.length > 0);
+      (typeof payload.image_url === "string" && payload.image_url.length > 0) ||
+      // A saved carousel is imagery too. The builder mirrors slide 01 onto
+      // image_url, so this is a belt-and-braces path for a piece that somehow
+      // carries only the slide array.
+      parseCarouselUrls(payload).length > 0;
     if (!hasImage) return true;
   }
 
@@ -43,7 +49,11 @@ export function mediaGateReason(piece: MediaGatePiece): string {
   if (payload && typeof payload === "object" && payload.needs_social_kit === true) {
     const hasImage =
       (typeof piece.image_url === "string" && piece.image_url.length > 0) ||
-      (typeof payload.image_url === "string" && payload.image_url.length > 0);
+      (typeof payload.image_url === "string" && payload.image_url.length > 0) ||
+      // A saved carousel is imagery too. The builder mirrors slide 01 onto
+      // image_url, so this is a belt-and-braces path for a piece that somehow
+      // carries only the slide array.
+      parseCarouselUrls(payload).length > 0;
     if (!hasImage) return "Social Kit graphic required — attach an image or use force";
   }
   const status = piece.media_status ?? "none";

@@ -359,6 +359,47 @@ treats it like TikTok/Instagram/Facebook were before their APIs went live:
 is available. Restoring automated posting means removing `"reddit"` from
 `MANUAL_PUBLISH_CHANNELS` and re-adding its `case` in `publish.ts` / `scheduler.ts`.
 
+#### Multi-image posting (carousels)
+
+A carousel saved from the Social Kit builder lands on the piece as
+`content_payload.carousel_urls`, with slide 01 mirrored onto `image_url`. Channels whose
+adapters can post several images natively send the whole set; everyone else sends
+`image_url` and is unaffected.
+
+`apps/api/src/lib/carousel.ts` owns the decision, shared by `publish.ts` and `scheduler.ts`:
+
+- `MULTI_IMAGE_CHANNELS` — currently `instagram` and `facebook`.
+- `parseCarouselUrls()` — drops non-strings, blanks and **duplicates** (a duplicate would
+  render the same slide twice), caps at `CAROUSEL_MAX` (10, Instagram's limit).
+- `carouselUrlsForChannel()` — returns `[]`, meaning "fall through to single-image", when
+  the channel can't do it, when fewer than `CAROUSEL_MIN` (2) slides survive, or **when the
+  piece has a video**: a rendered piece publishes as a Reel, not a slide deck.
+
+**Instagram** (`postInstagramCarousel`) is the three-step container flow: one child container
+per image with `is_carousel_item=true` and no caption (`media_type` omitted for images), a
+parent with `media_type=CAROUSEL` plus a comma-separated `children` id list and the caption,
+then `media_publish` on the parent. The parent is always polled to `FINISHED` first — it has
+real assembly work to do, unlike a single image. Children are created sequentially: a burst
+of N container creations is what trips Meta's rate limiter, and a 429 partway through would
+strand containers with no post to show for them (they expire after 24h).
+
+**Facebook** (`postFacebookPhotos`) uploads each photo to `/{page-id}/photos` with
+`published=false`, then creates one `/{page-id}/feed` post referencing them via the indexed
+`attached_media[N]={"media_fbid":"…"}` form. It can't reuse the single-image `/photos` path,
+which would produce N separate posts rather than one post with N photos.
+
+**Not covered:** X, Bluesky, LinkedIn and Threads all support multiple images at the platform
+level, but their adapters here are text-only (LinkedIn is single-image), so multi-image for
+them is adapter work rather than a dispatch change. TikTok photo posts use a different
+Content Posting API flow than the video one implemented today.
+
+The media gate also treats a non-empty `carousel_urls` as satisfying the "needs a Social Kit
+image" requirement.
+
+**Files:** `apps/api/src/lib/carousel.ts` (+ tests), `apps/api/src/adapters/instagram.ts`
+(+ tests), `apps/api/src/adapters/facebook.ts`, `apps/api/src/routes/publish.ts`,
+`apps/api/src/services/scheduler.ts`, `apps/api/src/lib/media-gate.ts`.
+
 #### Threads
 Posts via the Meta Threads API (Graph-based). OAuth 2.0 with a short-lived → long-lived
 (~60-day) token exchange and auto-refresh. Publishing is two-step: create a text media
@@ -980,8 +1021,8 @@ dispatch pieces from this page.
 - **Carousel** — opens the carousel builder seeded from the piece body, and saves the
   rendered slides straight to Storage (`creative/carousel/<pieceId>/NN.png`) and onto the
   piece as `content_payload.carousel_urls`, with slide 01 mirrored to `image_url`. No
-  export-then-reupload round trip. Publishing is still single-image, so an auto-posted piece
-  sends slide 01 only — the builder says so inline.
+  export-then-reupload round trip. On Instagram and Facebook the whole set publishes; other
+  channels send slide 01 — the builder says which applies.
 - **Manual channels** — paste post URL → mark published after manual upload
 - **Dismiss** — soft-reject (`POST /v1/queue/:id/reject`); piece moves to Rejected and will
   not publish
@@ -2077,9 +2118,9 @@ ordered 2–10 slide set and export it as a numbered image sequence.
 - Standalone on the Social Kit tab there is no piece to attach to, so only the download
   buttons appear.
 
-**Known limitation:** publishing reads a single `image_url`, so an auto-posted carousel sends
-slide 01 only. True multi-image posting (Instagram carousel containers) is not implemented;
-the builder warns about this inline.
+**Publishing:** Instagram and Facebook post the whole set (see Multi-Image Posting below).
+Every other channel publishes the single `image_url`, i.e. slide 01 — the builder says which
+of the two applies for the piece's channel.
 
 **Files:** `apps/web/src/creative/CarouselBuilder.tsx`, `apps/web/src/pages/SocialKitPage.tsx`
 (tab), `apps/web/src/pages/QueuePage.tsx` (▦ Carousel action + modal),

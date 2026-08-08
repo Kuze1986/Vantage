@@ -13,6 +13,13 @@ import { RateLimitError, parseRetryAfter } from "../lib/rate-limit-error.js";
 // against Meta's current docs before relying on this in production. Feed
 // video posts were deprecated in favor of Reels; confirm whether
 // media_type: "REELS" is still required for video uploads.
+//
+// The carousel flow (postInstagramCarousel) WAS checked against Meta's
+// content-publishing guide on 2026-08-08: child containers take
+// is_carousel_item=true with media_type omitted for images, the parent takes
+// media_type=CAROUSEL plus a comma-separated `children` list of up to 10
+// container ids, and status_code is one of
+// EXPIRED | ERROR | FINISHED | IN_PROGRESS | PUBLISHED.
 const GRAPH_VERSION = "v21.0";
 const FB_AUTH  = `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`;
 const FB_GRAPH = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -148,6 +155,70 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** POST /{ig-user-id}/media with the given params → container ("creation") id. */
+async function createContainer(
+  igUserId: string,
+  token: string,
+  params: Record<string, string>,
+): Promise<string> {
+  const url = new URL(`${FB_GRAPH}/${igUserId}/media`);
+  url.searchParams.set("access_token", token);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+
+  const res = await fetch(url, { method: "POST" });
+  const json = (await res.json()) as { id?: string; error?: { message?: string; code?: number } };
+  if (res.status === 429) {
+    throw new RateLimitError("Instagram rate limit — retry later", parseRetryAfter(res.headers.get("retry-after"), 5 * 60_000));
+  }
+  if (!res.ok || !json.id) {
+    const detail = json.error?.message ?? JSON.stringify(json);
+    await logActivity({ source: "adapter:instagram", source_type: "adapter", event_type: "post_failed", summary: detail.slice(0, 500), payload: json as Record<string, unknown> });
+    throw new Error(`Instagram media create failed: ${detail}`);
+  }
+  return json.id;
+}
+
+/**
+ * Poll a container until it finishes processing.
+ * status_code enum: EXPIRED | ERROR | FINISHED | IN_PROGRESS | PUBLISHED.
+ */
+async function waitForContainer(creationId: string, token: string, attempts = 30): Promise<void> {
+  let statusCode = "IN_PROGRESS";
+  for (let i = 0; i < attempts; i++) {
+    await sleep(3000);
+    const statusUrl = new URL(`${FB_GRAPH}/${creationId}`);
+    statusUrl.searchParams.set("fields", "status_code");
+    statusUrl.searchParams.set("access_token", token);
+    const statusRes = await fetch(statusUrl);
+    const statusJson = (await statusRes.json()) as { status_code?: string };
+    statusCode = statusJson.status_code ?? statusCode;
+    if (statusCode === "FINISHED") return;
+    if (statusCode === "ERROR" || statusCode === "EXPIRED") {
+      await logActivity({ source: "adapter:instagram", source_type: "adapter", event_type: "post_failed", summary: `container ${statusCode}`, payload: { creation_id: creationId } });
+      throw new Error(`Instagram media processing failed: ${statusCode}`);
+    }
+  }
+  throw new Error("Instagram media processing timed out — try publishing again shortly");
+}
+
+/** POST /{ig-user-id}/media_publish → the published post id. */
+async function publishContainer(igUserId: string, token: string, creationId: string): Promise<string> {
+  const url = new URL(`${FB_GRAPH}/${igUserId}/media_publish`);
+  url.searchParams.set("access_token", token);
+  url.searchParams.set("creation_id", creationId);
+  const res = await fetch(url, { method: "POST" });
+  const json = (await res.json()) as { id?: string; error?: { message?: string } };
+  if (res.status === 429) {
+    throw new RateLimitError("Instagram rate limit — retry later", parseRetryAfter(res.headers.get("retry-after"), 5 * 60_000));
+  }
+  if (!res.ok || !json.id) {
+    const detail = json.error?.message ?? JSON.stringify(json);
+    await logActivity({ source: "adapter:instagram", source_type: "adapter", event_type: "post_failed", summary: detail.slice(0, 500), payload: json as Record<string, unknown> });
+    throw new Error(`Instagram publish failed: ${detail}`);
+  }
+  return json.id;
+}
+
 export async function postInstagramMedia(
   workspaceId: string,
   params: { mediaUrl: string; mediaType: "IMAGE" | "VIDEO"; caption: string },
@@ -155,66 +226,67 @@ export async function postInstagramMedia(
   if (!params.mediaUrl) throw new Error("Instagram post requires an image or video");
   const { token, igUserId } = await getAccessToken(workspaceId);
 
-  const createUrl = new URL(`${FB_GRAPH}/${igUserId}/media`);
-  createUrl.searchParams.set("access_token", token);
-  createUrl.searchParams.set("caption", params.caption);
-  if (params.mediaType === "VIDEO") {
-    createUrl.searchParams.set("video_url", params.mediaUrl);
-    createUrl.searchParams.set("media_type", "REELS");
-  } else {
-    createUrl.searchParams.set("image_url", params.mediaUrl);
-  }
-  const createRes = await fetch(createUrl, { method: "POST" });
-  const createJson = (await createRes.json()) as { id?: string; error?: { message?: string; code?: number } };
-  if (createRes.status === 429) {
-    throw new RateLimitError("Instagram rate limit — retry later", parseRetryAfter(createRes.headers.get("retry-after"), 5 * 60_000));
-  }
-  const creationId = createJson.id;
-  if (!createRes.ok || !creationId) {
-    const detail = createJson.error?.message ?? JSON.stringify(createJson);
-    await logActivity({ source: "adapter:instagram", source_type: "adapter", event_type: "post_failed", summary: detail.slice(0, 500), payload: createJson as Record<string, unknown> });
-    throw new Error(`Instagram media create failed: ${detail}`);
-  }
+  const creationId = await createContainer(igUserId, token, {
+    caption: params.caption,
+    ...(params.mediaType === "VIDEO"
+      ? { video_url: params.mediaUrl, media_type: "REELS" }
+      : { image_url: params.mediaUrl }),
+  });
 
   // Video containers process asynchronously — poll until ready. Images are
   // typically ready immediately; one defensive check, no real polling loop.
-  if (params.mediaType === "VIDEO") {
-    let statusCode = "IN_PROGRESS";
-    for (let i = 0; i < 30; i++) {
-      await sleep(3000);
-      const statusUrl = new URL(`${FB_GRAPH}/${creationId}`);
-      statusUrl.searchParams.set("fields", "status_code");
-      statusUrl.searchParams.set("access_token", token);
-      const statusRes = await fetch(statusUrl);
-      const statusJson = (await statusRes.json()) as { status_code?: string };
-      statusCode = statusJson.status_code ?? statusCode;
-      if (statusCode === "FINISHED") break;
-      if (statusCode === "ERROR" || statusCode === "EXPIRED") {
-        await logActivity({ source: "adapter:instagram", source_type: "adapter", event_type: "post_failed", summary: `container ${statusCode}`, payload: { creation_id: creationId } });
-        throw new Error(`Instagram media processing failed: ${statusCode}`);
-      }
-    }
-    if (statusCode !== "FINISHED") {
-      throw new Error("Instagram media processing timed out — try publishing again shortly");
-    }
-  }
+  if (params.mediaType === "VIDEO") await waitForContainer(creationId, token);
 
-  const publishUrl = new URL(`${FB_GRAPH}/${igUserId}/media_publish`);
-  publishUrl.searchParams.set("access_token", token);
-  publishUrl.searchParams.set("creation_id", creationId);
-  const publishRes = await fetch(publishUrl, { method: "POST" });
-  const publishJson = (await publishRes.json()) as { id?: string; error?: { message?: string } };
-  if (publishRes.status === 429) {
-    throw new RateLimitError("Instagram rate limit — retry later", parseRetryAfter(publishRes.headers.get("retry-after"), 5 * 60_000));
-  }
-  const id = publishJson.id;
-  if (!publishRes.ok || !id) {
-    const detail = publishJson.error?.message ?? JSON.stringify(publishJson);
-    await logActivity({ source: "adapter:instagram", source_type: "adapter", event_type: "post_failed", summary: detail.slice(0, 500), payload: publishJson as Record<string, unknown> });
-    throw new Error(`Instagram publish failed: ${detail}`);
-  }
-
+  const id = await publishContainer(igUserId, token, creationId);
   await logActivity({ source: "adapter:instagram", source_type: "adapter", event_type: "post_success", summary: `Instagram post ${id}`, payload: { id } });
+  return { id };
+}
+
+/**
+ * Publish a multi-image carousel (2–10 slides).
+ *
+ * Three steps, per Meta's content-publishing guide: one child container per
+ * image with `is_carousel_item=true` (children carry no caption — the caption
+ * belongs to the parent), then a parent container with `media_type=CAROUSEL`
+ * and `children` as a comma-separated id list, then media_publish on the parent.
+ * `media_type` is omitted on image children; it is only set for video children.
+ *
+ * Children are created sequentially rather than in parallel: a burst of N
+ * container creations is exactly the shape that trips Meta's rate limiter, and
+ * a 429 partway through would leave orphaned containers with no post to show
+ * for them. Orphans expire on their own after 24h.
+ */
+export async function postInstagramCarousel(
+  workspaceId: string,
+  params: { imageUrls: string[]; caption: string },
+): Promise<{ id: string }> {
+  const urls = params.imageUrls.filter((u) => typeof u === "string" && u.length > 0);
+  if (urls.length < 2) throw new Error("Instagram carousel requires at least 2 images");
+  if (urls.length > 10) throw new Error("Instagram carousel allows at most 10 images");
+
+  const { token, igUserId } = await getAccessToken(workspaceId);
+
+  const childIds: string[] = [];
+  for (const imageUrl of urls) {
+    childIds.push(await createContainer(igUserId, token, { image_url: imageUrl, is_carousel_item: "true" }));
+  }
+
+  const parentId = await createContainer(igUserId, token, {
+    media_type: "CAROUSEL",
+    children: childIds.join(","),
+    caption: params.caption,
+  });
+
+  // Unlike a single image, a carousel parent has real work to do assembling its
+  // children, so always wait for FINISHED before publishing.
+  await waitForContainer(parentId, token);
+
+  const id = await publishContainer(igUserId, token, parentId);
+  await logActivity({
+    source: "adapter:instagram", source_type: "adapter", event_type: "post_success",
+    summary: `Instagram carousel ${id} (${urls.length} slides)`,
+    payload: { id, slides: urls.length },
+  });
   return { id };
 }
 

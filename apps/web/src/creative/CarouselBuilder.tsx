@@ -199,10 +199,18 @@ export function seedSlidesFromText(lines: string[]): Slide[] {
   ]
 }
 
+/**
+ * Mirrors MULTI_IMAGE_CHANNELS in apps/api/src/lib/carousel.ts. Everything else
+ * publishes a single image, so a saved carousel would send slide 01 only —
+ * worth saying before someone builds ten slides for a channel that drops nine.
+ */
+const MULTI_IMAGE_CHANNELS = new Set<string>(['instagram', 'facebook'])
+
 export function CarouselBuilder({
   initialBrandId = 'vantage',
   exportScale = 2,
   pieceId,
+  channelSlug,
   initialSlideText,
   onAttached,
 }: {
@@ -210,6 +218,8 @@ export function CarouselBuilder({
   exportScale?: number
   /** When set, the builder can save slides straight onto this content piece. */
   pieceId?: string
+  /** The piece's channel — decides whether all slides actually get published. */
+  channelSlug?: string
   /** Seed lines (usually the piece body) — one point slide per line. */
   initialSlideText?: string[]
   onAttached?: (urls: string[]) => Promise<void> | void
@@ -367,10 +377,18 @@ export function CarouselBuilder({
                     </button>
                     {saveNote && <div className="nx-mono" style={{ fontSize: 9, color: 'var(--nx-text-3)' }}>{saveNote}</div>}
                     {saveErr && <div className="vg-error" style={{ fontSize: 11 }}>{saveErr}</div>}
-                    <div className="nx-mono" style={{ fontSize: 8, color: 'var(--nx-amber)', lineHeight: 1.6 }}>
-                      ⚠ Publishing is single-image today — an auto-posted piece sends slide 01 only.
-                      All slides are stored on the piece and reviewable here.
-                    </div>
+                    {channelSlug && MULTI_IMAGE_CHANNELS.has(channelSlug) ? (
+                      <div className="nx-mono" style={{ fontSize: 8, color: 'var(--nx-text-3)', lineHeight: 1.6 }}>
+                        ✓ {channelSlug === 'instagram' ? 'Instagram' : 'Facebook'} publishes all {slides.length} slides
+                        as {channelSlug === 'instagram' ? 'a carousel' : 'one multi-photo post'}.
+                        {slides.length > 10 && ' Only the first 10 are sent.'}
+                      </div>
+                    ) : (
+                      <div className="nx-mono" style={{ fontSize: 8, color: 'var(--nx-amber)', lineHeight: 1.6 }}>
+                        ⚠ {channelSlug ? `${channelSlug} posts` : 'This channel posts'} a single image — it sends slide 01 only.
+                        Instagram and Facebook publish the whole set. All slides are stored on the piece either way.
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

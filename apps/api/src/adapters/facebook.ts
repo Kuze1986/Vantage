@@ -154,6 +154,76 @@ export async function postFacebook(
   return { id };
 }
 
+/**
+ * Publish a multi-photo Page post (2–10 images).
+ *
+ * Two steps: upload each photo to /{page-id}/photos with `published=false`,
+ * which stores it and returns an id without putting it in the feed, then create
+ * one /{page-id}/feed post referencing them via the indexed
+ * `attached_media[N]={"media_fbid":"..."}` parameter form.
+ *
+ * Unlike postFacebook's single-image path this cannot use /photos directly —
+ * that endpoint produces one post per photo, which is N posts rather than one
+ * post with N photos.
+ *
+ * Uploads run sequentially so a rate limit stops the run rather than firing N
+ * concurrent requests. Unpublished photos left behind by a partial failure are
+ * not attached to any post; they remain in the Page's photo store.
+ */
+export async function postFacebookPhotos(
+  workspaceId: string,
+  params: { message: string; imageUrls: string[] },
+): Promise<{ id: string }> {
+  const urls = params.imageUrls.filter((u) => typeof u === "string" && u.length > 0);
+  if (urls.length < 2) throw new Error("Facebook multi-photo post requires at least 2 images");
+  if (urls.length > 10) throw new Error("Facebook multi-photo post allows at most 10 images");
+  const { token, pageId } = await getAccessToken(workspaceId);
+
+  const mediaIds: string[] = [];
+  for (const imageUrl of urls) {
+    const photoUrl = new URL(`${FB_GRAPH}/${pageId}/photos`);
+    photoUrl.searchParams.set("access_token", token);
+    photoUrl.searchParams.set("url", imageUrl);
+    photoUrl.searchParams.set("published", "false");
+    const res = await fetch(photoUrl, { method: "POST" });
+    const json = (await res.json()) as { id?: string; error?: { message?: string } };
+    if (res.status === 429) {
+      throw new RateLimitError("Facebook rate limit — retry later", parseRetryAfter(res.headers.get("retry-after"), 5 * 60_000));
+    }
+    if (!res.ok || !json.id) {
+      const detail = json.error?.message ?? JSON.stringify(json);
+      await logActivity({ source: "adapter:facebook", source_type: "adapter", event_type: "post_failed", summary: detail.slice(0, 500), payload: json as Record<string, unknown> });
+      throw new Error(`Facebook photo upload failed: ${detail}`);
+    }
+    mediaIds.push(json.id);
+  }
+
+  const feedUrl = new URL(`${FB_GRAPH}/${pageId}/feed`);
+  feedUrl.searchParams.set("access_token", token);
+  feedUrl.searchParams.set("message", params.message);
+  mediaIds.forEach((mediaFbid, i) => {
+    feedUrl.searchParams.set(`attached_media[${i}]`, JSON.stringify({ media_fbid: mediaFbid }));
+  });
+  const feedRes = await fetch(feedUrl, { method: "POST" });
+  const feedJson = (await feedRes.json()) as { id?: string; post_id?: string; error?: { message?: string } };
+  if (feedRes.status === 429) {
+    throw new RateLimitError("Facebook rate limit — retry later", parseRetryAfter(feedRes.headers.get("retry-after"), 5 * 60_000));
+  }
+  const id = feedJson.post_id ?? feedJson.id;
+  if (!feedRes.ok || !id) {
+    const detail = feedJson.error?.message ?? JSON.stringify(feedJson);
+    await logActivity({ source: "adapter:facebook", source_type: "adapter", event_type: "post_failed", summary: detail.slice(0, 500), payload: feedJson as Record<string, unknown> });
+    throw new Error(`Facebook multi-photo post failed: ${detail}`);
+  }
+
+  await logActivity({
+    source: "adapter:facebook", source_type: "adapter", event_type: "post_success",
+    summary: `Facebook multi-photo post ${id} (${urls.length} photos)`,
+    payload: { id, photos: urls.length },
+  });
+  return { id };
+}
+
 export interface FacebookPackage {
   text: string;
   instructions: string;
