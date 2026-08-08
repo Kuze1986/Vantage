@@ -10,6 +10,7 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
+import { checkHostResolves, checkTargetUrl } from "../lib/target-url.js";
 import { maybeAutoQueuePiece } from "../lib/auto-queue.js";
 import {
   buildDemoForgePayload,
@@ -252,6 +253,16 @@ demoforgeRoutes.post("/jobs", async (c) => {
   const json   = await c.req.json().catch(() => ({}));
   const parsed = jobBodySchema.safeParse(json);
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+
+  // Fail fast on a mistyped recording target. z.string().url() accepts both
+  // "https://host,name.com" (a comma is legal in a hostname) and well-formed
+  // hosts that simply don't exist — historically the largest live cause of
+  // failed jobs, each costing a browser launch before ERR_NAME_NOT_RESOLVED.
+  const urlCheck = checkTargetUrl(parsed.data.url);
+  if (!urlCheck.ok) throw new HTTPException(400, { message: `Recording target rejected: ${urlCheck.reason}` });
+
+  const dnsCheck = await checkHostResolves(urlCheck.url.hostname);
+  if (!dnsCheck.ok) throw new HTTPException(400, { message: `Recording target rejected: ${dnsCheck.reason}` });
 
   const result = await demoFetch("/jobs", {
     method: "POST",

@@ -61,6 +61,29 @@ const STATUS_COLOR: Record<string, string> = {
 
 const DEFAULT_STEP: ScriptStep = { action: 'click', selector: '', narration: '' }
 
+/**
+ * Collapse a raw pipeline error into something an operator can act on.
+ *
+ * A failed job used to show only a red badge, so diagnosing meant reading a
+ * Playwright or FFmpeg stack trace. These are the classes actually seen in the
+ * job history; the full message stays in the title attribute.
+ */
+function failureCategory(msg: string): string {
+  const m = msg.toLowerCase()
+  if (m.includes('err_name_not_resolved'))        return 'target host not found — check the URL'
+  if (m.includes('err_connection'))               return 'target unreachable'
+  if (m.includes('elevenlabs_api_key') || m.includes('missing elevenlabs')) return 'narration key not set'
+  if (m.includes('status code: 402'))             return 'TTS credits exhausted'
+  if (m.includes('timeout') && m.includes('locator')) return 'selector never appeared'
+  if (m.includes('timeout'))                      return 'step timed out'
+  if (m.includes('cannot read properties of undefined')) return 'demo helper missing on target'
+  if (m.includes('cannot find ffmpeg') || m.includes("executable doesn't exist")) return 'worker environment incomplete'
+  if (m.includes('filtergraph'))                  return 'ffmpeg filter error'
+  if (m.includes('invalid url') || m.includes('navigate to invalid url')) return 'invalid recording URL'
+  // Unknown: show the first line, which is usually the useful part.
+  return msg.split('\n')[0].slice(0, 60)
+}
+
 // ── Template gallery ──────────────────────────────────────────────────────────
 // Each template records a specific Vantage feature story.
 // {BASE} is replaced with the operator-supplied base URL on load.
@@ -1082,6 +1105,14 @@ export function DemoForgePage() {
                           {j.id.slice(0, 8)}…
                         </div>
                         <Badge label={j.status} variant={j.status === 'done' ? 'active' : j.status === 'failed' ? 'critical' : 'pending'} />
+                        {j.status === 'failed' && j.error_message && (
+                          <div
+                            title={j.error_message}
+                            style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-red, #ef4444)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                          >
+                            {failureCategory(j.error_message)}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>

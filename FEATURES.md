@@ -2704,7 +2704,7 @@ engine already has it).
 
 **Status:** ✅ Shipped
 
-Vitest harness in `@vantage/api` with **257 tests across 32 files** (all passing) covering the
+Vitest harness in `@vantage/api` with **266 tests across 33 files** (all passing) covering the
 highest-risk paths: publish state
 machine (success / retry-backoff / exhausted-fail+alert / rate-limit), cadence claim lock,
 auto-generate audit gating (pass→queued, fail→regen→approved/rejected), membership/IDOR guard,
@@ -2863,13 +2863,25 @@ Two migrations are applied on the live project with no corresponding file in
 `20260609000000_email_templates.sql` still describes the table without it. A clean rebuild
 from the repo would not reproduce production.
 
-### 🟡 DemoForge failure corpus is mostly historical
-27 of 63 jobs failed, but the raw 43% overstates it. By cause: 8 × missing
-`ELEVENLABS_API_KEY` (**already fixed** — `processor.ts` now degrades to a silent video; all 8
+### ✅ DemoForge failure corpus — mostly historical, typos now caught
+27 of 63 jobs failed, but the raw 43% badly overstates it. By cause: 8 × missing
+`ELEVENLABS_API_KEY` (**already fixed** — `processor.ts` degrades to a silent video; all 8
 predate the fix), 4 × the Shift `__shiftDemoPlay` helper being absent, 4 × operator-typo'd
-hostnames (`theshift.biologyloopnexus.com`, `theshift,bioloopnexus.com`), 3 × missing local
-`ffmpeg`/Chromium, 1 × FFmpeg filtergraph binding, 1 × ElevenLabs 402. The only live,
-unaddressed class is the typo'd hostnames — there is no URL validation on job submit.
+hostnames, 3 × missing local `ffmpeg`/Chromium (developer machines, not Railway), 1 × FFmpeg
+filtergraph binding, 1 × ElevenLabs 402 (also handled). Excluding the resolved and
+local-environment classes, the live failure rate is a small fraction of 43%.
+
+The typo class is now rejected at submit. `POST /v1/demoforge/jobs` runs
+`lib/target-url.ts` before dispatching: a syntax check that catches
+`https://theshift,bioloopnexus.com` — `z.string().url()` accepts it, because a comma is legal
+in a WHATWG hostname — and a DNS pre-flight that catches
+`https://theshift.biologyloopnexus.com`, which is a flawless URL for a host that does not
+exist. Both previously cost a browser launch and surfaced ~30s later as
+`ERR_NAME_NOT_RESOLVED`; they now return an immediate 400 naming the problem. The DNS check
+**fails open** on timeouts and resolver errors, so a restricted deploy environment cannot
+block a valid job.
+
+Remaining: the `__shiftDemoPlay` class needs the Shift-side deploy described in §14.
 
 ### 🟡 Storage is not workspace-namespaced
 `vantage-media` is public-read and DemoForge writes to `demoforge/<format>/<job_id>.mp4` with
@@ -2899,7 +2911,7 @@ pieces), DemoForge (63 jobs / 36 rendered), Campaign Builder (2 campaigns), acti
 OAuth tokens, Social Kit + the seven-item Creative Studio, and the full Phase 4
 SaaS-readiness stack — multi-tenancy, tenant-aware
 scheduler, membership/roles, per-tenant credentials, claim-based publish lock, pluggable LLM
-providers across five vendors, and Threads + Bluesky. **257 tests across 32 files, plus CI.**
+providers across five vendors, and Threads + Bluesky. **266 tests across 33 files, plus CI.**
 
 **Built but never exercised:** everything downstream of publishing — engagement ingestion,
 BioLoop weight learning, Strategic Intelligence, the Audience Model, and Virality Signals.
