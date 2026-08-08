@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { getSupabaseAdmin } from "../lib/supabase.js";
+import { channelAuthMethod, supportsOAuthConnect } from "../lib/channel-auth.js";
 import { generatePkce, buildAuthorizeUrl as xAuthorizeUrl, savePendingOAuth as xSavePending } from "../adapters/x.js";
 import { buildAuthorizeUrl as liAuthorizeUrl, savePendingOAuth as liSavePending } from "../adapters/linkedin.js";
 import { buildAuthorizeUrl as redditAuthorizeUrl, savePendingOAuth as redditSavePending } from "../adapters/reddit.js";
@@ -38,12 +39,18 @@ channelsAuthedRoutes.get("/", async (c) => {
     // Adapters store credentials in auth_state.tokens on successful connect.
     // Fall back to the legacy access_token_hash column if present.
     const tokens = (ch.auth_state as { tokens?: unknown } | null)?.tokens;
+    const slug   = String(ch.slug);
     return {
       slug:           ch.slug,
       enabled:        ch.enabled,
       cadence_config: ch.cadence_config,
       connected:      !!tokens || !!ch.access_token_hash,
       connected_at:   ch.connected_at ?? null,
+      // Derived, never read from the stale channels.auth_method column — see
+      // lib/channel-auth.ts. This keeps the UI in step with what the publish
+      // path actually does, with no migration required.
+      auth_method:    channelAuthMethod(slug),
+      supports_oauth: supportsOAuthConnect(slug),
     };
   });
 

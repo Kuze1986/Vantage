@@ -3,27 +3,29 @@ import { vantageApi } from '../api/vantage'
 import type { ChannelStatus, Subscriber } from '../api/vantage'
 import { Panel, ModeTile, Badge, Button } from '../ds'
 
+/** Presentation only — icon, accent and copy. How a channel authenticates is NOT
+ *  decided here: the API derives `auth_method` / `supports_oauth` from
+ *  MANUAL_PUBLISH_CHANNELS (api/src/lib/channel-auth.ts) and sends them on each row.
+ *  A hard-coded copy here once let this page call a channel "manual" while the
+ *  publish path was posting to it automatically. */
 const CHANNEL_META: Record<string, {
   icon: string
   accent: 'amber' | 'cyan' | 'green' | 'red' | 'gold'
   description: string
   meta: string[]
-  authMethod: 'oauth' | 'api_key' | 'manual'
 }> = {
-  x:         { icon: '𝕏',  accent: 'cyan',  description: 'Post tweets and threads. OAuth 2.0 PKCE.', meta: ['OAuth 2.0', 'API v2'], authMethod: 'oauth' },
-  linkedin:  { icon: 'in', accent: 'cyan',  description: 'Publish professional posts and articles.', meta: ['OAuth 2.0', 'UGC Posts'], authMethod: 'oauth' },
-  reddit:    { icon: 'r/', accent: 'amber', description: 'Vantage picks the subreddit and writes the post; you paste it. Reddit blocks server posting.', meta: ['Manual post', 'Subreddit targeting'], authMethod: 'manual' },
-  threads:   { icon: '@',  accent: 'cyan',  description: 'Publish text posts to Threads. Meta Graph API.', meta: ['OAuth 2.0', 'Text posts'], authMethod: 'oauth' },
-  bluesky:   { icon: '🦋', accent: 'cyan',  description: 'Post to Bluesky via AT Protocol. App password.', meta: ['App password', 'AT Protocol'], authMethod: 'api_key' },
-  email:     { icon: '✉',  accent: 'green', description: 'Newsletter via Resend. HTML email.', meta: ['Resend API', 'HTML email'], authMethod: 'api_key' },
-  tiktok:    { icon: '♪',  accent: 'red',   description: 'Publish videos via the Content Posting API.', meta: ['OAuth 2.0 PKCE', 'Content Posting API'], authMethod: 'oauth' },
-  instagram: { icon: '◉',  accent: 'gold',  description: 'Publish Reels and images via the Graph API.', meta: ['Facebook Login', 'Graph API'], authMethod: 'oauth' },
-  facebook:  { icon: 'f',  accent: 'amber', description: 'Publish to your Facebook Page via the Graph API.', meta: ['Facebook Login', 'Graph API'], authMethod: 'oauth' },
+  x:         { icon: '𝕏',  accent: 'cyan',  description: 'Post tweets and threads. OAuth 2.0 PKCE.', meta: ['OAuth 2.0', 'API v2'] },
+  linkedin:  { icon: 'in', accent: 'cyan',  description: 'Publish professional posts and articles.', meta: ['OAuth 2.0', 'UGC Posts'] },
+  reddit:    { icon: 'r/', accent: 'amber', description: 'Vantage picks the subreddit and writes the post; you paste it. Reddit blocks server posting.', meta: ['Manual post', 'Subreddit targeting'] },
+  threads:   { icon: '@',  accent: 'cyan',  description: 'Publish text posts to Threads. Meta Graph API.', meta: ['OAuth 2.0', 'Text posts'] },
+  bluesky:   { icon: '🦋', accent: 'cyan',  description: 'Post to Bluesky via AT Protocol. App password.', meta: ['App password', 'AT Protocol'] },
+  email:     { icon: '✉',  accent: 'green', description: 'Newsletter via Resend. HTML email.', meta: ['Resend API', 'HTML email'] },
+  tiktok:    { icon: '♪',  accent: 'red',   description: 'Publish videos via the Content Posting API.', meta: ['OAuth 2.0 PKCE', 'Content Posting API'] },
+  instagram: { icon: '◉',  accent: 'gold',  description: 'Publish Reels and images via the Graph API.', meta: ['Facebook Login', 'Graph API'] },
+  facebook:  { icon: 'f',  accent: 'amber', description: 'Publish to your Facebook Page via the Graph API.', meta: ['Facebook Login', 'Graph API'] },
 }
 
 const CHANNEL_ORDER = ['x', 'linkedin', 'reddit', 'threads', 'bluesky', 'email', 'tiktok', 'instagram', 'facebook']
-// Reddit is deliberately absent: it's a manual channel, so there's no OAuth to start.
-const OAUTH_CHANNELS = ['x', 'linkedin', 'threads', 'tiktok', 'instagram', 'facebook']
 
 /** Mirrors DEFAULT_POSTING_HOURS in apps/api/src/lib/posting-hours.ts — shown as the
  *  placeholder for a channel with no configured hours. The API is authoritative. */
@@ -335,16 +337,28 @@ export function ChannelsPage() {
     const row  = channelMap[slug]
     const meta = CHANNEL_META[slug]
     if (!meta) return null
-    return { slug, meta, row: row ?? null, connected: row?.connected ?? false }
+    // The API is authoritative for auth_method / supports_oauth. Until a row
+    // loads we treat the channel as OAuth-but-not-yet-connectable, so no
+    // Connect button flashes before we know whether it earns one.
+    return {
+      slug,
+      meta,
+      row: row ?? null,
+      connected: row?.connected ?? false,
+      authMethod: row?.auth_method ?? 'oauth',
+      supportsOAuth: row?.supports_oauth ?? false,
+    }
   }).filter(Boolean) as Array<{
     slug: string
     meta: typeof CHANNEL_META[string]
     row: ChannelStatus | null
     connected: boolean
+    authMethod: 'oauth' | 'api_key' | 'manual'
+    supportsOAuth: boolean
   }>
 
-  const apiChannels    = liveChannels.filter((c) => c.meta.authMethod !== 'manual')
-  const manualChannels = liveChannels.filter((c) => c.meta.authMethod === 'manual')
+  const apiChannels    = liveChannels.filter((c) => c.authMethod !== 'manual')
+  const manualChannels = liveChannels.filter((c) => c.authMethod === 'manual')
   // Counted over apiChannels only — a manual channel has nothing to connect, so
   // including it in the denominator would leave the header permanently short.
   const connectedCount = apiChannels.filter((c) => c.connected).length
@@ -367,7 +381,7 @@ export function ChannelsPage() {
 
       <Panel title="API Channels" titleAccent="amber">
         <div className="vg-channel-grid">
-          {apiChannels.map(({ slug, meta, row, connected }) => (
+          {apiChannels.map(({ slug, meta, row, connected, supportsOAuth }) => (
             <div key={slug} style={{ display: 'flex', flexDirection: 'column' }}>
               <ModeTile
                 name={slug.toUpperCase()}
@@ -383,7 +397,7 @@ export function ChannelsPage() {
               />
 
               {/* OAuth connect button for OAuth channels */}
-              {meta.authMethod === 'oauth' && OAUTH_CHANNELS.includes(slug) && !connected && (
+              {supportsOAuth && !connected && (
                 <button
                   type="button"
                   className="nx-btn nx-btn--secondary nx-btn--sm nx-btn--full"
@@ -395,7 +409,7 @@ export function ChannelsPage() {
                 </button>
               )}
               {/* Already connected — show disconnect hint */}
-              {meta.authMethod === 'oauth' && OAUTH_CHANNELS.includes(slug) && connected && (
+              {supportsOAuth && connected && (
                 <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', marginTop: 6, textAlign: 'center' }}>
                   ✓ Connected — click tile to configure cadence
                 </p>
