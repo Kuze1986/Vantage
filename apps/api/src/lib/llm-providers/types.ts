@@ -14,6 +14,14 @@ export interface GenerationOptions {
   top_p?: number;               // 0-1, nucleus sampling
   stop_sequences?: string[];    // sequences to stop at
   system_prompt?: string;       // system context
+  /**
+   * Per-call model override. Undefined = the provider's own default.
+   *
+   * Must be passed per call rather than stored on the provider: the registry holds
+   * one shared singleton per provider, so mutating instance state would race across
+   * concurrent requests.
+   */
+  model?: string;
 }
 
 /**
@@ -32,6 +40,12 @@ export interface LLMProvider {
   readonly name: string;
   readonly displayName: string;
   readonly available: boolean;  // false if API key not configured
+
+  /** Model used when a call supplies no `options.model` (env override → spec default). */
+  readonly defaultModel: string;
+
+  /** Suggested model ids for the Settings UI. Not a whitelist — any id is accepted. */
+  readonly candidateModels: readonly string[];
 
   /**
    * Generate a simple text completion

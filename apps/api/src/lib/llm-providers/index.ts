@@ -6,6 +6,8 @@
 import { AnthropicProvider } from './anthropic.js';
 import { OpenAIProvider } from './openai.js';
 import { GrokProvider } from './grok.js';
+import { GeminiProvider } from './gemini.js';
+import { KimiProvider } from './kimi.js';
 import type {
   LLMProvider,
   LLMProviderRegistry,
@@ -16,6 +18,7 @@ import {
 } from './types.js';
 
 export * from './types.js';
+export * from './models.js';
 
 /**
  * Default registry instance
@@ -26,6 +29,18 @@ const registry = new Map<string, LLMProvider>();
 registry.set('anthropic', new AnthropicProvider());
 registry.set('openai', new OpenAIProvider());
 registry.set('grok', new GrokProvider());
+registry.set('gemini', new GeminiProvider());
+registry.set('kimi', new KimiProvider());
+
+/**
+ * Fallback order for callers that express no preference.
+ *
+ * Gemini and Kimi are APPENDED, never inserted: the dozen or so
+ * `getPreferredLLMProvider()` call sites outside Kuze/Ilita rely on this order, and
+ * appending guarantees they only ever reach a new provider when none of the original
+ * three has a key — i.e. in a configuration that previously threw outright.
+ */
+const FALLBACK_ORDER = ['anthropic', 'openai', 'grok', 'gemini', 'kimi'] as const;
 
 /**
  * Get a specific LLM provider by name
@@ -48,14 +63,19 @@ export function getPreferredLLMProvider(preferredName?: string): LLMProvider {
   if (preferredName) {
     try {
       return getLLMProvider(preferredName);
-    } catch {
-      // Fall through to default
+    } catch (err) {
+      // An unknown or unconfigured name falls through to the default order — that is
+      // the documented contract. Anything else is a real bug and must not be swallowed.
+      if (
+        !(err instanceof LLMProviderNotFoundError) &&
+        !(err instanceof LLMProviderUnavailableError)
+      ) {
+        throw err;
+      }
     }
   }
 
-  // Default: Anthropic (already integrated), then OpenAI, then Grok
-  const defaults = ['anthropic', 'openai', 'grok'];
-  for (const name of defaults) {
+  for (const name of FALLBACK_ORDER) {
     const provider = registry.get(name);
     if (provider?.available) {
       return provider;

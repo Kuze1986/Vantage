@@ -14,18 +14,35 @@ import {
   LLMProviderUnavailableError,
   LLMProviderValidationError,
 } from './types.js';
+import {
+  PROVIDER_SPECS,
+  providerApiKey,
+  providerBaseUrl,
+  providerConfigured,
+  providerDefaultModel,
+} from './models.js';
 
 export class AnthropicProvider implements LLMProvider {
   readonly name = 'anthropic';
-  readonly displayName = 'Claude (Anthropic)';
+  readonly displayName = PROVIDER_SPECS.anthropic.displayName;
 
   private client: Anthropic | null = null;
-  // Matches the previous kuze/ilita default so behaviour is unchanged when
-  // ANTHROPIC_MODEL is unset. Override via ANTHROPIC_MODEL.
-  private model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
 
   get available(): boolean {
-    return !!process.env.ANTHROPIC_API_KEY;
+    return providerConfigured('anthropic');
+  }
+
+  /** Getter, not a field: a field initializer would freeze the env read at import time. */
+  get defaultModel(): string {
+    return providerDefaultModel('anthropic');
+  }
+
+  get candidateModels(): readonly string[] {
+    return PROVIDER_SPECS.anthropic.candidates;
+  }
+
+  private modelFor(options?: GenerationOptions): string {
+    return options?.model?.trim() || this.defaultModel;
   }
 
   private ensureClient(): Anthropic {
@@ -33,8 +50,10 @@ export class AnthropicProvider implements LLMProvider {
       throw new LLMProviderUnavailableError(this.name);
     }
     if (!this.client) {
+      const baseURL = providerBaseUrl('anthropic');
       this.client = new Anthropic({
-        apiKey: process.env.ANTHROPIC_API_KEY,
+        apiKey: providerApiKey('anthropic'),
+        ...(baseURL ? { baseURL } : {}),
       });
     }
     return this.client;
@@ -47,7 +66,7 @@ export class AnthropicProvider implements LLMProvider {
     const client = this.ensureClient();
 
     const response = await client.messages.create({
-      model: this.model,
+      model: this.modelFor(options),
       max_tokens: options?.max_tokens || 2048,
       temperature: options?.temperature,
       system: options?.system_prompt,
@@ -86,7 +105,7 @@ export class AnthropicProvider implements LLMProvider {
     };
 
     const response = await client.messages.create({
-      model: this.model,
+      model: this.modelFor(options),
       max_tokens: options?.max_tokens || 2048,
       temperature: options?.temperature,
       system: `${options?.system_prompt || ''}
@@ -150,7 +169,7 @@ ${JSON.stringify(jsonSchema.input_schema, null, 2)}`,
     try {
       const client = this.ensureClient();
       const response = await client.messages.create({
-        model: this.model,
+        model: this.defaultModel,
         max_tokens: 10,
         messages: [
           {

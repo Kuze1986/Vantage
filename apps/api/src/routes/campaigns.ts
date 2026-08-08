@@ -38,6 +38,9 @@ import { loadProductProfile } from '../lib/product-profile.js';
 import { launchStatusForMedia } from '../lib/auto-queue.js';
 import { listShiftPacks, getShiftPack } from '../lib/shift-packs.js';
 import { syncCampaignKpis } from '../lib/campaign-kpi.js';
+import { tagUrls } from '../lib/utm.js';
+import { pickPostingHour, scheduledAtOnDate, type PostingHoursConfig } from '../lib/posting-hours.js';
+import { timelineDayCount, MAX_TIMELINE_DAYS } from '../lib/campaigns.js';
 
 export const campaignRoutes = new Hono();
 
@@ -547,7 +550,7 @@ campaignRoutes.post('/:id/timeline/generate', async (c) => {
   const cadence = (campaign.cadence_config ?? {}) as { weeks?: number; periodsPerWeek?: number };
   const weeks = Math.max(1, Number(cadence.weeks ?? 3));
   const periodsPerWeek = Math.max(1, Number(cadence.periodsPerWeek ?? 1));
-  const total = Math.min(weeks * periodsPerWeek, 60); // hard cap
+  const total = timelineDayCount(weeks, periodsPerWeek);
 
   const pillars = (campaign.messaging_pillars ?? []) as { id: string; name: string; tone?: string; description?: string }[];
   const channelMix = (campaign.channel_mix ?? {}) as Record<string, unknown>;
@@ -672,7 +675,15 @@ Produce exactly ${total} day objects, sequenced as a coherent narrative arc (awa
     payload: { campaign_id: campaignId, days_count: days.length },
   });
 
-  return c.json({ timeline: inserted ?? [] }, 201);
+  // Surface the cap rather than silently truncating: a cadence asking for more days
+  // than MAX_TIMELINE_DAYS used to just come back short with no explanation.
+  const requestedDays = weeks * periodsPerWeek;
+  const capped =
+    requestedDays > MAX_TIMELINE_DAYS
+      ? `Cadence requested ${requestedDays} days; capped at ${MAX_TIMELINE_DAYS}.`
+      : null;
+
+  return c.json({ timeline: inserted ?? [], max_timeline_days: MAX_TIMELINE_DAYS, capped }, 201);
 });
 
 // POST /v1/campaigns/:id/launch — generate + audit a content piece per day channel
@@ -760,6 +771,29 @@ campaignRoutes.post('/:id/launch', async (c) => {
   const demoBaseUrl = productProfile.product_base_url || undefined;
   const allowedChannels = new Set<string>(CAMPAIGN_CHANNELS);
 
+  // Campaign description is otherwise stranded at timeline-generation time: the copy
+  // generator (kuze) only ever sees topic_text + brand_voice, so campaign-level intent
+  // never reaches pack-seeded or hand-written days. Prepend it as framing — labelled so
+  // the model writes *within* the goal rather than *about* it.
+  const campaignBrief =
+    typeof campaign.description === 'string' && campaign.description.trim()
+      ? `Campaign context (write within this goal, do not write about it): ${campaign.description.trim()}`
+      : '';
+
+  // Send times come from each channel's configured posting_hours — the same config the
+  // autopilot cadence uses. Launch previously hardcoded 09:00 UTC for every piece, which
+  // both ignored this config and fired all channels on a day simultaneously.
+  const { data: channelRows } = await sb
+    .from('channels')
+    .select('slug, cadence_config')
+    .eq('workspace_id', workspaceId);
+  const postingConfigBySlug = new Map<string, PostingHoursConfig>(
+    (channelRows ?? []).map((row) => [
+      row.slug as string,
+      (row.cadence_config ?? null) as PostingHoursConfig,
+    ]),
+  );
+
   for (const day of timeline) {
     const idea = (day.content_ideas as Idea[] | null)?.[0];
     if (!idea?.title) {
@@ -797,10 +831,12 @@ campaignRoutes.post('/:id/launch', async (c) => {
       ideaBrandId: idea.brand_id,
       campaignDefaultBrandId: campaignDefaultBrand,
     });
-    const topicText = `${idea.title}\n\n${idea.outline ?? ''}`.trim();
+    const topicText = [campaignBrief, `${idea.title}\n\n${idea.outline ?? ''}`.trim()]
+      .filter(Boolean)
+      .join('\n\n');
     const published = Array.isArray(day.published_pieces) ? [...day.published_pieces] : [];
 
-    for (const channel of channelsForDay) {
+    for (const [channelIndex, channel] of channelsForDay.entries()) {
       const templateId = resolveTemplateId({
         ideaTemplateId: idea.demoforge_template_id,
         campaignDefaultTemplateId: campaignDefaultTemplate,
@@ -875,7 +911,15 @@ campaignRoutes.post('/:id/launch', async (c) => {
 
         let mediaStatus: 'none' | 'pending' | 'failed' = visualType === 'none' ? 'none' : 'pending';
 
-        const scheduledFor = `${day.date_scheduled}T09:00:00Z`;
+        // Stagger by day + channel position so a multi-channel day walks the channel's
+        // configured hours instead of firing every piece at the same instant.
+        const postingHour = pickPostingHour(
+          postingConfigBySlug.get(channel),
+          day.day_number + channelIndex,
+        );
+        const scheduledFor =
+          scheduledAtOnDate(day.date_scheduled, postingHour)
+          ?? new Date().toISOString();
         // Audit fail → rejected (not queued). Pass + media ready → queued (autopilot).
         // Pass + media pending → approved until DemoForge / Social Kit write-back.
         const pieceStatus = !auditPassed
@@ -900,6 +944,27 @@ campaignRoutes.post('/:id/launch', async (c) => {
           .select('id')
           .single();
         if (pieceErr || !piece) throw new Error(pieceErr?.message ?? 'Failed to create content piece');
+
+        // UTM tags need the piece id, which only exists after the insert — so tag and
+        // write back. Without this, campaign links publish untagged and every /try visit
+        // is unattributable. utm_campaign carries the campaign id so analytics can split
+        // campaigns apart. tagUrls only rewrites http(s) matches, so non-URL payload
+        // fields (brand_id, visual_type, …) pass through untouched.
+        let tagged = false;
+        for (const [k, v] of Object.entries(payload)) {
+          if (typeof v !== 'string') continue;
+          const next = tagUrls(v, channel, piece.id, campaignId);
+          if (next !== v) {
+            payload[k] = next;
+            tagged = true;
+          }
+        }
+        if (tagged) {
+          await sb
+            .from('content_pieces')
+            .update({ content_payload: payload, updated_at: new Date().toISOString() })
+            .eq('id', piece.id);
+        }
 
         let demoforgeJobId: string | undefined;
 

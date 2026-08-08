@@ -26,7 +26,7 @@ export async function auditContent(params: {
   brand_voice:  string;
   workspace_id?: string;
 }): Promise<AuditResult> {
-  const provider = await resolveProvider("audit", params.workspace_id);
+  const provider = await resolveProvider("audit", params.workspace_id, "ilita.auditContent");
   const text = (await provider.generateCompletion(
     ilitaAuditUserPrompt({
       content:     params.content,

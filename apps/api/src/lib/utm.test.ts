@@ -27,6 +27,17 @@ describe("tagUrls", () => {
     expect(out.match(/utm_source=/g)).toHaveLength(1);
   });
 
+  it("uses the supplied campaign id for utm_campaign", () => {
+    const out = tagUrls("https://example.com", "x", "p", "camp-123");
+    expect(out).toContain("utm_campaign=camp-123");
+    expect(out).not.toContain("utm_campaign=vantage");
+  });
+
+  it("falls back to the default campaign when passed an empty string", () => {
+    const out = tagUrls("https://example.com", "x", "p", "");
+    expect(out).toContain("utm_campaign=vantage");
+  });
+
   it("does not break trailing punctuation in prose", () => {
     const out = tagUrls("visit https://example.com.", "x", "p");
     // the URL is tagged; the sentence period is handled by the URL regex boundary

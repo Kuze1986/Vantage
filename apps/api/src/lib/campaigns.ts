@@ -11,6 +11,22 @@ import type { StructuredSchema } from './llm-providers/types.js';
 // Types
 // ============================================================================
 
+/**
+ * Upper bound on generated timeline days. Guards the generation prompt (and the
+ * launch fan-out, which is days × channels) from an unbounded cadence_config.
+ */
+export const MAX_TIMELINE_DAYS = 60;
+
+/**
+ * Number of content days a campaign's cadence produces. The web builder mirrors this
+ * so the form can show the real count before generating — keep the two in step.
+ */
+export function timelineDayCount(weeks: number, periodsPerWeek: number): number {
+  const w = Math.max(1, Number.isFinite(weeks) ? Math.trunc(weeks) : 1);
+  const p = Math.max(1, Number.isFinite(periodsPerWeek) ? Math.trunc(periodsPerWeek) : 1);
+  return Math.min(w * p, MAX_TIMELINE_DAYS);
+}
+
 export interface MessagingPillar {
   id: string;
   name: string;

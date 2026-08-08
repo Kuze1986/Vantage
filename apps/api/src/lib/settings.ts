@@ -13,8 +13,15 @@ export interface PipelineSettings {
   evergreen_threshold:   number;    // min engagement events to qualify for recycling (default 3)
   evergreen_recycle_days: number;   // days before a recycled topic can be used again (default 90)
   // Multi-LLM: per-task provider override. "" = inherit env default (LLM_PROVIDER_*).
+  // Accepts a bare provider name ("anthropic") or a failover pool
+  // ("openai:gpt-4o,anthropic"), so pre-existing rows keep working unchanged.
   llm_provider_generate: string;    // content generation (Kuze)
   llm_provider_audit:    string;    // compliance audit (Ilita)
+  // Per-task model override, applied to the head slot. "" = provider default.
+  llm_model_generate:    string;
+  llm_model_audit:       string;
+  // When false, a task uses only its head slot — no failover to other providers.
+  llm_failover_enabled:  boolean;
 }
 
 const DEFAULTS: PipelineSettings = {
@@ -26,6 +33,9 @@ const DEFAULTS: PipelineSettings = {
   evergreen_recycle_days: 90,
   llm_provider_generate: "",
   llm_provider_audit:    "",
+  llm_model_generate:    "",
+  llm_model_audit:       "",
+  llm_failover_enabled:  true,
 };
 
 export async function loadSettings(workspaceId: string): Promise<PipelineSettings> {
@@ -46,6 +56,9 @@ export async function loadSettings(workspaceId: string): Promise<PipelineSetting
       evergreen_recycle_days: typeof map.evergreen_recycle_days === "number"  ? map.evergreen_recycle_days : DEFAULTS.evergreen_recycle_days,
       llm_provider_generate:  typeof map.llm_provider_generate  === "string"  ? map.llm_provider_generate  : DEFAULTS.llm_provider_generate,
       llm_provider_audit:     typeof map.llm_provider_audit     === "string"  ? map.llm_provider_audit     : DEFAULTS.llm_provider_audit,
+      llm_model_generate:     typeof map.llm_model_generate     === "string"  ? map.llm_model_generate     : DEFAULTS.llm_model_generate,
+      llm_model_audit:        typeof map.llm_model_audit        === "string"  ? map.llm_model_audit        : DEFAULTS.llm_model_audit,
+      llm_failover_enabled:   typeof map.llm_failover_enabled   === "boolean" ? map.llm_failover_enabled   : DEFAULTS.llm_failover_enabled,
     };
   } catch {
     return { ...DEFAULTS };

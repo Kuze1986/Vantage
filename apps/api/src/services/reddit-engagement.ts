@@ -16,10 +16,28 @@ import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import { recordGrowthEvent, engagementKind } from "../lib/growth.js";
 import { recordCampaignEngagement } from "../lib/campaign-kpi.js";
+import { redditFetch, redditUserAgent } from "../adapters/reddit.js";
 
 const REDDIT_BY_ID = "https://www.reddit.com/by_id";
-const USER_AGENT   = "vantage-marketing-bot/1.0";
 const POLL_HOUR_MS = 2 * 60 * 60_000; // 2-hour poll window for dedup key
+
+/**
+ * Reddit is a manual channel, so external_post_id is whatever permalink the
+ * human pasted into the Queue page — not the bare post id the automated path
+ * used to store. Pull the id back out of a permalink
+ * (…/r/<sub>/comments/<id>/<slug>) so /by_id still resolves. Values that are
+ * already an id or a t3_ fullname pass through untouched.
+ */
+export function toRedditPostId(raw: string): string | null {
+  const v = raw.trim();
+  if (!v) return null;
+  const fromPermalink = v.match(/\/comments\/([a-z0-9]+)/i);
+  if (fromPermalink) return fromPermalink[1];
+  if (/^t3_[a-z0-9]+$/i.test(v)) return v.slice(3);
+  if (/^[a-z0-9]+$/i.test(v)) return v;
+  // A URL we don't recognise — polling it would just 404 against /by_id.
+  return null;
+}
 
 type RedditChild = {
   data?: {
@@ -56,12 +74,16 @@ export async function pollRedditEngagement(workspaceId: string): Promise<{ polle
   }
   if (!pieces?.length) return { polled: 0, inserted: 0 };
 
-  // De-duplicate post IDs (in case multiple pieces share one external post)
-  const postIds = [...new Set(pieces.map((p) => p.external_post_id as string))];
+  // De-duplicate post IDs (in case multiple pieces share one external post).
+  // Pieces whose external_post_id isn't resolvable to a Reddit id (e.g. someone
+  // pasted a non-Reddit URL) are dropped here rather than poisoning a chunk.
   const pieceByPostId = new Map<string, string>();
   for (const p of pieces) {
-    if (p.external_post_id) pieceByPostId.set(p.external_post_id as string, p.id as string);
+    const id = toRedditPostId(String(p.external_post_id ?? ""));
+    if (id) pieceByPostId.set(id, p.id as string);
   }
+  const postIds = [...pieceByPostId.keys()];
+  if (!postIds.length) return { polled: 0, inserted: 0 };
 
   // Build a comma-separated fullname list (max 25 per Reddit API limit)
   const CHUNK = 25;
@@ -75,8 +97,11 @@ export async function pollRedditEngagement(workspaceId: string): Promise<{ polle
 
     let listing: RedditListingResponse;
     try {
-      const res = await fetch(url, {
-        headers: { "User-Agent": USER_AGENT },
+      // Shared with the adapter so this inherits the compliant User-Agent and
+      // REDDIT_PROXY_URL routing — "vantage-marketing-bot/1.0" was exactly the
+      // kind of generic UA Reddit's edge rejects.
+      const res = await redditFetch(url, {
+        headers: { "User-Agent": redditUserAgent() },
       });
       if (!res.ok) {
         console.warn(`[reddit-engagement] fetch failed for chunk ${i}: ${res.status}`);

@@ -4,6 +4,8 @@ import { z } from "zod";
 import { loadSettings, patchSettings } from "../lib/settings.js";
 import { listLLMProviders } from "../lib/llm-providers/index.js";
 import { loadProductProfile, patchProductProfile } from "../lib/product-profile.js";
+import { countPoolEntries, parsePool } from "../lib/llm-pool.js";
+import { resolveChain } from "../lib/llm.js";
 
 export const settingsRoutes = new Hono();
 
@@ -35,18 +37,48 @@ settingsRoutes.patch("/product-profile", async (c) => {
   return c.json({ ok: true, profile });
 });
 
-// GET /v1/settings/llm-providers — list providers and whether each is configured
+// GET /v1/settings/llm-providers — list providers, availability, and model options
 settingsRoutes.get("/llm-providers", (c) => {
   const providers = listLLMProviders().map((p) => ({
-    name:        p.name,
-    displayName: p.displayName,
-    available:   p.available,
+    name:            p.name,
+    displayName:     p.displayName,
+    available:       p.available,
+    defaultModel:    p.defaultModel,
+    candidateModels: [...p.candidateModels],
   }));
   return c.json({ providers });
 });
 
-// "" is allowed and means "inherit the env default".
-const providerChoice = z.enum(["anthropic", "openai", "gemini", "grok", "kimi", ""]);
+// GET /v1/settings/llm-resolution — the chain each task actually resolves to.
+// Makes "which model am I on right now" a fact on screen rather than a guess.
+settingsRoutes.get("/llm-resolution", async (c) => {
+  const ws = c.get("workspaceId");
+  const [generate, audit] = await Promise.all([
+    resolveChain("generate", ws),
+    resolveChain("audit", ws),
+  ]);
+  return c.json({ generate, audit });
+});
+
+/**
+ * Provider choice: "" (inherit), a bare provider name, or a failover pool
+ * ("openai:gpt-4o,anthropic"). Validated by parsing rather than by an enum — the old
+ * enum accepted "gemini"/"kimi" whether or not they existed, so a user could save a
+ * value that silently did nothing. Requiring every entry to parse makes it honest.
+ */
+const providerChoice = z
+  .string()
+  .max(200)
+  .refine((v) => v === "" || parsePool(v).length === countPoolEntries(v), {
+    message:
+      "must be a comma-separated list of `provider` or `provider:model` using known providers",
+  });
+
+/** Any model id the provider accepts — deliberately not a whitelist. */
+const modelChoice = z
+  .string()
+  .max(120)
+  .regex(/^[A-Za-z0-9._:\/-]*$/, "invalid model id");
 
 const patchSchema = z.object({
   dedup_days:            z.number().int().min(1).max(365).optional(),
@@ -55,6 +87,9 @@ const patchSchema = z.object({
   active_verticals:      z.array(z.string()).optional(),
   llm_provider_generate: providerChoice.optional(),
   llm_provider_audit:    providerChoice.optional(),
+  llm_model_generate:    modelChoice.optional(),
+  llm_model_audit:       modelChoice.optional(),
+  llm_failover_enabled:  z.boolean().optional(),
 });
 
 // PATCH /v1/settings — update one or more settings

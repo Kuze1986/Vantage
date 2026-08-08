@@ -17,6 +17,7 @@ import { sendAlert } from "../lib/alert.js";
 import { RateLimitError } from "../lib/rate-limit-error.js";
 import { recordGrowthEvent } from "../lib/growth.js";
 import { isMediaGated, mediaGateReason, withForceMedia } from "../lib/media-gate.js";
+import { MANUAL_PUBLISH_CHANNELS } from "../lib/publish-pack.js";
 import { resolveCampaignIdForPiece } from "../lib/campaign-kpi.js";
 import { channelFormatMap } from "@vantage/prompts";
 import type { ChannelSlug } from "@vantage/prompts";
@@ -24,13 +25,13 @@ import type { ChannelSlug } from "@vantage/prompts";
 // Adapter imports — each channel routes to its own adapter
 import { postTweet } from "../adapters/x.js";
 import { postLinkedIn } from "../adapters/linkedin.js";
-import { postToSubreddit } from "../adapters/reddit.js";
 import { postThread } from "../adapters/threads.js";
 import { postBluesky } from "../adapters/bluesky.js";
 import { sendEmail } from "../adapters/email.js";
 import { postTikTokVideo } from "../adapters/tiktok.js";
 import { postInstagramMedia } from "../adapters/instagram.js";
 import { postFacebook } from "../adapters/facebook.js";
+import { pickPostingHour } from "../lib/posting-hours.js";
 
 const TICK_MS               = 60_000;            // check queue every 60 seconds
 const AUTO_GEN_TICK         = 300_000;           // check auto-generate every 5 minutes
@@ -163,27 +164,9 @@ export async function publishPiece(workspaceId: string, piece: ContentPieceRow, 
         externalId = id;
         break;
       }
-      case "reddit": {
-        const cadence = channelRow.cadence_config as { subreddits?: string[]; subreddit_index?: number };
-        const subs = cadence.subreddits ?? [];
-        if (subs.length === 0) throw new Error("No subreddits configured for Reddit channel");
-        // 3A-4: round-robin index instead of random
-        const idx       = (cadence.subreddit_index ?? 0) % subs.length;
-        const subreddit = subs[idx];
-        const nextIndex = (idx + 1) % subs.length;
-        const sbAdmin   = getSupabaseAdmin();
-        await sbAdmin.from("channels").update({
-          cadence_config: { ...cadence, subreddit_index: nextIndex },
-        }).eq("workspace_id", workspaceId).eq("slug", "reddit");
-        const { id } = await postToSubreddit(workspaceId, {
-          subreddit,
-          title: String(payload.title ?? payload.body ?? "").slice(0, 300),
-          body:  String(payload.body ?? ""),
-          is_link_post: payload.is_link_post === true,
-        });
-        externalId = id;
-        break;
-      }
+      // No "reddit" case: it's in MANUAL_PUBLISH_CHANNELS and the tick skips it
+      // before ever getting here. If one somehow reaches this switch, the default
+      // below fails it loudly rather than silently posting nothing.
       case "threads": {
         const { id } = await postThread(workspaceId, String(payload.body ?? ""));
         externalId = id;
@@ -407,6 +390,13 @@ export async function cadenceTickForWorkspace(workspaceId: string): Promise<void
       continue;
     }
 
+    // Manual channels (Reddit) can't be posted by a server at all, so skip them
+    // BEFORE the claim below. Claiming would flip the piece to 'publishing',
+    // publishPiece() would throw, and it would land in 'failed' — burying a
+    // piece that is perfectly fine and just waiting on a human. Left untouched
+    // in 'queued', it keeps showing its Publish Pack on the Queue page.
+    if (MANUAL_PUBLISH_CHANNELS.has(piece.channel_slug)) continue;
+
     // 2c: Atomic claim — flip queued→publishing only if still queued. The WHERE
     // status='queued' makes this a compare-and-swap: a concurrent tick (or a
     // second instance) that already claimed this row updates zero rows here and
@@ -546,8 +536,7 @@ export async function autoGenerateTickForWorkspace(workspaceId: string): Promise
 
         if (auditResult.verdict === "pass") {
           // Auto-approve and queue it
-          const postingHours = ch.cadence_config.posting_hours ?? [9, 12, 17]; // default UTC hours
-          const hour = postingHours[i % postingHours.length];
+          const hour = pickPostingHour(ch.cadence_config, i);
           const scheduledFor = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), hour, 0, 0)).toISOString();
 
           await sb.from("content_pieces").update({

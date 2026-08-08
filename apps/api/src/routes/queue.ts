@@ -244,9 +244,23 @@ queueRoutes.get("/:id/publish-pack", async (c) => {
 
   const channel = String(piece.channel_slug ?? "");
   if (!MANUAL_PUBLISH_CHANNELS.has(channel)) {
+    // Derived from the set so this message can't drift as channels move between
+    // automated and manual.
+    const manual = [...MANUAL_PUBLISH_CHANNELS].join(" / ") || "(none)";
     throw new HTTPException(400, {
-      message: `Publish Pack is only for TikTok / Instagram / Facebook (got '${channel}')`,
+      message: `Publish Pack is only for manual channels: ${manual} (got '${channel}')`,
     });
+  }
+
+  // Reddit's pack needs to name the subreddit to post into. Read the current
+  // round-robin target without advancing it — building a pack is a read.
+  let subreddit: string | null = null;
+  if (channel === "reddit") {
+    const { data: ch } = await sb.from("channels")
+      .select("cadence_config").eq("workspace_id", ws).eq("slug", "reddit").maybeSingle();
+    const cadence = (ch?.cadence_config ?? {}) as { subreddits?: string[]; subreddit_index?: number };
+    const subs = cadence.subreddits ?? [];
+    if (subs.length) subreddit = subs[(cadence.subreddit_index ?? 0) % subs.length];
   }
 
   const payload =
@@ -262,6 +276,7 @@ queueRoutes.get("/:id/publish-pack", async (c) => {
       videoUrl: piece.video_url,
       imageUrl: piece.image_url,
       mediaStatus: piece.media_status,
+      subreddit,
     }),
   );
 });

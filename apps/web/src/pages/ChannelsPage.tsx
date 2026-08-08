@@ -12,7 +12,7 @@ const CHANNEL_META: Record<string, {
 }> = {
   x:         { icon: '𝕏',  accent: 'cyan',  description: 'Post tweets and threads. OAuth 2.0 PKCE.', meta: ['OAuth 2.0', 'API v2'], authMethod: 'oauth' },
   linkedin:  { icon: 'in', accent: 'cyan',  description: 'Publish professional posts and articles.', meta: ['OAuth 2.0', 'UGC Posts'], authMethod: 'oauth' },
-  reddit:    { icon: 'r/', accent: 'amber', description: 'Post to subreddits with subreddit-aware cadence.', meta: ['OAuth 2.0', 'Subreddit targeting'], authMethod: 'oauth' },
+  reddit:    { icon: 'r/', accent: 'amber', description: 'Vantage picks the subreddit and writes the post; you paste it. Reddit blocks server posting.', meta: ['Manual post', 'Subreddit targeting'], authMethod: 'manual' },
   threads:   { icon: '@',  accent: 'cyan',  description: 'Publish text posts to Threads. Meta Graph API.', meta: ['OAuth 2.0', 'Text posts'], authMethod: 'oauth' },
   bluesky:   { icon: '🦋', accent: 'cyan',  description: 'Post to Bluesky via AT Protocol. App password.', meta: ['App password', 'AT Protocol'], authMethod: 'api_key' },
   email:     { icon: '✉',  accent: 'green', description: 'Newsletter via Resend. HTML email.', meta: ['Resend API', 'HTML email'], authMethod: 'api_key' },
@@ -22,7 +22,12 @@ const CHANNEL_META: Record<string, {
 }
 
 const CHANNEL_ORDER = ['x', 'linkedin', 'reddit', 'threads', 'bluesky', 'email', 'tiktok', 'instagram', 'facebook']
-const OAUTH_CHANNELS = ['x', 'linkedin', 'reddit', 'threads', 'tiktok', 'instagram', 'facebook']
+// Reddit is deliberately absent: it's a manual channel, so there's no OAuth to start.
+const OAUTH_CHANNELS = ['x', 'linkedin', 'threads', 'tiktok', 'instagram', 'facebook']
+
+/** Mirrors DEFAULT_POSTING_HOURS in apps/api/src/lib/posting-hours.ts — shown as the
+ *  placeholder for a channel with no configured hours. The API is authoritative. */
+const DEFAULT_POSTING_HOURS = [9, 12, 17]
 
 function CadenceForm({ slug, config, onSave }: {
   slug: string
@@ -31,7 +36,7 @@ function CadenceForm({ slug, config, onSave }: {
 }) {
   const [postsPerDay, setPostsPerDay]   = React.useState(String(config.posts_per_day ?? 0))
   const [autoApprove, setAutoApprove]   = React.useState(config.auto_approve ?? false)
-  const [hours, setHours]               = React.useState((config.posting_hours ?? [9, 12, 17]).join(', '))
+  const [hours, setHours]               = React.useState((config.posting_hours ?? DEFAULT_POSTING_HOURS).join(', '))
   const [subreddits, setSubreddits]     = React.useState((config.subreddits ?? []).join(', '))
   const [saving, setSaving]             = React.useState(false)
   const [saved, setSaved]               = React.useState(false)
@@ -338,9 +343,11 @@ export function ChannelsPage() {
     connected: boolean
   }>
 
-  const connectedCount = liveChannels.filter((c) => c.connected).length
   const apiChannels    = liveChannels.filter((c) => c.meta.authMethod !== 'manual')
   const manualChannels = liveChannels.filter((c) => c.meta.authMethod === 'manual')
+  // Counted over apiChannels only — a manual channel has nothing to connect, so
+  // including it in the denominator would leave the header permanently short.
+  const connectedCount = apiChannels.filter((c) => c.connected).length
 
   return (
     <>
@@ -350,7 +357,7 @@ export function ChannelsPage() {
           <p className="vg-page-sub">Connect distribution channels and configure posting cadence</p>
         </div>
         <Badge
-          label={`${connectedCount} / ${liveChannels.length} connected`}
+          label={`${connectedCount} / ${apiChannels.length} connected`}
           variant={connectedCount > 0 ? 'active' : 'soon'}
         />
       </div>

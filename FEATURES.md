@@ -231,10 +231,11 @@ at the adapter level before sending via Resend.
 - `packages/prompts/src/index.ts` — system and user prompt builders, format schemas
 - `apps/api/src/lib/utm.ts` — URL tagging utility
 
-**Configuration:** Kuze runs on the workspace's chosen generation provider (default Anthropic).
-At least one provider key must be set — `ANTHROPIC_API_KEY` (+ optional `ANTHROPIC_MODEL`,
-default `claude-sonnet-4-6`), `OPENAI_API_KEY` (+ `OPENAI_MODEL`), and/or `GROK_API_KEY`. Image
-generation additionally requires `OPENAI_API_KEY`. See [Pluggable LLM Providers](#4-8--pluggable-llm-providers).
+**Configuration:** Kuze runs on the workspace's chosen generation provider (default OpenAI).
+At least one provider key must be set — `OPENAI_API_KEY` (+ optional `OPENAI_MODEL`, default
+`gpt-4o`), `ANTHROPIC_API_KEY` (+ `ANTHROPIC_MODEL`, default `claude-sonnet-5`), `GEMINI_API_KEY`,
+`XAI_API_KEY`, and/or `KIMI_API_KEY`. Image generation additionally requires `OPENAI_API_KEY`.
+See [Pluggable LLM Providers](#4-8--pluggable-llm-providers).
 
 ---
 
@@ -338,10 +339,25 @@ Posts via LinkedIn UGC Posts API (`POST /v2/ugcPosts`). Constructs a `SHARE` pos
 `specificContent.com.linkedin.ugc.ShareContent`. Supports optional headline. Returns
 the post URN as ID.
 
-#### Reddit
-Posts via Reddit OAuth API (`POST /api/submit`). Routes to a configured subreddit.
-Supports text posts (`kind: "self"`) and link posts (`kind: "link"`). Returns the post
-`id`. Subreddit selection currently uses random choice from configured list.
+#### Reddit — manual channel
+**Reddit does not post automatically.** Its API returns 403 at the Fastly edge for
+requests from cloud egress ranges, so `postToSubreddit()` cannot run from Railway
+regardless of how OAuth is configured. Reddit is therefore in
+`MANUAL_PUBLISH_CHANNELS` (`apps/api/src/lib/publish-pack.ts`) and the pipeline
+treats it like TikTok/Instagram/Facebook were before their APIs went live:
+
+- The cadence engine **skips** queued Reddit pieces instead of claiming them, so
+  they stay `queued` rather than failing.
+- `GET /v1/queue/:id/publish-pack` returns the subreddit (current round-robin
+  target), title, body, and step-by-step instructions to paste.
+- `POST /v1/publish/reddit` requires `external_post_url` — the permalink the human
+  posted — and records it as `external_post_id`.
+- Engagement polling extracts the post id back out of that permalink via
+  `toRedditPostId()` and continues to work unchanged.
+
+`postToSubreddit()` and the OAuth flow are retained for the day proper API access
+is available. Restoring automated posting means removing `"reddit"` from
+`MANUAL_PUBLISH_CHANNELS` and re-adding its `case` in `publish.ts` / `scheduler.ts`.
 
 #### Threads
 Posts via the Meta Threads API (Graph-based). OAuth 2.0 with a short-lived → long-lived
@@ -474,7 +490,9 @@ Weights can be inspected via `GET /v1/bioloop/weights?channel=<slug>`.
 **What it does:**
 Manages the nine distribution channels and their per-channel configuration.
 
-**OAuth channels** (X, LinkedIn, Reddit, Threads): Full OAuth 2.0 flow (X uses PKCE).
+**OAuth channels** (X, LinkedIn, Threads, TikTok, Instagram, Facebook): Full OAuth 2.0 flow
+(X and TikTok use PKCE). Reddit keeps an OAuth implementation but is surfaced as a manual
+channel — see the Reddit section above.
 - `POST /v1/channels/:slug/auth/start` — generates the authorization URL (+ code verifier for X)
 - `GET /v1/channels/:slug/auth/callback` — dispatches by slug, exchanges code for tokens, stores
   them in the workspace's `channels` row under `auth_state.tokens`
@@ -946,10 +964,11 @@ dispatch pieces from this page.
 - **Audit** — runs Ilita review; transitions auditing → approved or rejected
 - **Queue / Force Queue** — schedules an approved piece (`force` when media-gated)
 - **Publish / Force Publish** — immediate publish for API channels (same media gate)
-- **Publish Pack** — TikTok / Instagram / Facebook: modal with caption + hashtags, video /
-  thumbnail download links, Copy caption / Copy all, and upload instructions
+- **Publish Pack** — manual channels (currently Reddit): modal with the target subreddit,
+  title, and body — plus caption/hashtags and media download links on video channels —
+  Copy all, and step-by-step posting instructions
   (`GET /v1/queue/:id/publish-pack`). Shown for all statuses on manual channels; warns when
-  media is not ready.
+  media is not ready. The served slugs are derived from `MANUAL_PUBLISH_CHANNELS`.
 - **Manual channels** — paste post URL → mark published after manual upload
 - **Dismiss** — soft-reject (`POST /v1/queue/:id/reject`); piece moves to Rejected and will
   not publish
@@ -989,8 +1008,11 @@ pipeline tick — no restart required.
 | `scripta_enabled` | boolean | true | When false, `refreshTopicsFromScripta()` returns immediately without querying the scripta schema. |
 | `bioloop_enabled` | boolean | true | When false, the daily BioLoop scheduler tick logs "skipped" and exits without running. |
 | `active_verticals` | string[] | [] (all) | When non-empty, Shift topics whose `vertical` field is not in this list are skipped during pull. Pulse topics are not filtered. |
-| `llm_provider_generate` | string | "" (inherit) | Provider for content generation (Kuze): `anthropic` \| `openai` \| `gemini` \| `grok` \| `kimi`, or "" to inherit the `LLM_PROVIDER_GENERATE`/`LLM_PROVIDER` env default. |
-| `llm_provider_audit` | string | "" (inherit) | Provider for compliance audit (Ilita): same values, chosen independently of generation. |
+| `llm_provider_generate` | string | "" (inherit) | Provider for content generation (Kuze): `anthropic` \| `openai` \| `gemini` \| `grok` \| `kimi`, a failover pool (`openai:gpt-4o,anthropic`), or "" to inherit the `LLM_POOL_GENERATE`/`LLM_PROVIDER_GENERATE`/`LLM_PROVIDER` env default, then the task default (openai). |
+| `llm_provider_audit` | string | "" (inherit) | Provider for compliance audit (Ilita): same values, chosen independently of generation. Task default is anthropic. |
+| `llm_model_generate` | string | "" (provider default) | Model for the head slot of the generation chain. Free text — any id the provider accepts. Ignored when the provider is "" (inherit). |
+| `llm_model_audit` | string | "" (provider default) | Model for the head slot of the audit chain. |
+| `llm_failover_enabled` | boolean | true | When false, a task uses only its head slot; a failure surfaces instead of routing to the next provider. |
 
 **Product profile** (separate panel; same `vantage.settings` key/value store):
 `default_product_id` (default `shift`), `product_base_url`, `default_brand_id`,
@@ -2285,30 +2307,50 @@ model, tier boundaries, what to meter). Tracked separately; not yet started.
 **Status:** ✅ Shipped
 
 The AI services no longer hard-depend on Anthropic. Kuze (generation) and Ilita (audit) route
-through a provider registry (`lib/llm-providers/`) backed by shared [`@bioloop/llm`](../bioloop-llm/)
-with **Anthropic**, **OpenAI**, **Gemini**, **Grok (xAI)**, and **Kimi (Moonshot K2/K3)** behind one
-interface. Selection is **per task** and **per workspace**:
-`resolveProvider(task, workspaceId)` picks the provider by precedence —
-per-workspace setting (`llm_provider_generate` / `llm_provider_audit`) →
-`LLM_PROVIDER_GENERATE`/`LLM_PROVIDER_AUDIT` env → `LLM_PROVIDER` env → first provider with a
-configured key (order: anthropic → openai → gemini → grok → kimi). A missing/invalid choice never
-hard-fails while any provider is configured. The Settings page adds an **AI Providers** panel
-(per-task dropdowns, unconfigured providers greyed out); `GET /v1/settings/llm-providers` reports
-availability. The registry's `generateStructured` is intentionally not used — the services keep
-their tuned `@vantage/prompts` schemas and existing JSON extraction via `generateCompletion`.
+through Vantage's own provider registry (`lib/llm-providers/`) with **Anthropic**, **OpenAI**,
+**Gemini**, **Grok (xAI)**, and **Kimi (Moonshot K2/K3)** behind one interface. OpenAI, Grok,
+Gemini and Kimi all share `OpenAICompatibleProvider` — Gemini via Google's OpenAI-compatibility
+endpoint — so five providers ship with no npm dependency beyond the `openai` and
+`@anthropic-ai/sdk` clients already in use.
 
-> Model choice is per-provider via env (`ANTHROPIC_MODEL`, `OPENAI_MODEL`, `GEMINI_MODEL`,
-> `XAI_MODEL` / Grok, `KIMI_MODEL` — defaults include kimi-k3) — the UI selects the provider, not a
-> specific model.
+> The registry is deliberately **self-contained**, not a re-export of the sibling
+> `@bioloop/llm` router: Railway builds this monorepo alone with `--frozen-lockfile`, so a
+> `file:../bioloop-llm` dependency could never resolve. Env aliases and model defaults follow
+> the same conventions, so the two stay interchangeable.
 
-**Files:** `apps/api/src/lib/llm.ts`, `apps/api/src/lib/llm-providers/{index,types,bioloop}.ts`,
+Selection is **per task**, **per workspace**, and now includes the **model**.
+`resolveProvider(task, workspaceId)` resolves an ordered chain of `provider:model` slots by
+precedence — per-workspace setting (`llm_provider_generate` / `llm_provider_audit`) →
+`LLM_POOL_GENERATE`/`LLM_POOL_AUDIT` → `LLM_PROVIDER_GENERATE`/`LLM_PROVIDER_AUDIT` →
+`LLM_POOL` → `LLM_PROVIDER` → task default (**generate → openai, audit → anthropic**). Settings
+values accept a bare provider name or a pool (`openai:gpt-4o,anthropic`). Unavailable providers
+are filtered out, so a missing or invalid choice never hard-fails while any provider is configured.
+
+**Runtime failover.** A provider-side failure — 429, out of credits, overload, network — advances
+to the next slot; a request-shaped failure (schema mismatch, bad params) aborts immediately with
+the original error. Classification tests the error *message before the status*, because Anthropic
+reports an exhausted credit balance as HTTP **400**, which a status-first check would call fatal.
+Recoveries log `llm.failover`; a fully failed chain throws `LLMChainExhaustedError` naming every
+attempt, and logs `llm.chain_exhausted`. The happy path logs nothing.
+
+The Settings **AI Providers** panel has a provider dropdown *and* a model input (free text with
+suggestions, so new model ids need no code change) per task, plus a failover toggle and the
+resolved chain. `GET /v1/settings/llm-providers` reports availability and model candidates;
+`GET /v1/settings/llm-resolution` returns the chain each task actually resolves to.
+
+The registry's `generateStructured` is intentionally not used by Kuze/Ilita — they keep their
+tuned `@vantage/prompts` schemas and existing JSON extraction via `generateCompletion`.
+
+**Files:** `apps/api/src/lib/llm.ts`, `apps/api/src/lib/llm-pool.ts`,
+`apps/api/src/lib/llm-providers/{index,types,models,openai-compatible,anthropic,openai,gemini,grok,kimi}.ts`,
 `apps/api/src/services/{kuze,ilita}.ts`, `apps/api/src/routes/settings.ts`,
-`apps/api/src/lib/settings.ts`, `apps/web/src/pages/SettingsPage.tsx`,
-`apps/api/src/routes/{audit,campaigns}.ts`, `apps/api/src/services/scheduler.ts`.
+`apps/api/src/lib/settings.ts`, `apps/web/src/pages/SettingsPage.tsx`.
 
-**Configuration:** any subset of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` /
-`XAI_API_KEY` (or `GROK_API_KEY`) / `KIMI_API_KEY` (or `MOONSHOT_API_KEY`), with optional model envs
-and the `LLM_PROVIDER*` defaults.
+**Configuration:** any subset of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` (or
+`GOOGLE_API_KEY`) / `XAI_API_KEY` (or `GROK_API_KEY`) / `KIMI_API_KEY` (or `MOONSHOT_API_KEY`),
+optional `*_MODEL` and `*_BASE_URL` overrides, the `LLM_POOL*` / `LLM_PROVIDER*` defaults, and
+`LLM_MAX_ATTEMPTS` (default 3). **Leave `LLM_PROVIDER` unset** — it pins both tasks to one
+provider and overrides the per-task defaults.
 
 ---
 

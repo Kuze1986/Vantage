@@ -1,5 +1,5 @@
 import React from 'react'
-import { vantageApi, type BrandKitRecord } from '../api/vantage'
+import { vantageApi, type BrandKitRecord, type VantageSettings } from '../api/vantage'
 import { Panel, Badge, Button } from '../ds'
 import { BrandKitsPanel } from './BrandKitsPanel'
 
@@ -20,16 +20,39 @@ function envPresent(key: string): boolean {
   return !!val && val !== 'undefined'
 }
 
-type Settings = {
-  dedup_days:            number
-  scripta_enabled:       boolean
-  bioloop_enabled:       boolean
-  active_verticals:      string[]
-  llm_provider_generate: string
-  llm_provider_audit:    string
+// Sourced from the API client so the two can't drift — handleSave PATCHes the whole
+// draft, and dirty-tracking is a JSON.stringify comparison, so a field missing from
+// this type is a field the UI silently drops.
+type Settings = VantageSettings
+
+type LLMProviderInfo = {
+  name: string
+  displayName: string
+  available: boolean
+  defaultModel: string
+  candidateModels: string[]
 }
 
-type LLMProviderInfo = { name: string; displayName: string; available: boolean }
+type LLMResolution = {
+  generate: { provider: string; model: string }[]
+  audit: { provider: string; model: string }[]
+}
+
+/** The two AI tasks, and which settings keys drive each. */
+const LLM_TASKS = [
+  {
+    task: 'generate' as const,
+    providerKey: 'llm_provider_generate' as const,
+    modelKey: 'llm_model_generate' as const,
+    label: 'Content generation (Kuze)',
+  },
+  {
+    task: 'audit' as const,
+    providerKey: 'llm_provider_audit' as const,
+    modelKey: 'llm_model_audit' as const,
+    label: 'Compliance audit (Ilita)',
+  },
+]
 
 type ProductProfile = {
   default_product_id: string
@@ -50,20 +73,23 @@ export function SettingsPage() {
   const [saved, setSaved]         = React.useState(false)
   const [profileSaved, setProfileSaved] = React.useState(false)
   const [brandKits, setBrandKits] = React.useState<BrandKitRecord[]>([])
+  const [resolution, setResolution] = React.useState<LLMResolution | null>(null)
   const [err, setErr]             = React.useState<string | null>(null)
 
   const load = React.useCallback(async () => {
     try {
-      const [r, p, pp, kits] = await Promise.all([
+      const [r, p, pp, kits, res] = await Promise.all([
         vantageApi.getSettings(),
         vantageApi.listLLMProviders().catch(() => ({ providers: [] as LLMProviderInfo[] })),
         vantageApi.getProductProfile().catch(() => null),
         vantageApi.listBrandKits().catch(() => ({ kits: [] as BrandKitRecord[] })),
+        vantageApi.getLLMResolution().catch(() => null),
       ])
       setSettings(r.settings)
       setDraft(r.settings)
       setProviders(p.providers)
       setBrandKits(kits.kits)
+      setResolution(res)
       if (pp?.profile) {
         setProfile(pp.profile as ProductProfile)
         setProfileDraft(pp.profile as ProductProfile)
@@ -82,6 +108,9 @@ export function SettingsPage() {
       const r = await vantageApi.patchSettings(draft)
       setSettings(r.settings)
       setDraft(r.settings)
+      // The chain is derived server-side from what we just saved — refetch so the
+      // displayed failover order reflects the new settings rather than the old ones.
+      setResolution(await vantageApi.getLLMResolution().catch(() => null))
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } catch (e) {
@@ -358,35 +387,73 @@ export function SettingsPage() {
           ) : (
             <div style={{ display: 'grid', gap: 16 }}>
               <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', margin: 0, lineHeight: 1.6 }}>
-                Choose which model powers each AI task. "Inherit default" uses the server's
-                LLM_PROVIDER_* environment variable. A provider is selectable only if its API
-                key is configured server-side.
+                Choose the provider and model for each AI task. "Inherit default" falls back to
+                the server's LLM_POOL_* / LLM_PROVIDER_* environment, then to the task default
+                (Kuze → OpenAI, Ilita → Anthropic). A provider is selectable only if its API key
+                is configured server-side. If a provider fails mid-run — rate limited, out of
+                credits, overloaded — the next one in the chain takes over automatically.
               </p>
 
-              {([
-                { key: 'llm_provider_generate' as const, label: 'Content generation (Kuze)', hint: 'Writes posts, threads, captions' },
-                { key: 'llm_provider_audit' as const,    label: 'Compliance audit (Ilita)',  hint: 'Reviews content before it ships' },
-              ]).map(({ key, label, hint }) => (
-                <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                  <div>
-                    <div style={{ fontFamily: 'var(--nx-sans)', fontSize: 13, color: 'var(--nx-text-1)', marginBottom: 2 }}>{label}</div>
-                    <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)' }}>{hint}</div>
+              {LLM_TASKS.map(({ task, providerKey, modelKey, label }) => {
+                const selected = providers.find((p) => p.name === draft[providerKey])
+                const chain = resolution?.[task] ?? []
+                const listId = `vg-models-${task}`
+                return (
+                  <div key={task} style={{ display: 'grid', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                      <div style={{ fontFamily: 'var(--nx-sans)', fontSize: 13, color: 'var(--nx-text-1)' }}>{label}</div>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <select
+                          className="vg-input"
+                          value={draft[providerKey]}
+                          onChange={(e) => patch(providerKey, e.target.value)}
+                          style={{ width: 180 }}
+                          aria-label={`${label} provider`}
+                        >
+                          <option value="">Inherit default</option>
+                          {providers.map((p) => (
+                            <option key={p.name} value={p.name} disabled={!p.available}>
+                              {p.displayName}{p.available ? '' : ' — no API key'}
+                            </option>
+                          ))}
+                        </select>
+                        {/* A free-text input with suggestions, not a closed <select>: new
+                            model ids must be settable without shipping a code change. */}
+                        <input
+                          className="vg-input"
+                          list={listId}
+                          value={draft[modelKey]}
+                          onChange={(e) => patch(modelKey, e.target.value)}
+                          disabled={!draft[providerKey]}
+                          placeholder={selected ? `Default — ${selected.defaultModel}` : 'Model'}
+                          aria-label={`${label} model`}
+                          style={{ width: 180 }}
+                        />
+                        <datalist id={listId}>
+                          {(selected?.candidateModels ?? []).map((m) => (
+                            <option key={m} value={m} />
+                          ))}
+                        </datalist>
+                      </div>
+                    </div>
+                    {chain.length > 0 && (
+                      <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', textAlign: 'right' }}>
+                        {isDirty ? 'Saved chain: ' : 'Failover: '}
+                        {chain.map((s) => `${s.provider}:${s.model}`).join(' → ')}
+                      </div>
+                    )}
                   </div>
-                  <select
-                    className="vg-input"
-                    value={draft[key]}
-                    onChange={(e) => patch(key, e.target.value)}
-                    style={{ width: 220 }}
-                  >
-                    <option value="">Inherit default</option>
-                    {providers.map((p) => (
-                      <option key={p.name} value={p.name} disabled={!p.available}>
-                        {p.displayName}{p.available ? '' : ' — no API key'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
+                )
+              })}
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)' }}>
+                <input
+                  type="checkbox"
+                  checked={draft.llm_failover_enabled}
+                  onChange={(e) => patch('llm_failover_enabled', e.target.checked)}
+                />
+                Automatically fail over to the next provider when one is unavailable
+              </label>
 
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <Button

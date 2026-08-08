@@ -26,9 +26,31 @@ function getProxyAgent(): ProxyAgent | undefined {
   return proxyAgent;
 }
 
-function redditFetch(url: string, init: UndiciRequestInit) {
+/**
+ * Proxy host:port for diagnostics — never the credentials. "none" means
+ * REDDIT_PROXY_URL is unset or empty in this process, which is the difference
+ * between "the proxy didn't help" and "the proxy was never applied" (e.g. the
+ * variable was added in Railway but the service wasn't redeployed).
+ */
+function proxyLabel(): string {
+  const raw = process.env.REDDIT_PROXY_URL?.trim();
+  if (!raw) return "none";
+  try {
+    const u = new URL(raw);
+    return `${u.hostname}:${u.port || "(default)"}`;
+  } catch {
+    return "INVALID_URL";
+  }
+}
+
+export function redditFetch(url: string, init: UndiciRequestInit = {}) {
   const dispatcher = getProxyAgent();
   return undiciFetch(url, dispatcher ? { ...init, dispatcher } : init);
+}
+
+/** The compliant User-Agent, for other modules that call Reddit (engagement poll). */
+export function redditUserAgent(): string {
+  return USER_AGENT;
 }
 
 type RedditAuthState = {
@@ -78,18 +100,32 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
 
   const body = new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: redirect });
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
-  const res = await redditFetch(REDDIT_TOKEN, {
-    method: "POST",
-    headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT },
-    body,
-  });
+  let res: Awaited<ReturnType<typeof redditFetch>>;
+  try {
+    res = await redditFetch(REDDIT_TOKEN, {
+      method: "POST",
+      headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/x-www-form-urlencoded", "User-Agent": USER_AGENT },
+      body,
+    });
+  } catch (e) {
+    // A transport-level failure never reaches Reddit, so it produces no status or
+    // headers to inspect. With a proxy configured this is nearly always the proxy
+    // itself — wrong host/port, rejected credentials, or an exhausted plan — not
+    // Reddit blocking us. Name the proxy so the two are never confused.
+    const cause = e instanceof Error ? e.message : String(e);
+    throw new Error(`Reddit token exchange could not reach Reddit [proxy=${proxyLabel()}]: ${cause}`);
+  }
   const json = (await res.json()) as Record<string, unknown>;
   if (!res.ok) {
     // Diagnostic: surfaces whether the UA change is live and whether Reddit's edge
     // (Fastly) is blocking — distinguishes a bad User-Agent from a datacenter-IP block.
+    // proxy= tells us whether REDDIT_PROXY_URL was actually live in this process:
+    // "none" on a 403 means the proxy was never applied (usually a missing redeploy),
+    // a host:port on a 403 means Reddit blocked that proxy's IP too.
     const diag = [
       `status=${res.status}`,
       `ua=${JSON.stringify(USER_AGENT)}`,
+      `proxy=${proxyLabel()}`,
       `via=${res.headers.get("via") ?? ""}`,
       `x-served-by=${res.headers.get("x-served-by") ?? ""}`,
       `retry-after=${res.headers.get("retry-after") ?? ""}`,
@@ -184,6 +220,46 @@ export async function postToSubreddit(workspaceId: string, params: {
   const permalink = json.json?.data?.url ?? `https://reddit.com/r/${params.subreddit}`;
   await logActivity({ source: "adapter:reddit", source_type: "adapter", event_type: "post_success", summary: `Reddit post ${id} in r/${params.subreddit}`, payload: { id, permalink } });
   return { id, permalink };
+}
+
+export interface RedditPackage {
+  title: string;
+  body: string;
+  subreddit: string;
+  instructions: string;
+}
+
+/**
+ * Reddit is a manual channel: its API refuses requests from cloud egress ranges,
+ * so postToSubreddit() above can't run from Railway. Vantage still picks the
+ * subreddit and writes the post — the human does the final paste.
+ *
+ * `subreddit` comes from the channel's cadence_config round-robin; the caller
+ * passes the *current* target without advancing the index, since building a
+ * pack is a read, not a publish.
+ */
+export function packageForManualPost(
+  payload: Record<string, unknown>,
+  subreddit?: string,
+): RedditPackage {
+  const sub = (subreddit ?? "").replace(/^\/?r\//, "").trim();
+  const target = sub ? `r/${sub}` : "your target subreddit";
+  const isLink = payload.is_link_post === true;
+  const url = typeof payload.url === "string" ? payload.url : "";
+  return {
+    // Matches the 300-char cap postToSubreddit() applies, so what you paste is
+    // exactly what the automated path would have sent.
+    title: String(payload.title ?? payload.body ?? "").slice(0, 300),
+    body: isLink ? url : String(payload.body ?? ""),
+    subreddit: sub,
+    instructions: [
+      `1. Open reddit.com/${sub ? `r/${sub}` : "r/<subreddit>"}/submit`,
+      `2. Choose ${isLink ? '"Link"' : '"Text"'} and paste the title below.`,
+      isLink ? "3. Paste the URL into the link field." : "3. Paste the body below into the text field.",
+      `4. Check ${target}'s rules and flair requirements before submitting.`,
+      "5. Post, then copy the permalink and paste it into Vantage to mark as published.",
+    ].join("\n"),
+  };
 }
 
 export function generateState(): string {

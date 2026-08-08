@@ -102,6 +102,25 @@ export type Subscriber = {
   unsubscribed_at: string | null;
 };
 
+/**
+ * Mirrors PipelineSettings in apps/api/src/lib/settings.ts. Declared once so the GET
+ * and PATCH shapes cannot drift — SettingsPage PATCHes the whole draft, so a field
+ * missing here is a field the UI silently drops.
+ */
+export type VantageSettings = {
+  dedup_days: number;
+  scripta_enabled: boolean;
+  bioloop_enabled: boolean;
+  active_verticals: string[];
+  /** Bare provider name, or a failover pool: "openai:gpt-4o,anthropic". "" = inherit. */
+  llm_provider_generate: string;
+  llm_provider_audit: string;
+  /** Model for the head slot. "" = provider default. */
+  llm_model_generate: string;
+  llm_model_audit: string;
+  llm_failover_enabled: boolean;
+};
+
 export const vantageApi = {
   // ── Source ────────────────────────────────────────────────────────────────
   getTopics: (limit = 20) =>
@@ -260,40 +279,30 @@ export const vantageApi = {
 
   // ── Settings ──────────────────────────────────────────────────────────────
   getSettings: () =>
-    vantageFetch("/v1/settings") as Promise<{
-      settings: {
-        dedup_days: number;
-        scripta_enabled: boolean;
-        bioloop_enabled: boolean;
-        active_verticals: string[];
-        llm_provider_generate: string;
-        llm_provider_audit: string;
-      }
-    }>,
+    vantageFetch("/v1/settings") as Promise<{ settings: VantageSettings }>,
 
-  patchSettings: (patch: {
-    dedup_days?:            number;
-    scripta_enabled?:       boolean;
-    bioloop_enabled?:       boolean;
-    active_verticals?:      string[];
-    llm_provider_generate?: string;
-    llm_provider_audit?:    string;
-  }) =>
+  patchSettings: (patch: Partial<VantageSettings>) =>
     vantageFetch("/v1/settings", { method: "PATCH", body: JSON.stringify(patch) }) as Promise<{
       ok: boolean;
-      settings: {
-        dedup_days: number;
-        scripta_enabled: boolean;
-        bioloop_enabled: boolean;
-        active_verticals: string[];
-        llm_provider_generate: string;
-        llm_provider_audit: string;
-      }
+      settings: VantageSettings;
     }>,
 
   listLLMProviders: () =>
     vantageFetch("/v1/settings/llm-providers") as Promise<{
-      providers: { name: string; displayName: string; available: boolean }[]
+      providers: {
+        name: string;
+        displayName: string;
+        available: boolean;
+        defaultModel: string;
+        candidateModels: string[];
+      }[]
+    }>,
+
+  /** The provider:model chain each task actually resolves to, after all precedence. */
+  getLLMResolution: () =>
+    vantageFetch("/v1/settings/llm-resolution") as Promise<{
+      generate: { provider: string; model: string }[];
+      audit: { provider: string; model: string }[];
     }>,
 
   // ── Calendar ──────────────────────────────────────────────────────────────

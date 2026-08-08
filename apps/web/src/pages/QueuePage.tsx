@@ -55,7 +55,9 @@ function isAutopilotQueued(p: Piece): boolean {
   return p.status === 'queued' && Boolean(p.content_payload?.visual_type || p.content_payload?.campaign_id)
 }
 
-const MANUAL_CHANNELS = new Set<string>([])
+// Mirrors MANUAL_PUBLISH_CHANNELS in apps/api/src/lib/publish-pack.ts. Reddit's
+// API refuses cloud egress, so it's posted by hand via the Publish Pack.
+const MANUAL_CHANNELS = new Set<string>(['reddit'])
 const VIDEO_FORMATS   = new Set(['tiktok_script', 'instagram_caption', 'facebook_post'])
 
 const STATUS_FILTERS = ['all', 'auditing', 'approved', 'queued', 'published', 'rejected', 'failed'] as const

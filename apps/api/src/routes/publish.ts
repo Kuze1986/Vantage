@@ -6,11 +6,11 @@ import { logActivity } from "../lib/activity.js";
 import { recordGrowthEvent } from "../lib/growth.js";
 import { assertMediaReady, withForceMedia } from "../lib/media-gate.js";
 import { resolveCampaignIdForPiece } from "../lib/campaign-kpi.js";
+import { MANUAL_PUBLISH_CHANNELS } from "../lib/publish-pack.js";
 
 // Adapters
 import { postTweet } from "../adapters/x.js";
 import { postLinkedIn } from "../adapters/linkedin.js";
-import { postToSubreddit } from "../adapters/reddit.js";
 import { postThread } from "../adapters/threads.js";
 import { postBluesky } from "../adapters/bluesky.js";
 import { sendEmail } from "../adapters/email.js";
@@ -33,9 +33,10 @@ publishRoutes.post("/:channel", async (c) => {
   const parsed  = bodySchema.safeParse(json);
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
 
-  // external_post_url stays in the schema for API-compat but is no longer read —
-  // no channel dispatches through the manual record-a-URL path anymore.
-  const { content_piece_id, force } = parsed.data;
+  // external_post_url is read again for manual channels (Reddit): the human posts
+  // it, then pastes the permalink back so the piece can reach 'published' with a
+  // real external id that engagement polling can key off.
+  const { content_piece_id, external_post_url, force } = parsed.data;
   const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
 
@@ -91,13 +92,23 @@ publishRoutes.post("/:channel", async (c) => {
   const slug = piece.channel_slug as string;
   const campaignId = await resolveCampaignIdForPiece(content_piece_id).catch(() => null);
 
-  // Automated channels — no manual-post channels dispatch through this route
-  // anymore now that tiktok/instagram/facebook all post for real. A workspace
-  // that hasn't connected a channel yet still gets a clear "not connected"
-  // error from the adapter itself, same as any other unconnected OAuth channel.
+  // Manual channels record the URL the human posted instead of calling an
+  // adapter. Reddit is here because its API refuses cloud egress entirely, so
+  // there is no server-side call to make — see lib/publish-pack.ts.
   let externalId: string;
   try {
-    switch (slug) {
+    // Manual channels all share one branch regardless of slug, so they're
+    // dispatched as a pseudo-case rather than nesting the whole switch.
+    switch (MANUAL_PUBLISH_CHANNELS.has(slug) ? "__manual__" : slug) {
+      case "__manual__": {
+        if (!external_post_url) {
+          throw new HTTPException(400, {
+            message: `${slug} is a manual channel — post it yourself, then supply external_post_url to mark it published`,
+          });
+        }
+        externalId = external_post_url;
+        break;
+      }
       case "x": {
         const body = String(payload.body ?? "");
         if (!body) throw new Error("Missing tweet body");
@@ -112,28 +123,8 @@ publishRoutes.post("/:channel", async (c) => {
         ({ id: externalId } = await postLinkedIn(ws, body, headline, imageUrl));
         break;
       }
-      case "reddit": {
-        // Load subreddit from channel cadence_config, using round-robin index (3A-4)
-        const { data: ch } = await sb.from("channels")
-          .select("cadence_config").eq("workspace_id", ws).eq("slug", "reddit").single();
-        const cadence = (ch?.cadence_config ?? {}) as { subreddits?: string[]; subreddit_index?: number };
-        const subs: string[] = cadence.subreddits ?? [];
-        if (!subs.length) throw new Error("No subreddits configured for Reddit channel");
-        const idx        = (cadence.subreddit_index ?? 0) % subs.length;
-        const subreddit  = subs[idx];
-        const nextIndex  = (idx + 1) % subs.length;
-        // Persist the updated index back to cadence_config
-        await sb.from("channels").update({
-          cadence_config: { ...cadence, subreddit_index: nextIndex },
-        }).eq("workspace_id", ws).eq("slug", "reddit");
-        ({ id: externalId } = await postToSubreddit(ws, {
-          subreddit,
-          title:        String(payload.title ?? payload.body ?? "").slice(0, 300),
-          body:         String(payload.body ?? ""),
-          is_link_post: payload.is_link_post === true,
-        }));
-        break;
-      }
+      // "reddit" is handled by the __manual__ case above — Reddit's API refuses
+      // requests from cloud egress ranges, so there is no server-side post to make.
       case "threads": {
         const body = String(payload.body ?? "");
         if (!body) throw new Error("Missing Threads post body");

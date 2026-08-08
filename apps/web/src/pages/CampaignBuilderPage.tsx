@@ -99,18 +99,22 @@ type ShiftPackMeta = {
   items: { id: string; title: string; outline: string; visual_type: string }[]
 }
 
-export default function CampaignBuilderPage() {
-  const [view, setView] = useState<ViewState>('list')
-  const [campaigns, setCampaigns] = useState<Campaign[]>([])
-  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
-  const [timeline, setTimeline] = useState<TimelineDay[]>([])
-  const [kpiMetrics, setKpiMetrics] = useState<KPIMetrics[]>([])
-  const [formData, setFormData] = useState({
+const DEFAULT_WEEKS = 3
+/** Content days per week. The generator's day count is weeks × periodsPerWeek, so a
+ *  value of 1 yields one post per week — not a daily plan. Exposed in the form. */
+const DEFAULT_PERIODS_PER_WEEK = 3
+
+/** Initial create-form state. A factory, not a shared object, so resetting after a
+ *  create can't hand back a mutated reference. */
+function createInitialFormData() {
+  const start = new Date()
+  const end = new Date(start.getTime() + DEFAULT_WEEKS * 7 * 24 * 60 * 60 * 1000)
+  return {
     name: '',
     description: '',
-    start_date: new Date().toISOString().split('T')[0],
-    end_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    cadence_config: { weeks: 3, periodsPerWeek: 1 },
+    start_date: start.toISOString().split('T')[0],
+    end_date: end.toISOString().split('T')[0],
+    cadence_config: { weeks: DEFAULT_WEEKS, periodsPerWeek: DEFAULT_PERIODS_PER_WEEK },
     messaging_pillars: [
       {
         id: '1',
@@ -123,7 +127,26 @@ export default function CampaignBuilderPage() {
     ],
     channel_mix: { ...DEFAULT_CHANNEL_MIX },
     kpi_targets: { impressions: 10000, engagements: 500 },
-  })
+  }
+}
+
+/** Mirrors MAX_TIMELINE_DAYS / timelineDayCount() in apps/api/src/lib/campaigns.ts —
+ *  the server is authoritative and enforces this; the form shows the real number before
+ *  you generate so the cap can't truncate a plan silently. Keep the two in step. */
+const MAX_TIMELINE_DAYS = 60
+function timelineDayCount(weeks: number, periodsPerWeek: number): number {
+  const w = Math.max(1, Number.isFinite(weeks) ? Math.trunc(weeks) : 1)
+  const p = Math.max(1, Number.isFinite(periodsPerWeek) ? Math.trunc(periodsPerWeek) : 1)
+  return Math.min(w * p, MAX_TIMELINE_DAYS)
+}
+
+export default function CampaignBuilderPage() {
+  const [view, setView] = useState<ViewState>('list')
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
+  const [timeline, setTimeline] = useState<TimelineDay[]>([])
+  const [kpiMetrics, setKpiMetrics] = useState<KPIMetrics[]>([])
+  const [formData, setFormData] = useState(createInitialFormData)
 
   const [busy, setBusy] = useState<string | null>(null)
   const [editingCampaign, setEditingCampaign] = useState(false)
@@ -156,7 +179,12 @@ export default function CampaignBuilderPage() {
   useEffect(() => {
     const start = new Date(`${formData.start_date}T00:00:00Z`)
     if (Number.isNaN(start.getTime())) return
-    start.setUTCDate(start.getUTCDate() + formData.cadence_config.weeks * 7)
+    // Clearing the Duration input yields NaN; adding it produces an Invalid Date whose
+    // toISOString() throws and takes the whole form down. Fall back to 1 week.
+    const weeks = Number.isFinite(formData.cadence_config.weeks)
+      ? Math.max(1, formData.cadence_config.weeks)
+      : 1
+    start.setUTCDate(start.getUTCDate() + weeks * 7)
     const computedEndDate = start.toISOString().split('T')[0]
     if (computedEndDate !== formData.end_date) {
       setFormData((prev) => ({ ...prev, end_date: computedEndDate }))
@@ -245,25 +273,7 @@ export default function CampaignBuilderPage() {
       await vantageApi.createCampaign(formData)
       await fetchCampaigns()
       setView('list')
-      setFormData({
-        name: '',
-        description: '',
-        start_date: new Date().toISOString().split('T')[0],
-        end_date: new Date(Date.now() + 21 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        cadence_config: { weeks: 3, periodsPerWeek: 1 },
-        messaging_pillars: [
-          {
-            id: '1',
-            name: 'Product Launch',
-            description: 'Introducing new features',
-            tone: 'Professional & Exciting',
-            keyMessages: ['New capabilities', 'Customer success'],
-            targetAudience: 'Early adopters & decision makers',
-          },
-        ],
-        channel_mix: { ...DEFAULT_CHANNEL_MIX },
-        kpi_targets: { impressions: 10000, engagements: 500 },
-      })
+      setFormData(createInitialFormData())
     } catch (err) {
       console.error('Failed to create campaign:', err)
       alert('Failed to create campaign: ' + (err instanceof Error ? err.message : 'Unknown error'))
@@ -736,29 +746,83 @@ export default function CampaignBuilderPage() {
               </div>
             </div>
 
-            <div>
-              <label style={{ fontSize: '0.875rem', fontWeight: 500, display: 'block', marginBottom: '0.25rem' }}>Duration (weeks)</label>
-              <input
-                type="number"
-                value={formData.cadence_config.weeks}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    cadence_config: { ...formData.cadence_config, weeks: parseInt(e.target.value) },
-                  })
-                }
-                min="1"
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid var(--nx-border)',
-                  borderRadius: '0.25rem',
-                  fontFamily: 'inherit',
-                  marginTop: '0.5rem',
-                  boxSizing: 'border-box',
-                }}
-              />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div>
+                <label style={{ fontSize: '0.875rem', fontWeight: 500, display: 'block', marginBottom: '0.25rem' }}>Duration (weeks)</label>
+                <input
+                  type="number"
+                  value={Number.isFinite(formData.cadence_config.weeks) ? formData.cadence_config.weeks : ''}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      cadence_config: { ...formData.cadence_config, weeks: parseInt(e.target.value) },
+                    })
+                  }
+                  min="1"
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid var(--nx-border)',
+                    borderRadius: '0.25rem',
+                    fontFamily: 'inherit',
+                    marginTop: '0.5rem',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.875rem', fontWeight: 500, display: 'block', marginBottom: '0.25rem' }}>Posts per week</label>
+                <input
+                  type="number"
+                  value={Number.isFinite(formData.cadence_config.periodsPerWeek) ? formData.cadence_config.periodsPerWeek : ''}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      cadence_config: {
+                        ...formData.cadence_config,
+                        periodsPerWeek: parseInt(e.target.value),
+                      },
+                    })
+                  }
+                  min="1"
+                  max="7"
+                  title="7 = one content day per day. The timeline generator produces weeks × posts-per-week days."
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    border: '1px solid var(--nx-border)',
+                    borderRadius: '0.25rem',
+                    fontFamily: 'inherit',
+                    marginTop: '0.5rem',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
             </div>
+
+            <p style={{ fontSize: '0.8125rem', color: 'var(--nx-text-2)', marginTop: '-0.5rem' }}>
+              Timeline will generate{' '}
+              <strong style={{ color: 'var(--nx-cyan, #00C4E8)' }}>
+                {timelineDayCount(formData.cadence_config.weeks, formData.cadence_config.periodsPerWeek)} content days
+              </strong>{' '}
+              spread evenly across the date range. Launch creates one piece per selected channel per day
+              {Object.keys(formData.channel_mix).length > 0 && (
+                <>
+                  {' '}(
+                  {timelineDayCount(formData.cadence_config.weeks, formData.cadence_config.periodsPerWeek) *
+                    Object.keys(formData.channel_mix).length}{' '}
+                  pieces total)
+                </>
+              )}
+              .
+              {timelineDayCount(formData.cadence_config.weeks, formData.cadence_config.periodsPerWeek) <
+                Math.max(1, formData.cadence_config.weeks || 1) *
+                  Math.max(1, formData.cadence_config.periodsPerWeek || 1) && (
+                <span style={{ color: 'var(--nx-amber, #EFA020)' }}>
+                  {' '}Capped at {MAX_TIMELINE_DAYS} days — reduce duration or posts per week to plan the full run.
+                </span>
+              )}
+            </p>
 
             {renderChannelMixEditor(formData.channel_mix, (channel_mix) =>
               setFormData({ ...formData, channel_mix }),

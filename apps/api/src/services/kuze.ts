@@ -138,7 +138,7 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
     loadViralityPatterns(input.workspace_id, input.channel),
     loadRejectionCategories(input.workspace_id, input.channel),
   ]);
-  const provider = await resolveProvider("generate", input.workspace_id);
+  const provider = await resolveProvider("generate", input.workspace_id, "kuze.generateContent");
 
   const rawText = (await provider.generateCompletion(
     kuzeUserPrompt({
@@ -196,7 +196,7 @@ export async function generateCaptions(input: GenerateCaptionsInput): Promise<st
     loadViralityPatterns(input.workspace_id, input.channel),
     loadRejectionCategories(input.workspace_id, input.channel),
   ]);
-  const provider = await resolveProvider("generate", input.workspace_id);
+  const provider = await resolveProvider("generate", input.workspace_id, "kuze.generateCaptions");
 
   const channelLabel = input.channel.toUpperCase();
   const toneHint     = input.tone ? `Tone: ${input.tone}. ` : '';

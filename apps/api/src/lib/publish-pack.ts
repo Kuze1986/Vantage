@@ -2,15 +2,27 @@
  * Publish Pack — one-click export bundle for manual channels.
  * TikTok/Instagram/Facebook all post automatically now; packageTikTok/
  * packageInstagram/packageFacebook stay wired into buildPublishPack() below
- * as a fallback/reference, but are unreachable via the API since
- * MANUAL_PUBLISH_CHANNELS is empty — queue.ts gates on it before ever
+ * as a fallback/reference, but are unreachable via the API unless their slug
+ * is added to MANUAL_PUBLISH_CHANNELS — queue.ts gates on it before ever
  * calling this.
+ *
+ * Reddit IS manual: Reddit's API blocks cloud egress ranges outright (see
+ * adapters/reddit.ts), so it can never post from Railway no matter how the
+ * OAuth flow is configured. It's the one channel here that's manual by
+ * external constraint rather than by choice.
  */
 import { packageForManualPost as packageTikTok } from "../adapters/tiktok.js";
 import { packageForManualPost as packageInstagram } from "../adapters/instagram.js";
 import { packageForManualPost as packageFacebook } from "../adapters/facebook.js";
+import { packageForManualPost as packageReddit } from "../adapters/reddit.js";
 
-export const MANUAL_PUBLISH_CHANNELS = new Set<string>([]);
+/**
+ * Channels the pipeline must NOT attempt to post automatically. Everything
+ * downstream keys off this one set: the cadence engine skips these pieces
+ * instead of claiming them, POST /v1/publish requires an external_post_url
+ * for them, and GET /v1/queue/:id/publish-pack only serves these slugs.
+ */
+export const MANUAL_PUBLISH_CHANNELS = new Set<string>(["reddit"]);
 
 export type PublishPack = {
   content_piece_id: string;
@@ -45,6 +57,8 @@ export function buildPublishPack(opts: {
   videoUrl?: string | null;
   imageUrl?: string | null;
   mediaStatus?: string | null;
+  /** Reddit only — the current round-robin target from the channel's cadence_config. */
+  subreddit?: string | null;
 }): PublishPack {
   const { id, channel, payload } = opts;
   const video_url =
@@ -101,6 +115,14 @@ export function buildPublishPack(opts: {
       "3. Paste the caption below.",
       "4. Publish, then copy the URL and mark as published in Vantage.",
     ].join("\n");
+  } else if (channel === "reddit") {
+    const pkg = packageReddit(payload, opts.subreddit ?? undefined);
+    // Reddit is title+body, not caption+hashtags. Hashtags are meaningless on
+    // Reddit and read as spam, so they're deliberately left empty here.
+    caption = pkg.body;
+    instructions = pkg.instructions;
+    fields.title = pkg.title;
+    if (pkg.subreddit) fields.subreddit = `r/${pkg.subreddit}`;
   } else {
     caption = String(payload.body ?? payload.caption ?? payload.text ?? "");
     hashtags = hashtagLine(payload.hashtags);
@@ -112,7 +134,11 @@ export function buildPublishPack(opts: {
     opts.mediaStatus === "ready" || Boolean(video_url) || Boolean(thumbnail_url);
 
   const copyParts = [
-    captionWithTags ? `CAPTION\n${captionWithTags}` : "",
+    // Reddit's fields are named differently on the submit form — labelling its
+    // body "CAPTION" would just make the paste harder to follow.
+    fields.subreddit ? `SUBREDDIT\n${fields.subreddit}` : "",
+    fields.title ? `TITLE\n${fields.title}` : "",
+    captionWithTags ? `${channel === "reddit" ? "BODY" : "CAPTION"}\n${captionWithTags}` : "",
     fields.hook ? `HOOK\n${fields.hook}` : "",
     fields.script && channel === "tiktok" ? `SCRIPT\n${fields.script}` : "",
     fields.on_screen_text ? `ON-SCREEN\n${fields.on_screen_text}` : "",
