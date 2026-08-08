@@ -38,14 +38,17 @@ export function buildAuthorizeUrl(stateToken: string): string {
   u.searchParams.set("client_id", clientId);
   u.searchParams.set("redirect_uri", redirect);
   u.searchParams.set("state", stateToken);
-  // Matches the exact permission set Meta's "Manage content on Instagram" /
-  // API setup with Facebook login" screen requires — confirmed against the
-  // live console, not just general API knowledge (instagram_content_publish
-  // was wrong; it's instagram_content_publishing, and business_management
-  // was missing entirely).
+  // Confirmed against the app's full Permissions and Features list (not just
+  // the abbreviated "API setup with Facebook login" summary screen, whose
+  // label text doesn't match the real permission name): the permission that
+  // actually exists and shows "Ready for testing" is instagram_content_publish
+  // (no "-ing"). instagram_content_publishing doesn't exist at all — that was
+  // a bad correction. Don't confuse this with instagram_business_content_publish,
+  // a different permission tied to the separate "API setup with Instagram
+  // login" path this adapter doesn't use.
   u.searchParams.set(
     "scope",
-    "instagram_basic,instagram_content_publishing,pages_read_engagement,business_management,pages_show_list",
+    "instagram_basic,instagram_content_publish,pages_read_engagement,business_management,pages_show_list",
   );
   return u.toString();
 }
