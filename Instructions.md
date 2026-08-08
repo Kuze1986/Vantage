@@ -95,16 +95,27 @@ Bluesky doesn't use an OAuth redirect. Instead:
 
 The Email channel does not use OAuth. It sends via **Resend**:
 
-1. Ensure `RESEND_API_KEY` and `RESEND_FROM_EMAIL` are set in your API environment variables.
+1. Ensure `RESEND_API_KEY` and `RESEND_FROM_ADDRESS` are set in your API environment
+   variables. Note the name — `adapters/email.ts` and `lib/alert.ts` both read
+   `RESEND_FROM_ADDRESS`; `RESEND_FROM_EMAIL` is read by nothing and the adapter will throw
+   "Email channel not configured".
 2. The Email tile will show as enabled without an OAuth flow.
 
-### Manual Channels (TikTok, Instagram, Facebook)
+### Manual Channel (Reddit)
 
-These channels have no direct API publish. Content is generated and formatted for you, but you post it manually:
+Reddit is the only channel Vantage cannot post to automatically — its API returns 403 at the
+Fastly edge for requests from cloud egress ranges, so posting from Railway is impossible
+regardless of how OAuth is configured. Content is generated and formatted for you, but you
+post it manually:
 
 1. Click the tile to enable the channel.
-2. When content is ready, the Queue page will display copy-ready text, hashtags, on-screen captions, and upload instructions.
-3. After posting manually, paste the post URL back into Vantage to mark it published.
+2. When content is ready, use **Publish Pack** on the Queue row — it gives you the target
+   subreddit, title, body, and step-by-step instructions, with a Copy all button.
+3. After posting, paste the permalink back into Vantage to mark it published. Engagement
+   polling extracts the post id from that permalink and continues from there.
+
+> TikTok, Instagram and Facebook used to be manual. They now post automatically over OAuth —
+> connect them like any other API channel in the step above.
 
 ---
 

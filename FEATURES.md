@@ -4,6 +4,33 @@
 > Update it whenever a feature ships, changes, or is removed. The Phase 3A/3B plan below
 > moves to the "Implemented" sections as each item lands.
 
+## Status vocabulary
+
+Every feature carries **two** independent markers. "Shipped" only ever meant *the code
+exists* — it could never distinguish code that runs every day from code that has never
+executed once in production. The second axis fixes that.
+
+| Marker | Meaning |
+|---|---|
+| ✅ Shipped | Code is complete, typechecks, and is covered by tests |
+| ◐ Partial | Code exists but does less than this document once claimed — see the item's note |
+| ⬜ Planned | Not built |
+| 🟢 Verified | Has demonstrably run in production — evidence cited inline |
+| 🟡 Unverified | Code-complete, but no production execution on record |
+
+**🟡 is not a bug report.** It means nobody has exercised the path yet, so nothing about it
+is confirmed either way. The single biggest cause: **no content piece has ever published.**
+All 23 pieces sit at `approved` or `rejected`, `engagement_events` has 0 rows, and everything
+downstream of the publish step — engagement, BioLoop weights, campaign KPI, analytics —
+therefore has no production signal.
+
+Purely client-side surfaces (the landing page, Social Kit canvases, the creative studio
+editors) carry **no** verification marker — they write nothing to the database, so there is no
+row count that could confirm or deny them.
+
+*Verified/Unverified evidence is from the live Supabase project, as of **2026-08-08**.
+Re-check with a row count before trusting a 🟢 that is more than a few months old.*
+
 ---
 
 ## Table of Contents
@@ -34,10 +61,13 @@
 23. [Strategic Intelligence](#23-strategic-intelligence)
 24. [Audience Model](#24-audience-model)
 25. [BioLoop Virality Signals](#25-bioloop-virality-signals)
-26. [Phase 3A — Gaps & Fixes](#phase-3a--gaps--fixes)
-27. [Phase 3B — New Capabilities](#phase-3b--new-capabilities)
-28. [Phase 3C — Creative Studio](#phase-3c--creative-studio)
-29. [Phase 4 — SaaS Readiness](#phase-4--saas-readiness)
+26. [Legal Pages](#26-legal-pages)
+27. [Media Gallery](#27-media-gallery)
+- [Phase 3A — Gaps & Fixes](#phase-3a--gaps--fixes)
+- [Phase 3B — New Capabilities](#phase-3b--new-capabilities)
+- [Phase 3C — Creative Studio](#phase-3c--creative-studio)
+- [Phase 4 — SaaS Readiness](#phase-4--saas-readiness)
+- [**Known Gaps**](#known-gaps)
 
 ---
 
@@ -46,6 +76,8 @@
 ---
 
 ### 0. Marketing Landing
+
+**Status:** ✅ Shipped (client-side only — no verification signal)
 
 **What it does:**
 Public marketing site for Vantage, ported from BioLoop Nexus Design (`Vantage Landing.html`
@@ -73,11 +105,15 @@ Subsystems · The Loop · Proof · Comparison · CTA · Footer
 
 ### 1. Authentication & Access
 
+**Status:** ✅ Shipped · 🟢 Verified (1 workspace, 1 owner membership; 6 channels holding live OAuth tokens)
+
 **What it does:**
-Users sign in with email and password via Supabase Auth. On successful login the Supabase
-session token (JWT) is stored in the browser. Every API call attaches it as a
-`Bearer` token. The API's `authMiddleware` verifies it against the Supabase project's
-JWT secret and rejects unauthenticated requests with 401.
+Users sign in through **Nexus SSO**. `/login` renders no credential form of its own — it
+checks for an existing session and otherwise calls `redirectToNexus()`, handing off to the
+Nexus identity provider and returning the operator to `/dashboard`. On return the Supabase
+session token (JWT) is stored in the browser. Every API call attaches it as a `Bearer` token.
+The API's `authMiddleware` verifies it against the Supabase project's JWT secret and rejects
+unauthenticated requests with 401.
 
 **Multi-tenant (Phase 1/2a — see [Phase 4 — SaaS Readiness](#phase-4--saas-readiness)).**
 The app is multi-tenant: data is partitioned by **workspace**. After authentication,
@@ -113,6 +149,8 @@ the anon/user key which is RLS-restricted.
 
 ### 2. Brand Voice
 
+**Status:** ✅ Shipped · 🟢 Verified (1 `brand_voice` row, injected into every generation)
+
 **What it does:**
 A single-row configuration that defines NEXUS's brand identity and is injected into every
 Kuze generation call. It shapes tone, topics to avoid, and per-channel style.
@@ -138,6 +176,8 @@ part of the user prompt.
 ---
 
 ### 3. Source Pipeline
+
+**Status:** ✅ Shipped · 🟢 Verified (**7,472** topics ingested)
 
 **What it does:**
 Ingests topics from three sources into `vantage.topics` for Kuze to generate content from.
@@ -183,6 +223,8 @@ respective Postgres schemas to be accessible from the same Supabase instance.
 
 ### 4. Content Generation — Kuze
 
+**Status:** ✅ Shipped · 🟢 Verified (23 content pieces generated across 6 channels)
+
 **What it does:**
 Kuze is the AI copywriter. It takes a topic, the brand voice, and (optionally) BioLoop
 performance weights, and returns a channel-formatted JSON content payload via the workspace's
@@ -212,10 +254,16 @@ topic, all sharing a `variant_group_id` UUID. Each piece goes through the standa
 auditing pipeline independently. Returns a different response shape when `variants > 1`.
 
 **Image generation:** When `generate_image: true` is passed, after text generation,
-DALL-E 3 is called with a prompt derived from the topic and vertical. The image URL is
-stored in `content_pieces.image_url` and in `content_payload.image_url`. Aspect ratio
+DALL-E 3 is called with a prompt derived from the topic and vertical. Aspect ratio
 is chosen per channel: landscape (1792×1024) for X/LinkedIn/Facebook, square (1024×1024)
 for Instagram/Reddit, portrait (1024×1792) for TikTok.
+
+The image is requested as `b64_json` and **persisted to Supabase Storage** at
+`workspaces/<ws>/generated/<piece_id>.png` before the call returns; the resulting permanent
+public URL is what lands in `content_pieces.image_url` and `content_payload.image_url`.
+OpenAI's own image URLs expire in about an hour, so they are never stored. A failed upload
+throws and the piece continues without an image (logged as `image_generate_error`) rather
+than carrying a dead link.
 
 **UTM tagging:** After the piece is inserted (so the `piece.id` is known), all URL-like
 strings in `content_payload` are tagged with `utm_source=<channel>`, `utm_medium=social`,
@@ -240,6 +288,8 @@ See [Pluggable LLM Providers](#4-8--pluggable-llm-providers).
 ---
 
 ### 5. Content Audit — Ilita
+
+**Status:** ✅ Shipped · 🟢 Verified (all 23 pieces audited — 15 `approved`, 8 `rejected`)
 
 **What it does:**
 Ilita is the AI brand-safety reviewer. It takes a content piece, its format, and the brand
@@ -266,6 +316,11 @@ See [Pluggable LLM Providers](#4-8--pluggable-llm-providers).
 ---
 
 ### 6. Queue & Status Machine
+
+**Status:** ✅ Shipped · ◐ Partially verified — the `draft → auditing → approved/rejected`
+half runs in production; **nothing has ever reached `queued`, `publishing`, `published`, or
+`failed`.** The claim lock, retry backoff, rate-limit release, and reaper are all tested in
+Vitest but have never fired against a real platform.
 
 **What it does:**
 Every content piece moves through a defined status machine stored in `content_pieces.status`:
@@ -319,8 +374,18 @@ write-back and Queue media PATCH also auto-queue approved scheduled pieces.
 
 ### 7. Publishing Adapters
 
+**Status:** ✅ Shipped · 🟡 Unverified — **no adapter has ever completed a publish in
+production.** Six channels hold live OAuth tokens and the code paths are covered by tests,
+but `published` is a status no piece has ever reached.
+
 **What it does:**
 Each channel has an adapter that takes a `content_payload` and posts it to the platform.
+
+> **Eight of nine channels post automatically. Reddit is the only manual one.**
+> `MANUAL_PUBLISH_CHANNELS` (`apps/api/src/lib/publish-pack.ts`) is the single source of truth
+> for this, and it contains exactly `{"reddit"}`. Everything downstream keys off that set: the
+> cadence engine skips those pieces, `POST /v1/publish` demands an `external_post_url` for
+> them, and `GET /v1/queue/:id/publish-pack` serves only those slugs.
 
 > **Per-tenant credentials (Phase 2b).** Every adapter is scoped by `workspaceId`: OAuth
 > tokens (and Bluesky's app-password session) live on the workspace's own `channels` row (keyed
@@ -419,11 +484,31 @@ Fetches subscriber list, sends one email per subscriber via Resend's single-send
 Runs `tagUrls()` on the HTML body before sending so all `<a href="...">` links carry UTM
 parameters. Returns the Resend message ID.
 
-#### TikTok / Instagram / Facebook (manual)
-No direct API publish. These adapters package the `content_payload` into a structured
-object with platform-specific fields and upload instructions. The piece is marked
-`manual: true` in the publish response. The operator pastes the external URL after
-manual upload; this URL is stored as `external_post_id`.
+#### TikTok
+Posts via the TikTok **Content Posting API**. OAuth 2.0 with PKCE (`generatePkce()` →
+`buildAuthorizeUrl()` → `exchangeCodeForTokens()`). `postTikTokVideo()` uploads the rendered
+DemoForge video and returns the publish id.
+
+#### Instagram
+Posts via the Meta **Graph API**. OAuth 2.0 (no PKCE). `postInstagramMedia()` follows the
+standard two-step container flow — create a media container from the image/video URL, then
+publish it — and returns the media id.
+
+#### Facebook
+Posts to a Facebook **Page** via the Graph API. OAuth 2.0; `postFacebook()` publishes the
+`text` payload (plus image when present) and returns the post id.
+
+> **App-review gating.** The adapters are complete, but each platform still needs Advanced
+> Access before the flow works for anyone who is not already a role on the Meta/TikTok app.
+> Two migrations exist to flip the channel rows from `manual` to `oauth`
+> (`20260806000000_tiktok_instagram_oauth.sql`, `20260808000000_facebook_oauth.sql`) and are
+> deliberately **unapplied** pending that review. See [Known Gaps](#known-gaps) — today the
+> `auth_method` column they set is not read by anything, so applying them changes nothing.
+
+#### Manual packaging (retained)
+`packageForManualPost()` still exists on the TikTok, Instagram, and Facebook adapters and is
+still wired into `buildPublishPack()`. It is unreachable via the API unless the channel's slug
+is added back to `MANUAL_PUBLISH_CHANNELS` — kept as a fallback for the app-review window.
 
 **Files:**
 - `apps/api/src/adapters/x.ts`
@@ -438,16 +523,40 @@ manual upload; this URL is stored as `external_post_id`.
 - `apps/api/src/routes/publish.ts`
 
 **Configuration:** Channel-specific OAuth tokens stored in `vantage.channels`. Resend
-requires `RESEND_API_KEY`. Email sender configured via `RESEND_FROM_EMAIL`.
+requires `RESEND_API_KEY`. Email sender is configured via **`RESEND_FROM_ADDRESS`** — note the
+variable name; `adapters/email.ts` and `lib/alert.ts` both read `RESEND_FROM_ADDRESS`, and the
+adapter throws "Email channel not configured" if it is unset. (Earlier revisions of this file
+and `Instructions.md` documented `RESEND_FROM_EMAIL`, which is read by nothing.)
+TikTok/Instagram/Facebook additionally need their platform app credentials and redirect URIs.
 
 ---
 
 ### 8. Cadence Engine
 
+**Status:** ✅ Shipped · ◐ Partially verified — the auto-generate and pulse ticks demonstrably
+run (7,472 topics, 23 pieces). The cadence **publish** tick has never successfully published,
+and the six engagement/intelligence ticks have produced zero rows.
+
 **What it does:**
-A scheduler that runs four recurring ticks in a single Node.js process. Started at API
+A scheduler that runs **ten** recurring ticks in a single Node.js process. Started at API
 boot via `startCadenceEngine()`. Every tick **iterates all workspaces** and operates per-tenant
 (loading that workspace's channels/voice/settings, scoping every query by `workspace_id`).
+
+| Tick | Interval | Status |
+|---|---|---|
+| Cadence (publish queued pieces) | 60s | 🟡 never published |
+| Auto-generate | 5 min | 🟢 |
+| Pulse Reactor | 30 min | 🟢 |
+| Reddit engagement poll | 2h | 🟡 |
+| Bluesky engagement poll | 1h | 🟡 |
+| Threads engagement poll | 3h | 🟡 |
+| Competitive post collection | 4h | 🟡 |
+| Segment assignment | 6h | 🟡 |
+| Segment preference learning | 12h | 🟡 |
+| Insights generation | 24h | 🟡 |
+
+The engagement polls are all 🟡 for the same structural reason: they scan for *published*
+pieces on their channel, and there are none.
 
 #### Cadence tick (every 60 seconds)
 For each workspace, queries `content_pieces` for pieces with `status = 'queued'` and
@@ -473,18 +582,44 @@ Calls `refreshTopicsFromPulse()` — fetches HN, Reddit, and optionally NewsAPI 
 deduplicates, and inserts new pulse topics. Loads subreddit list from the Reddit channel's
 `cadence_config`.
 
+#### Engagement polling ticks (Reddit 2h · Bluesky 1h · Threads 3h)
+Platforms without a usable webhook push are polled instead. Each tick scans that channel's
+pieces published in the recent window, fetches current engagement counts, diffs them against
+the last stored snapshot, and writes `engagement_events` for meaningful deltas — then feeds
+Growth OS and campaign KPI sync the same way the webhook handlers do.
+
+#### Competitive post collection (4h)
+`collectCompetitivePosts()` reads the `monitoring_sources` rows (handles, keywords, subreddits)
+and pulls matching posts into `competitive_posts` for Strategic Intelligence to analyse. Before
+this service existed, `monitoring_sources` was written by the UI and read by nothing. Only the
+platforms Vantage is actually provisioned for are fetched; other source rows are stored but
+skipped.
+
+#### Audience ticks (segment assignment 6h · preference learning 12h · insights 24h)
+`segment-assignment.ts` maps engaged actors onto `segment_members`;
+`segment-preferences-learner.ts` derives `segment_preferences` from what those members engage
+with; `insights-generator.ts` produces `intelligence_insights` from the collected competitive
+and trend data. All three are downstream of `engagement_events` and so are inert today.
+
 #### BioLoop (Supabase Edge Function — daily at 02:00 UTC)
-Runs as `supabase/functions/bioloop/index.ts` on a pg_cron schedule. Iterates every workspace
-and runs `runBioLoop()` + `identifyEvergreenTopics()` for each whose `bioloop_enabled` setting
-is true. Can also be triggered manually (for the caller's workspace) via the Dashboard 🧬
-BioLoop button or `POST /v1/bioloop/run`.
+Runs as `supabase/functions/bioloop/index.ts` on a pg_cron schedule (`bioloop-daily`,
+confirmed active). Iterates every workspace and runs `runBioLoop()` + `identifyEvergreenTopics()`
+for each whose `bioloop_enabled` setting is true. Can also be triggered manually (for the
+caller's workspace) via the Dashboard 🧬 BioLoop button or `POST /v1/bioloop/run`.
 
 **Files:**
 - `apps/api/src/services/scheduler.ts`
+- `apps/api/src/services/{reddit,bluesky,threads}-engagement.ts`
+- `apps/api/src/services/competitive-collector.ts`
+- `apps/api/src/services/{segment-assignment,segment-preferences-learner,insights-generator}.ts`
 
 ---
 
 ### 9. BioLoop Learning
+
+**Status:** ✅ Shipped · 🟡 Unverified — `generation_weights` has **0 rows**. The daily cron is
+active and the code runs, but with `engagement_events` empty there is no signal to learn from,
+so no weight has ever been computed and no generation has ever been biased.
 
 **What it does:**
 A closed-loop feedback system that updates `vantage.generation_weights` based on
@@ -528,12 +663,15 @@ Weights can be inspected via `GET /v1/bioloop/weights?channel=<slug>`.
 
 ### 10. Channel Management
 
+**Status:** ✅ Shipped · 🟢 Verified (9 channel rows; X, LinkedIn, Threads, Bluesky, TikTok,
+Instagram all hold live tokens. Reddit and Email are `enabled: false`.)
+
 **What it does:**
 Manages the nine distribution channels and their per-channel configuration.
 
 **OAuth channels** (X, LinkedIn, Threads, TikTok, Instagram, Facebook): Full OAuth 2.0 flow
-(X and TikTok use PKCE). Reddit keeps an OAuth implementation but is surfaced as a manual
-channel — see the Reddit section above.
+(X and TikTok use PKCE). All six post automatically. Reddit keeps an OAuth implementation but
+is surfaced as a manual channel — see the Reddit section above.
 - `POST /v1/channels/:slug/auth/start` — generates the authorization URL (+ code verifier for X)
 - `GET /v1/channels/:slug/auth/callback` — dispatches by slug, exchanges code for tokens, stores
   them in the workspace's `channels` row under `auth_state.tokens`
@@ -553,6 +691,15 @@ refuses cloud egress, so content is generated and handed to a human via the Publ
 See the Reddit section above. TikTok, Instagram and Facebook were manual historically; they
 now post automatically over OAuth.
 
+> **Auth method is derived, not stored.** `apps/api/src/lib/channel-auth.ts` computes each
+> channel's `auth_method` (`oauth` / `api_key` / `manual`) and `supports_oauth` from
+> `MANUAL_PUBLISH_CHANNELS` — the same set the cadence engine and publish route obey — and
+> `GET /v1/channels` returns both on every row. The `channels.auth_method` **column is
+> deliberately not read**: it goes stale silently, because `seedDefaultChannels()` upserts with
+> `ignoreDuplicates` and never updates an existing row. That is what once left Facebook reading
+> `manual` in the database while it was posting automatically. `CHANNEL_META` in
+> `ChannelsPage.tsx` is now presentation-only. See [Known Gaps](#known-gaps).
+
 **Cadence config** (per channel):
 - `posts_per_day` — target daily volume for auto-generate
 - `posting_hours` — array of UTC hours to schedule posts (e.g. `[9, 12, 17]`)
@@ -568,6 +715,10 @@ now post automatically over OAuth.
 ---
 
 ### 11. Webhook Receivers
+
+**Status:** ✅ Shipped · 🟡 Unverified — `engagement_events` has **0 rows**. Signature
+verification is covered by tests, but no real platform delivery has ever been received, because
+nothing has been published for a platform to report on.
 
 **What it does:**
 Receives platform engagement events and stores them in `vantage.engagement_events`,
@@ -627,6 +778,9 @@ Manual publish already did; email webhooks and Reddit poll now match.
 
 ### 12. Newsletter Subscribers
 
+**Status:** ✅ Shipped · 🟡 Unverified — **0 subscribers**, and the email channel row is
+`enabled: false`. A newsletter send today would throw "No active email subscribers".
+
 **What it does:**
 Manages the email distribution list for the email channel.
 
@@ -651,6 +805,10 @@ channel tile is expanded, below the CadenceForm.
 
 ### 13. Music Library
 
+**Status:** ✅ Shipped · 🟡 Unverified — **0 tracks registered.** There is also no upload UI:
+tracks must be pushed to Storage manually and registered with a raw `POST /v1/music` call, so
+in practice the library is unusable from the app today.
+
 **What it does:**
 A registry of royalty-free background music tracks used by DemoForge video generation.
 Tracks are stored as records in `vantage.music_tracks`; the actual audio files live in
@@ -671,6 +829,11 @@ the processor downloads the file from Storage for mixing.
 ---
 
 ### 14. DemoForge Video Pipeline
+
+**Status:** ✅ Shipped · 🟢 Verified — **63 jobs, 36 completed**, ~100 MB of rendered output in
+Storage, most recent success 2026-08-03. The 27 failures are dominated by resolved
+configuration issues rather than pipeline defects; see [Known Gaps](#known-gaps) for the
+breakdown.
 
 **What it does:**
 A separate Railway service (`apps/demoforge`) that produces platform-formatted marketing
@@ -959,6 +1122,10 @@ longer fails the job: DemoForge logs a warning and renders a silent video instea
 
 ### 15. Dashboard
 
+**Status:** ✅ Shipped · ◐ Partially verified — stat cards, topic list and the live activity
+feed run on real data (4,381 activity events). "Published Today" and "Top Pieces — 7d" have
+never shown a non-zero value.
+
 **What it does:**
 The primary operator view. Loads on login and auto-updates via Supabase realtime.
 
@@ -1000,6 +1167,8 @@ The primary operator view. Loads on login and auto-updates via Supabase realtime
 ---
 
 ### 16. Content Queue Page
+
+**Status:** ✅ Shipped · 🟢 Verified (the review surface for all 23 pieces)
 
 **What it does:**
 Lists all content pieces with filter tabs by status. Operators review, audit, and
@@ -1061,6 +1230,8 @@ dispatch pieces from this page.
 
 ### 17. Settings Page
 
+**Status:** ✅ Shipped · 🟢 Verified (5 settings rows persisted)
+
 **What it does:**
 Live pipeline configuration. All values are read from and written to `vantage.settings`
 via `GET /v1/settings` and `PATCH /v1/settings`. Changes take effect on the next
@@ -1114,6 +1285,9 @@ publish permanent fails, DemoForge job fails, and campaign media enqueue failure
 
 ### 18. Activity Logging
 
+**Status:** ✅ Shipped · 🟢 Verified (**4,381** events — the most heavily exercised table in
+the schema)
+
 **What it does:**
 Every meaningful pipeline event writes a row to `vantage.activity_events`. This provides
 a complete audit trail visible in the Dashboard live feed and queryable for debugging.
@@ -1135,6 +1309,9 @@ a complete audit trail visible in the Dashboard live feed and queryable for debu
 
 ### 19. Database Infrastructure
 
+**Status:** ✅ Shipped · 🟢 Verified (36 tables live; 1 workspace, 1 membership — multi-tenancy
+is built and enforced, but has only ever run single-tenant)
+
 **What it does:**
 All application data lives in the `vantage` Postgres schema on Supabase. PostgREST
 exposes only the `public` schema by default, so auto-updatable views in `public` proxy
@@ -1146,6 +1323,10 @@ users → workspaces with roles. Every core table carries a `workspace_id` (NOT 
 `(workspace_id, slug)` and `settings` `(workspace_id, key)`; `content_pieces` /
 `generation_weights` use composite FKs to `channels`. `music_tracks` and `sound_effects` are a
 shared global library (no `workspace_id`).
+
+**Scale:** the live `vantage` schema holds **36 tables**. The list below covers the core
+pipeline only — campaign, intelligence, audience, virality, creative and legal tables are
+documented in their own feature sections.
 
 **Core tables** (all workspace-scoped unless noted):
 - `vantage.workspaces` — tenant root (owner, name, slug). (A legacy `llm_provider` column and
@@ -1192,6 +1373,8 @@ table including defaults and FK constraints.
 ---
 
 ### 20. Social Kit
+
+**Status:** ✅ Shipped (client-side only — no verification signal)
 
 **What it does:**
 An in-app social-asset studio at `/social-kit` that produces on-brand graphics for any of the
@@ -1240,6 +1423,10 @@ selector. The active `theme-*` class is scoped to the page's wrapper `<div>` (ne
 ---
 
 ### 21. Sound Effects + Audio Mixer
+
+**Status:** ✅ Shipped · 🟡 Unverified — **0 sound effects registered**, so the mixer's effects
+bus has never carried a track. Same gap as the Music Library: no upload UI, registration is
+API-only.
 
 **What it does:**
 An extensible sound effects library and per-track audio mixer for DemoForge video generation.
@@ -1318,6 +1505,10 @@ Job submission includes optional `narration_volume`, `music_volume`, and `master
 ---
 
 ### 22. Campaign Builder
+
+**Status:** ✅ Shipped · ◐ Partially verified — **2 campaigns, 9 timeline days** created and
+launched. `campaign_kpi_tracking` has 0 rows, so the KPI band has never displayed real
+progress (it depends on engagement, which depends on publishing).
 
 **What it does:**
 Strategic campaign planning and execution engine that enables multi-channel, multi-week content campaigns
@@ -1419,6 +1610,11 @@ Uses pluggable LLM provider system.
 
 ### 23. Strategic Intelligence
 
+**Status:** ✅ Shipped · 🟡 **Unverified — all five tables have 0 rows.** No competitive post
+has been collected, no trend detected, no insight generated, no benchmark taken, and no
+monitoring source configured. The code, routes, UI and the 4-hourly collector tick all exist
+and are tested; none of it has ever produced a row in production.
+
 **What it does:**
 Competitive landscape monitoring and AI-powered strategic insight generation. Tracks competitor posts,
 detects trending topics, analyzes competitive performance, and generates actionable insights for campaign
@@ -1496,6 +1692,11 @@ Four-tab interface:
 
 ### 24. Audience Model
 
+**Status:** ✅ Shipped · 🟡 **Unverified — all six tables have 0 rows.** No segment has been
+created and no member assigned. Segmentation is downstream of `engagement_events`, which is
+empty. Note also that **GA4 sync is not implemented** despite appearing in the route list
+below — see the ⬜ marker on that endpoint.
+
 **What it does:**
 Behavioral audience segmentation with ML-ready predictive scoring. Segments users by engagement
 patterns, calculates lifetime value, predicts churn risk, learns content preferences, and enables
@@ -1566,7 +1767,11 @@ segment-aware personalization across the entire platform.
 - `GET /v1/audience/segments/:id/preferences` — get learned preferences (content types, times, topics)
 - `GET /v1/audience/ga4/config` — fetch GA4 sync configuration
 - `POST /v1/audience/ga4/config` — update GA4 property ID and mapping
-- `POST /v1/audience/ga4/sync` — trigger immediate GA4 sync (imports user data and segments)
+- `POST /v1/audience/ga4/sync` — ⬜ **Not implemented.** The handler stamps `last_sync_at`,
+  writes `last_sync_status: 'success'`, logs a `ga4_sync_completed` activity event and returns
+  `{status: 'synced'}` — **without ever contacting Google** (`routes/audience.ts`, marked
+  `// TODO: Implement actual GA4 API sync`). The UI's "Sync now" button therefore reports a
+  success that means nothing. Deferred until segments are actually in use.
 
 **UI (`apps/web/src/pages/AudiencePage.tsx`):**
 Three-tab interface:
@@ -1596,6 +1801,10 @@ Three-tab interface:
 ---
 
 ### 25. BioLoop Virality Signals
+
+**Status:** ✅ Shipped · 🟡 **Unverified — all five tables have 0 rows.** No viral signal
+detected, no pattern recognised, no recommendation generated. Like Features 23 and 24, this is
+a complete, tested subsystem with no production input.
 
 **What it does:**
 Multi-platform trend detection, viral pattern recognition, and segment-aware virality analysis.
@@ -1693,6 +1902,92 @@ Early boost signals suggest which segments to target for amplification.
 - Workspace-scoped; indexes on virality_score, viral_probability, platform, status
 
 **Configuration:** Requires pluggable LLM provider (Claude, GPT-4o, Grok configurable per workspace).
+
+---
+
+### 26. Legal Pages
+
+**Status:** ✅ Shipped (code) · 🔴 **Broken in production — the migration is not applied.**
+
+**What it does:**
+Serves the platform's Terms & Conditions and Privacy Policy. These are **global**, not
+workspace-scoped: one Vantage instance has one ToS and one Privacy Policy.
+
+The read endpoint is deliberately **unauthenticated** — mounted on the public `app` before the
+`authedV1` group — because platform reviewers (TikTok, Meta) must be able to open a live URL
+without credentials. That makes this feature a hard dependency of channel app review.
+
+- `GET /v1/legal/:slug` — public; 404s on any slug outside `terms` / `privacy`
+- `PATCH /v1/legal/:slug` — authenticated, for the in-app editor
+- `/terms` and `/privacy` — public React routes, linked from the landing page footer
+- `/legal` — the authenticated editor page
+
+**Current defect:** `supabase/migrations/20260805000000_legal_pages.sql` has **never been
+applied** — `to_regclass('vantage.legal_pages')` returns null on the live project. `GET
+/v1/legal/:slug` therefore fails and `LegalPage.tsx` renders the raw error string to any
+visitor. Applying the migration is the whole fix; it is additive and idempotent
+(`CREATE TABLE IF NOT EXISTS` + view + trigger + two empty seed rows).
+
+**Files:**
+- `apps/api/src/lib/legal-pages.ts` — `isLegalSlug`, `getLegalPage`, `updateLegalPage`
+- `apps/api/src/routes/legal.ts` — the authenticated `PATCH`
+- `apps/api/src/index.ts` — the public `GET` route
+- `apps/web/src/pages/legal/LegalPage.tsx` — public renderer
+- `apps/web/src/pages/LegalEditorPage.tsx` — authenticated editor
+- `supabase/migrations/20260805000000_legal_pages.sql` — **unapplied**
+
+---
+
+### 27. Media Gallery
+
+**Status:** ✅ Shipped · 🟢 Verified (indexes ~211 existing assets — 36 renders, 165 extracted
+keyframes, 10 covers, 15 piece images/videos — against 202 Storage objects after URL dedupe)
+
+**What it does:**
+One browsable index at `/media` of every image and video the workspace has produced. Media
+was previously reachable only from the surface that made it: a hero image on its Queue row, a
+render inside its DemoForge job, carousel slides nowhere at all once the modal closed.
+
+**Sources indexed:**
+| Source | Assets |
+|---|---|
+| `piece` | `image_url`, `video_url`, `content_payload.og_image_url`, `carousel_urls[]`, `mode_stills[]` |
+| `demoforge` | `output_url` render, `thumbnail_url` cover, `extracted_frames[]` keyframes |
+| `brand_kit` | logos |
+| `clip` | intro/outro clips (workspace + global library), preview GIF as poster |
+
+**`GET /v1/media/gallery`** — `?source=&kind=&limit=&offset=`. Returns
+`{ items, total, next_offset, scan_limit }`. Each item carries `piece_id` / `job_id` so the UI
+can link back to its owner.
+
+**The index is built from database rows, never a Storage listing.** Storage paths are not
+uniformly workspace-namespaced — DemoForge writes `demoforge/<format>/<job_id>.mp4` with no
+workspace segment — so ownership cannot be read off the path. Every query filters on
+`workspace_id`, which makes the gallery tenant-safe by construction regardless of bucket
+layout. See the Storage note in [Known Gaps](#known-gaps).
+
+**Behaviour worth knowing:**
+- Results are **de-duplicated by URL** — a job's cover is often also the linked piece's hero,
+  and would otherwise appear twice.
+- Slide 01 of a carousel is mirrored onto `image_url` by the builder, so it is listed once as
+  the hero rather than twice.
+- Videos carry a poster (`thumbnail_url`) where one is known; a video's hero image is used.
+- Sorted newest first; assets with no timestamp sort **last**, so an undated brand kit logo
+  cannot outrank a fresh render.
+- Each source is scanned to `GALLERY_SCAN_LIMIT` (500) rows — the gallery shows recent assets
+  rather than paging exhaustively through all history. The UI says so when the cap is reached.
+
+**Viewing** reuses the shared `MediaLightbox`, and the whole filtered set is handed to it, so
+←/→ walks the entire gallery rather than just the tile that was clicked.
+
+**Files:**
+- `apps/api/src/lib/media-gallery.ts` — aggregation, dedupe, sort, paging (pure, unit-tested)
+- `apps/api/src/lib/media-gallery.test.ts` — 14 tests
+- `apps/api/src/routes/media.ts` — `GET /gallery` alongside the existing `POST /upload`
+- `apps/web/src/pages/MediaGalleryPage.tsx` — tile grid, filter chips, load-more
+- `apps/web/src/App.tsx` — `/media` route + sidebar entry
+
+**Configuration:** None beyond the existing Supabase Storage setup.
 
 ---
 
@@ -1846,7 +2141,9 @@ the Reddit channel and weights never update.
 
 ### 3A-8 — Per-Vertical Dashboard Breakdown
 
-**Status:** ✅ Shipped
+**Status:** ◐ Partial — what shipped is `{published_7d, published_today}` per vertical
+(`routes/dashboard.ts`). The `queued` / `auditing` counts and the engagement-by-vertical
+aggregation described below were **not** built; the `engagement_events` join is absent.
 
 **Problem:** The spec says "Dashboard shows per-channel *and per-vertical* breakdown of
 activity and engagement." The dashboard currently has per-channel stats but never
@@ -1936,7 +2233,9 @@ drive the most events, or how channels compare over weeks.
   - Line chart: engagement events over time (channel color-coded)
   - Bar chart: engagement by posting hour
   - Bar chart: top 10 verticals by engagement rate
-  - Uses a lightweight chart library (recharts or chart.js)
+  - Charts are **hand-rolled inline SVG** (`<polyline>` / `<rect>` against a computed
+    viewBox), not recharts or chart.js — no charting dependency was added. The original plan
+    called for a library; the implementation didn't need one.
 
 **Files to create/change:** `apps/api/src/routes/analytics.ts` (new),
 `apps/web/src/pages/AnalyticsPage.tsx` (new), app router + sidebar
@@ -2260,7 +2559,7 @@ after the foundation.)
 
 ### 3C-6 — Email / Newsletter Template Builder
 
-**Status:** ✅ Shipped
+**Status:** ✅ Shipped (builder + CRUD) · ⬜ **Pipeline integration not built**
 
 **Problem:** The Email channel sends Kuze's raw HTML `body` straight to Resend with no branded
 chrome — no header, hero, styled CTA button, or footer. There is no visual way to build a
@@ -2277,17 +2576,22 @@ is email-client-safe HTML, not a PNG, so the canvas engine does not apply.
   `PreviewModal`).
 - **Persistence:** new `vantage.email_templates` table (`id`, `name`, `blocks` JSONB,
   `created_at`) + `public.email_templates` view + CRUD routes; save/load named templates.
-- **Pipeline integration:** a saved template can act as a **wrapper** — a generated
-  `email_newsletter` piece's Kuze `body` is injected into the template's text block, so
-  automated newsletters inherit branded chrome. The email adapter
-  (`apps/api/src/adapters/email.ts`) applies the selected wrapper before `tagUrls()` + send.
+- **Pipeline integration — ⬜ NOT BUILT.** The design was for a saved template to act as a
+  **wrapper**: a generated `email_newsletter` piece's Kuze `body` injected into the template's
+  text block so automated newsletters inherit branded chrome. In reality `adapters/email.ts`
+  imports only `tagUrls` and nothing anywhere reads `email_templates` outside its own CRUD
+  route — newsletters still send Kuze's raw HTML. The blocker is structural:
+  `serializeToHtml()` lives in `apps/web/src/creative/emailSerializer.ts`, browser-side, where
+  the API adapter cannot reach it. Closing this means promoting the serializer to a shared
+  workspace package and adding an `email_wrapper_template_id` setting.
 
 **Files to create/change:** `apps/web/src/pages/EmailBuilderPage.tsx` + block components (new),
 HTML serializer util, `apps/api/src/routes/email-templates.ts` (new),
 `apps/api/src/adapters/email.ts` (apply wrapper), new migration (`email_templates` table + view),
 app router + sidebar.
 
-**Configuration:** None beyond the existing Resend setup (`RESEND_API_KEY`, `RESEND_FROM_EMAIL`).
+**Configuration:** None beyond the existing Resend setup (`RESEND_API_KEY`,
+`RESEND_FROM_ADDRESS` — see the note in §7 about this variable's name).
 
 ---
 
@@ -2376,7 +2680,8 @@ engine already has it).
 
 **Status:** ✅ Shipped
 
-Vitest harness in `@vantage/api` with **42 tests** across the highest-risk paths: publish state
+Vitest harness in `@vantage/api` with **242 tests across 30 files** (all passing) covering the
+highest-risk paths: publish state
 machine (success / retry-backoff / exhausted-fail+alert / rate-limit), cadence claim lock,
 auto-generate audit gating (pass→queued, fail→regen→approved/rejected), membership/IDOR guard,
 multi-tenant OAuth state resolution, webhook signature verification + workspace attribution, and
@@ -2475,4 +2780,109 @@ Threads; Bluesky needs no app credentials (per-user app passwords; optional `BLU
 
 ---
 
-*Last updated: 22 core Vantage features operational. Phase 2 — Campaign Builder (Feature 22): campaign planning, timeline, KPI tracking with LLM-powered content ideation. Phase 3 — Strategic Intelligence (Feature 23): competitive monitoring, trend detection, gap analysis. Phase 4 — Audience Model (Feature 24): behavioral segmentation, LTV calculation, churn prediction, GA4 sync, ML-ready scoring. Phase 5 — BioLoop Virality Signals (Feature 25): viral growth detection, pattern recognition, segment-aware strategies. Workspace-scoped architecture with pluggable LLM providers (Claude/GPT-4o/Grok), now wired end-to-end and selectable **per task** (generation vs audit) per workspace. Nine distribution channels (X, LinkedIn, Reddit, Threads, Bluesky, Email + three manual). Phase 3A (15 gaps/fixes), Phase 3B (5 new capabilities), and Phase 3C — Creative Studio (7 items) all shipped. Social Kit (Feature 20), Sound Effects + Audio Mixer (Feature 21) complete. **Phase 4 — SaaS Readiness: core multi-tenancy, tenant-aware scheduler, workspace membership/roles, per-tenant channel credentials, a claim-based publish lock, pluggable LLM providers (4-8), and Threads + Bluesky channels (4-9) all shipped, with a 42-test Vitest suite + CI; billing is the remaining item.***
+## Known Gaps
+
+> Defects and honest caveats that live nowhere else. Each is real, reproduced, and small
+> enough to state plainly. Ordered by impact.
+
+### 🔴 `legal_pages` migration unapplied
+`/terms` and `/privacy` render an error string to the public. Blocks TikTok/Meta app review,
+which is in turn what gates the three newest channels. See [Feature 26](#26-legal-pages).
+
+### ✅ DALL·E image URLs expired — fixed
+**Was:** `services/imageGen.ts` requested `response_format: "url"` and stored OpenAI's hosted
+URL directly in `content_pieces.image_url` / `content_payload.image_url`. Those URLs expire
+about an hour after generation, so every generated image became a dead link, and 3A-3's
+LinkedIn image passthrough would have registered a 404 as its media asset. It never surfaced
+only because no DALL·E image had ever been persisted — all 8 pieces carrying an `image_url`
+are Supabase-hosted DemoForge write-backs.
+
+**Now:** the request asks for `b64_json`, so there is no expiry window to race at all — the
+bytes come back inline and are uploaded to `vantage-media` at
+`workspaces/<ws>/generated/<piece_id>.png` before the function returns. The only URL that
+reaches the database is the permanent Supabase public URL. An upload failure throws rather
+than returning a link, so the piece continues imageless instead of carrying a broken one
+(`image_generate_error`, already non-fatal in the generate route). Pinned by
+`services/imageGen.test.ts`.
+
+### 🟠 Nothing has ever published
+The single largest caveat in this document, repeated here because it explains most of the 🟡
+markers. `content_pieces` holds 23 rows, all `approved` or `rejected`. `published_at` is null
+everywhere and `engagement_events` has 0 rows. Features 9, 11, 23, 24 and 25, the analytics
+surface, campaign KPI tracking, and evergreen recycling are all downstream of a publish event
+that has never occurred.
+
+### ✅ `channels.auth_method` inconsistency — mitigated
+**Was:** the answer to "is this channel manual?" existed in three places that could disagree —
+the `channels.auth_method` column (written by `seedDefaultChannels()`, read by nothing, and
+stale because the seeding upsert uses `ignoreDuplicates` and never updates existing rows),
+a hard-coded `CHANNEL_META[].authMethod` map in `ChannelsPage.tsx`, and
+`MANUAL_PUBLISH_CHANNELS` — the only one the pipeline actually obeys. Facebook read `manual`
+in the database while holding valid OAuth tokens and posting automatically.
+
+**Now:** `apps/api/src/lib/channel-auth.ts` **derives** `auth_method` and `supports_oauth`
+from `MANUAL_PUBLISH_CHANNELS`, `GET /v1/channels` returns both on every row, and the UI
+consumes them. `CHANNEL_META` is presentation-only (icon, accent, copy) and the client-side
+`OAUTH_CHANNELS` list is gone. A stale database row can no longer make the UI contradict the
+publish path, and no migration was required to achieve it.
+
+**Residual:** the `channels.auth_method` column itself is now explicitly vestigial — still
+written, deliberately never read. The two pending migrations that flip TikTok/Instagram/
+Facebook to `oauth` (`20260806000000_…`, `20260808000000_…`) are therefore no-ops; their
+warnings about "flipping the Connect button live" no longer describe anything. Drop the column
+and both files when convenient.
+
+### 🟠 Live schema has drifted from the repo
+Two migrations are applied on the live project with no corresponding file in
+`supabase/migrations/`: `demoforge_baseline` and `saas_schema_reconciliation` (both
+2026-08-06). The latter is what added `workspace_id` to `email_templates` — the repo's
+`20260609000000_email_templates.sql` still describes the table without it. A clean rebuild
+from the repo would not reproduce production.
+
+### 🟡 DemoForge failure corpus is mostly historical
+27 of 63 jobs failed, but the raw 43% overstates it. By cause: 8 × missing
+`ELEVENLABS_API_KEY` (**already fixed** — `processor.ts` now degrades to a silent video; all 8
+predate the fix), 4 × the Shift `__shiftDemoPlay` helper being absent, 4 × operator-typo'd
+hostnames (`theshift.biologyloopnexus.com`, `theshift,bioloopnexus.com`), 3 × missing local
+`ffmpeg`/Chromium, 1 × FFmpeg filtergraph binding, 1 × ElevenLabs 402. The only live,
+unaddressed class is the typo'd hostnames — there is no URL validation on job submit.
+
+### 🟡 Storage is not workspace-namespaced
+`vantage-media` is public-read and DemoForge writes to `demoforge/<format>/<job_id>.mp4` with
+no workspace segment. Harmless at one tenant; with several it permits cross-tenant enumeration
+by job id. Ownership currently has to be resolved through `demoforge_jobs.workspace_id` rather
+than from the path.
+
+### 🟡 Two route files bypass the workspace context
+`routes/audience.ts` and `routes/campaigns.ts` read `c.req.header('x-workspace-id')` directly
+and throw 400 when it is absent, instead of using `c.get("workspaceId")` as every other route
+does. Not a security hole — `workspaceGuard` has already validated membership by that point —
+but they lose the documented "fall back to the caller's default workspace" behaviour.
+
+### 🟡 Music and sound-effect libraries have no upload UI
+Both are registration-by-raw-API-call only, and both have 0 rows. The audio mixer, intro/outro
+picker and DemoForge image overlays all depend on libraries that are empty and awkward to fill
+(brand kits: 0, intro/outro clips: 0).
+
+---
+
+*Last updated **2026-08-08**, following a full audit against the source tree and the live
+Supabase project.*
+
+**Built and running:** source pipeline (7,472 topics), Kuze generation + Ilita audit (23
+pieces), DemoForge (63 jobs / 36 rendered), Campaign Builder (2 campaigns), activity logging
+(4,381 events), the media gallery (~211 assets indexed), nine channels with six holding live
+OAuth tokens, Social Kit + the seven-item Creative Studio, and the full Phase 4
+SaaS-readiness stack — multi-tenancy, tenant-aware
+scheduler, membership/roles, per-tenant credentials, claim-based publish lock, pluggable LLM
+providers across five vendors, and Threads + Bluesky. **242 tests across 30 files, plus CI.**
+
+**Built but never exercised:** everything downstream of publishing — engagement ingestion,
+BioLoop weight learning, Strategic Intelligence, the Audience Model, and Virality Signals.
+Complete, tested, and sitting at zero rows.
+
+**Not built:** Billing & Plans (4-7), GA4 sync (4-8's sibling in Feature 24), and the 3C-6
+email-wrapper pipeline integration.
+
+**Broken:** the `legal_pages` migration — `/terms` and `/privacy` serve an error to the public
+until it is applied. See [Known Gaps](#known-gaps).
