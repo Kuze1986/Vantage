@@ -11,6 +11,7 @@ import { z } from "zod";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import { checkHostResolves, checkTargetUrl } from "../lib/target-url.js";
+import { assertQuota, recordUsage } from "../lib/usage.js";
 import { maybeAutoQueuePiece } from "../lib/auto-queue.js";
 import {
   buildDemoForgePayload,
@@ -264,10 +265,20 @@ demoforgeRoutes.post("/jobs", async (c) => {
   const dnsCheck = await checkHostResolves(urlCheck.url.hostname);
   if (!dnsCheck.ok) throw new HTTPException(400, { message: `Recording target rejected: ${dnsCheck.reason}` });
 
+  // 4-7: renders are the expensive unit ($0.50–1.50 each) and the one metered
+  // separately from posts. Checked after validation so a rejected URL doesn't
+  // look like a quota problem.
+  await assertQuota(ws, "videos");
+
   const result = await demoFetch("/jobs", {
     method: "POST",
     body:   JSON.stringify({ ...parsed.data, workspace_id: ws }),
   }) as { job_id: string; status: string };
+
+  // Counted on accepted submission, not on completed render: the ElevenLabs and
+  // Railway spend is incurred either way, so a job that fails mid-pipeline has
+  // still cost real money.
+  await recordUsage(ws, "videos");
 
   await logActivity({
     source: "demoforge", source_type: "adapter",

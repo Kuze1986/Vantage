@@ -47,6 +47,32 @@ export type BrandKitRecord = {
   updated_at?: string;
 };
 
+/** Mirrors Plan in api/src/lib/plans.ts. A negative limit means unlimited. */
+export type BillingPlan = {
+  key: 'trial' | 'starter' | 'growth' | 'scale' | 'internal';
+  label: string;
+  priceMonthly: string;
+  priceAnnual: string | null;
+  generations: number;
+  videos: number;
+  workspaces: number;
+  channels: number;
+  features: string[];
+  selfServe: boolean;
+};
+
+export type BillingState = {
+  plan: BillingPlan;
+  subscription: { status: string; plan_key: string | null; current_period_end: string | null } | null;
+  usage: {
+    period_start: string;
+    used: { generations: number; videos: number };
+    limits: { generations: number; videos: number };
+  };
+  plans: BillingPlan[];
+  stripe_configured: boolean;
+};
+
 /** One asset in the media gallery. Mirrors MediaItem in api/src/lib/media-gallery.ts. */
 export type MediaGalleryItem = {
   id: string;
@@ -255,6 +281,18 @@ export const vantageApi = {
   // ── Dashboard ─────────────────────────────────────────────────────────────
   dashboardOverview: () =>
     vantageFetch("/v1/dashboard/overview") as Promise<DashboardOverview>,
+
+  // ── Billing ───────────────────────────────────────────────────────────────
+  getBilling: () => vantageFetch("/v1/billing") as Promise<BillingState>,
+
+  startCheckout: (plan: string, interval: 'monthly' | 'annual') =>
+    vantageFetch("/v1/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan, interval }),
+    }) as Promise<{ url: string; session_id: string }>,
+
+  openBillingPortal: () =>
+    vantageFetch("/v1/billing/portal", { method: "POST" }) as Promise<{ url: string }>,
 
   // ── Media gallery ─────────────────────────────────────────────────────────
   mediaGallery: (opts?: { source?: string; kind?: string; limit?: number; offset?: number }) => {

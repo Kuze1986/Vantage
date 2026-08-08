@@ -44,6 +44,9 @@ importers:
       openai:
         specifier: ^4.78.1
         version: 4.104.0(ws@8.20.0)(zod@3.25.76)
+      stripe:
+        specifier: ^22.4.0
+        version: 22.4.0(@types/node@22.19.17)
       undici:
         specifier: ^6
         version: 6.27.0
@@ -1565,6 +1568,15 @@ packages:
     resolution: {integrity: sha512-4gB8na07fecVVkOI6Rs4e7T6NOTki5EmL7TUduTs6bu3EdnSycntVJ4re8kgZA+wx9IueI2Y11bfbgwtzuE0KQ==}
     engines: {node: '>=0.10.0'}
 
+  stripe@22.4.0:
+    resolution: {integrity: sha512-LVJ+tcSYeqOSnXr3i+Kz2tZ7y0crLLdP2uwD/4wccrmEVyn0g/Heo0pF7as7rxS/sOjJzrb1lxgZY0Y0Dx1pSA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@types/node': '>=18'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
+
   supports-color@7.2.0:
     resolution: {integrity: sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw==}
     engines: {node: '>=8'}
@@ -3064,6 +3076,10 @@ snapshots:
   strip-final-newline@2.0.0: {}
 
   strip-json-comments@2.0.1: {}
+
+  stripe@22.4.0(@types/node@22.19.17):
+    optionalDependencies:
+      '@types/node': 22.19.17
 
   supports-color@7.2.0:
     dependencies:

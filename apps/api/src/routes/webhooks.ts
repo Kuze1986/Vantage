@@ -6,6 +6,21 @@ import { logActivity } from "../lib/activity.js";
 import { recordGrowthEvent, engagementKind } from "../lib/growth.js";
 import { recordCampaignEngagement, recordCampaignConversion, resolveCampaignIdForPiece } from "../lib/campaign-kpi.js";
 import { crcResponseToken } from "../adapters/x.js";
+import type Stripe from "stripe";
+import { getStripe, invoiceSubscriptionId } from "../lib/stripe.js";
+import {
+  alreadyProcessed,
+  markProcessed,
+  recordInvoice,
+  resolveWorkspaceId,
+  upsertCustomer,
+  upsertSubscription,
+} from "../lib/billing-webhook.js";
+
+type StripeEvent = Stripe.Event;
+type StripeCheckoutSession = Stripe.Checkout.Session;
+type StripeSubscription = Stripe.Subscription;
+type StripeInvoice = Stripe.Invoice;
 
 async function afterEngagement(opts: {
   contentPieceId: string | null;
@@ -471,4 +486,126 @@ webhooksRoutes.post("/conversion", async (c) => {
   });
 
   return c.json({ ok: true, campaign_id: campaignId });
+});
+
+// ── Stripe (4-7 Billing) ─────────────────────────────────────────────────────
+// Unauthenticated like every other webhook; the signature is the auth. Must
+// verify against the *raw* body — any reserialization changes the bytes and the
+// signature no longer matches.
+webhooksRoutes.post("/stripe", async (c) => {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) throw new HTTPException(500, { message: "STRIPE_WEBHOOK_SECRET not configured" });
+
+  const signature = c.req.header("stripe-signature");
+  if (!signature) throw new HTTPException(400, { message: "missing stripe-signature" });
+
+  const raw = await c.req.text();
+
+  let event: StripeEvent;
+  try {
+    event = getStripe().webhooks.constructEvent(raw, signature, secret) as StripeEvent;
+  } catch (err) {
+    // Never echo the reason — an attacker probing the endpoint learns nothing.
+    await logActivity({
+      source: "billing", source_type: "system",
+      event_type: "stripe_signature_invalid",
+      summary: "Rejected a Stripe webhook with an invalid signature",
+      payload: { error: err instanceof Error ? err.message : String(err) },
+    });
+    throw new HTTPException(401, { message: "invalid signature" });
+  }
+
+  // Replay is expected: Stripe redelivers on any non-2xx. Acknowledge and stop.
+  if (await alreadyProcessed(event.id)) return c.json({ ok: true, duplicate: true });
+
+  const stripe = getStripe();
+
+  try {
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data.object as StripeCheckoutSession;
+        const customerId = typeof session.customer === "string" ? session.customer : session.customer?.id ?? null;
+        const workspaceId = await resolveWorkspaceId({
+          metadataWorkspaceId: session.metadata?.workspace_id ?? null,
+          clientReferenceId: session.client_reference_id ?? null,
+          stripeCustomerId: customerId,
+        });
+
+        if (!workspaceId || !customerId) {
+          // Acknowledge rather than 500 — a retry cannot supply what the event
+          // never carried, and repeated 500s would stall the whole endpoint.
+          await logActivity({
+            source: "billing", source_type: "system",
+            event_type: "stripe_unattributable",
+            summary: "checkout.session.completed had no resolvable workspace",
+            payload: { session_id: session.id },
+          });
+          break;
+        }
+
+        await upsertCustomer({
+          workspaceId,
+          stripeCustomerId: customerId,
+          email: session.customer_details?.email ?? session.customer_email ?? null,
+        });
+
+        if (session.subscription) {
+          const subId = typeof session.subscription === "string" ? session.subscription : session.subscription.id;
+          const sub = await stripe.subscriptions.retrieve(subId);
+          await upsertSubscription(workspaceId, sub);
+        }
+        break;
+      }
+
+      case "customer.subscription.created":
+      case "customer.subscription.updated":
+      case "customer.subscription.deleted": {
+        const sub = event.data.object as StripeSubscription;
+        const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
+        const workspaceId = await resolveWorkspaceId({
+          metadataWorkspaceId: sub.metadata?.workspace_id ?? null,
+          stripeCustomerId: customerId,
+        });
+        if (!workspaceId) break;
+        await upsertSubscription(workspaceId, sub);
+        break;
+      }
+
+      case "invoice.paid":
+      case "invoice.payment_failed": {
+        const invoice = event.data.object as StripeInvoice;
+        const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer?.id ?? null;
+        const workspaceId = await resolveWorkspaceId({ stripeCustomerId: customerId });
+        await recordInvoice(workspaceId, invoice);
+
+        // No counter reset here: usage_counters is keyed by period_start, so a
+        // new period is a new row. Nothing to clear, nothing to double-clear on
+        // a replayed event.
+        if (workspaceId) {
+          const subId = invoiceSubscriptionId(invoice);
+          if (subId) {
+            const sub = await stripe.subscriptions.retrieve(subId);
+            await upsertSubscription(workspaceId, sub);
+          }
+        }
+        break;
+      }
+
+      default:
+        break;
+    }
+
+    await markProcessed(event);
+    return c.json({ ok: true });
+  } catch (err) {
+    // Let Stripe retry — the event is not marked processed.
+    const message = err instanceof Error ? err.message : String(err);
+    await logActivity({
+      source: "billing", source_type: "system",
+      event_type: "stripe_webhook_error",
+      summary: message.slice(0, 300),
+      payload: { event_id: event.id, type: event.type },
+    });
+    throw new HTTPException(500, { message: "webhook processing failed" });
+  }
 });

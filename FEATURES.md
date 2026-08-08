@@ -2704,7 +2704,7 @@ engine already has it).
 
 **Status:** ✅ Shipped
 
-Vitest harness in `@vantage/api` with **266 tests across 33 files** (all passing) covering the
+Vitest harness in `@vantage/api` with **305 tests across 36 files** (all passing) covering the
 highest-risk paths: publish state
 machine (success / retry-backoff / exhausted-fail+alert / rate-limit), cadence claim lock,
 auto-generate audit gating (pass→queued, fail→regen→approved/rejected), membership/IDOR guard,
@@ -2717,10 +2717,68 @@ utilities. A GitHub Actions workflow runs typecheck + tests + build on every pus
 
 ### 4-7 — Billing & Plans
 
-**Status:** ⬜ Planned
+**Status:** ✅ Shipped · 🟡 Unverified — **the migration is not yet applied** and no Stripe keys
+are configured, so nothing has run against live Stripe. Logic is covered by 48 tests.
 
-Stripe integration + plan tiers + quota/metering enforcement. Needs product decisions (pricing
-model, tier boundaries, what to meter). Tracked separately; not yet started.
+Stripe subscriptions, per-workspace quota, and hard-block enforcement.
+
+**Tiers** (`apps/api/src/lib/plans.ts` is the single source of truth — the billing route, the
+Settings panel, quota enforcement and the webhook's price→plan map all read it):
+
+| Plan | Price | Posts / mo | Videos / mo | Workspaces | Channels |
+|---|---|---|---|---|---|
+| Trial | $0 | 10 | 0 | 1 | 3 |
+| Starter | $39 (`$390`/yr) | 60 | 0 | 1 | 3 |
+| Growth | $129 (`$1,290`/yr) | 300 | 10 | 1 | 9 |
+| Scale | $349 (`$3,490`/yr) | 1,200 | 40 | 3 | 9 |
+| Internal | — | ∞ | ∞ | ∞ | 9 |
+
+Annual is ten months' price — two free.
+
+**Quota is metered on generation, sold as "posts."** The rate card says posts because that is
+what a customer perceives, but the counter decrements when Kuze generates. Cost is incurred at
+generation (~$0.01–0.02 text, $0.04–0.08 with an image) and the pipeline structurally generates
+more than it publishes — auto-generate fills a deficit and Ilita rejects a share. Metering
+publishes would let a workspace generate hundreds of pieces, publish sixty, and pay for sixty.
+A/B variants each count.
+
+**Enforcement is a hard block.** `assertQuota()` runs *before* any model call and refuses with
+**402** plus an upgrade prompt; `recordUsage()` runs *after* success, so a failed generation
+never consumes allowance. No overage is billed, so there is no path to a surprise invoice.
+Metering fails soft — it must never take down the pipeline it measures.
+
+**Operator exemption.** Workspaces listed in `BILLING_EXEMPT_WORKSPACES` (comma-separated ids)
+resolve to the **Internal** plan: uncapped, never counted, and short-circuited before any
+database read. Deliberately server-side env rather than a column or a setting — anything
+reachable through the API could be self-granted by the workspace it exempts. Internal is not on
+the rate card and cannot be reached through checkout.
+
+**Billing periods** key on `(workspace_id, metric, period_start)`, so a new period is a new row:
+"reset at renewal" needs no scheduled job, and a replayed `invoice.paid` cannot double-grant an
+allowance. The period anchors to the subscription's own renewal day, not the 1st.
+
+**Entitlement** covers `active`, `trialing` and **`past_due`** — cutting a customer off
+mid-dunning for a card Stripe is still retrying is hostile. `canceled` / `unpaid` drop to trial.
+
+**API:** `GET /v1/billing` · `POST /v1/billing/checkout` · `POST /v1/billing/portal` (both
+gated to owner/admin) · `POST /v1/webhooks/stripe`.
+
+**Stripe notes:** one Product per tier with monthly/annual Prices attached — sharing a Product
+makes every invoice line read identically. `payment_method_types` is deliberately never passed,
+so Stripe picks eligible methods dynamically. Two 2026 API field moves are shimmed and tested:
+subscription period timestamps moved onto items, and `invoice.subscription` moved to
+`invoice.parent.subscription_details`. Webhook events are deduped by `stripe_event_id`.
+
+**Files:** `apps/api/src/lib/{plans,usage,stripe,billing-webhook}.ts`,
+`apps/api/src/routes/billing.ts`, `apps/api/src/routes/webhooks.ts` (Stripe handler),
+`apps/web/src/pages/BillingPanel.tsx`, `supabase/migrations/20260808120000_billing.sql`.
+
+**Configuration:** `STRIPE_SECRET_KEY` (prefer a restricted `rk_` key), `STRIPE_WEBHOOK_SECRET`,
+six `STRIPE_PRICE_*` ids, `APP_BASE_URL`, optional `BILLING_EXEMPT_WORKSPACES`.
+
+**Not built:** overage billing (the rate card's +$15/100 posts, +$8/video, +$79/workspace are
+upgrade nudges, not billable items) and Stripe Tax. Enabling `automatic_tax` without an active
+tax registration collects nothing while appearing to work — read the tax reference first.
 
 ---
 
@@ -2911,13 +2969,14 @@ pieces), DemoForge (63 jobs / 36 rendered), Campaign Builder (2 campaigns), acti
 OAuth tokens, Social Kit + the seven-item Creative Studio, and the full Phase 4
 SaaS-readiness stack — multi-tenancy, tenant-aware
 scheduler, membership/roles, per-tenant credentials, claim-based publish lock, pluggable LLM
-providers across five vendors, and Threads + Bluesky. **266 tests across 33 files, plus CI.**
+providers across five vendors, and Threads + Bluesky. **305 tests across 36 files, plus CI.**
 
 **Built but never exercised:** everything downstream of publishing — engagement ingestion,
 BioLoop weight learning, Strategic Intelligence, the Audience Model, and Virality Signals.
 Complete, tested, and sitting at zero rows.
 
-**Not built:** Billing & Plans (4-7) and GA4 sync (Feature 24).
+**Not built:** GA4 sync (Feature 24), overage billing, and Stripe Tax. Billing & Plans (4-7)
+is built but needs its migration applied and Stripe keys set before it can run.
 
 **Broken:** the `legal_pages` migration — `/terms` and `/privacy` serve an error to the public
 until it is applied. See [Known Gaps](#known-gaps).

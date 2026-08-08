@@ -35,6 +35,7 @@ import { introOutroClipsRoutes } from "./routes/intro-outro-clips.js";
 import { mediaRoutes } from "./routes/media.js";
 import { oauthCallbackGet } from "./routes/oauth-callback.js";
 import { legalRoutes } from "./routes/legal.js";
+import { billingRoutes } from "./routes/billing.js";
 import { getLegalPage, isLegalSlug } from "./lib/legal-pages.js";
 import { startCadenceEngine } from "./services/scheduler.js";
 
@@ -97,6 +98,7 @@ authedV1.route("/brand-kits", brandKitsRoutes);
 authedV1.route("/intro-outro-clips", introOutroClipsRoutes);
 authedV1.route("/media", mediaRoutes);
 authedV1.route("/legal", legalRoutes);
+authedV1.route("/billing", billingRoutes);
 
 app.route("/v1", authedV1);
 

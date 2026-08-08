@@ -7,6 +7,7 @@ import { logActivity } from "../lib/activity.js";
 import { generateContent } from "../services/kuze.js";
 import { generateImage } from "../services/imageGen.js";
 import { tagUrls } from "../lib/utm.js";
+import { assertQuota, recordUsage } from "../lib/usage.js";
 import type { ChannelSlug } from "../services/kuze.js";
 
 const bodySchema = z.object({
@@ -31,6 +32,11 @@ generateRoutes.post("/:channel", async (c) => {
   const { topic_id, subreddit, generate_image, variants = 1 } = parsed.data;
   const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
+
+  // 4-7: quota is metered on generation, where the cost actually is. Checked
+  // before any model call so a refused request costs nothing. A/B variants each
+  // count — `variants: 3` is three generations of spend.
+  await assertQuota(ws, "generations");
 
   const { data: topic, error: tErr } = await sb
     .from("topics")
@@ -146,6 +152,9 @@ generateRoutes.post("/:channel", async (c) => {
       .eq("workspace_id", ws).eq("id", piece.id);
 
     createdPieces.push({ content_piece_id: piece.id, format: gen.format, status: "auditing" });
+
+    // After the piece exists, so a failed generation doesn't consume allowance.
+    await recordUsage(ws, "generations");
 
     await logActivity({
       source: "kuze", source_type: "agent",

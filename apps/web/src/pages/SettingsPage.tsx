@@ -2,6 +2,7 @@ import React from 'react'
 import { vantageApi, type BrandKitRecord, type VantageSettings } from '../api/vantage'
 import { Panel, Badge, Button } from '../ds'
 import { BrandKitsPanel } from './BrandKitsPanel'
+import { BillingPanel } from './BillingPanel'
 
 const ALL_VERTICALS = [
   'pharmacy-tech', 'healthcare', 'biotech', 'fintech', 'edtech',
@@ -159,6 +160,8 @@ export function SettingsPage() {
       {err && <div className="vg-error" style={{ marginBottom: 16 }}>{err}</div>}
 
       <div className="vg-stack">
+
+        <BillingPanel />
 
         <BrandKitsPanel onKitsChange={setBrandKits} />
 
