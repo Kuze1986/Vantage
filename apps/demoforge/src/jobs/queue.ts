@@ -7,6 +7,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { processJob } from "./processor.js";
+import { sendJobFailureAlert } from "./alert.js";
 
 export type JobStatus =
   | "pending"
@@ -74,6 +75,8 @@ export interface ColorGradeConfig {
 export interface DemoJob {
   id:              string;
   content_piece_id?: string;
+  /** Carried for failure alerting — the DB row has it, the in-memory job did not. */
+  workspace_id?:   string;
   target_format:   "tiktok" | "linkedin" | "instagram";
   input_payload:   {
     url:     string;
@@ -170,6 +173,15 @@ async function drain(): Promise<void> {
       jobId: job.id,
     });
     console.error(`[demoforge] job ${job.id} failed:`, msg);
+    // A failed render tied to a piece means a campaign asset silently missed its
+    // slot. Best-effort: never let alerting failure mask the original error.
+    await sendJobFailureAlert({
+      jobId: job.id,
+      contentPieceId: job.content_piece_id,
+      workspaceId: job.workspace_id,
+      targetFormat: job.target_format,
+      error: msg,
+    }).catch((alertErr) => console.warn("[demoforge] alert failed:", alertErr));
   } finally {
     processing = false;
     void drain(); // pick up next job

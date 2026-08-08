@@ -82,6 +82,35 @@ export default function IntelligencePage() {
   const [posts, setPosts] = useState<CompetitivePost[]>([])
   const [benchmarks, setBenchmarks] = useState<Benchmark[]>([])
   const [loading, setLoading] = useState(false)
+  // Add-to-campaign: turns an insight into a campaign timeline day. The route
+  // has always existed; the UI to reach it did not.
+  const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([])
+  const [applyCampaign, setApplyCampaign] = useState<Record<string, string>>({})
+  const [applyingId, setApplyingId] = useState<string | null>(null)
+  const [applied, setApplied] = useState<Record<string, string>>({})
+  const [applyErr, setApplyErr] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    vantageApi.listCampaigns()
+      .then((r) => setCampaigns((r.campaigns ?? []).map((c) => ({ id: c.id, name: c.name }))))
+      .catch(() => { /* the dropdown just stays empty; not worth an error banner */ })
+  }, [])
+
+  const applyInsight = async (insightId: string) => {
+    const campaignId = applyCampaign[insightId]
+    if (!campaignId) return
+    setApplyingId(insightId)
+    setApplyErr((p) => ({ ...p, [insightId]: '' }))
+    try {
+      await vantageApi.applyInsightToCampaign(insightId, campaignId)
+      const name = campaigns.find((c) => c.id === campaignId)?.name ?? 'campaign'
+      setApplied((p) => ({ ...p, [insightId]: name }))
+    } catch (e) {
+      setApplyErr((p) => ({ ...p, [insightId]: String((e as Error).message) }))
+    } finally {
+      setApplyingId(null)
+    }
+  }
 
   useEffect(() => {
     loadData()
@@ -214,6 +243,47 @@ export default function IntelligencePage() {
                         ))}
                       </div>
                     )}
+
+                    {/* Turn the insight into a campaign timeline day */}
+                    <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--nx-border)' }}>
+                      {applied[insight.id] ? (
+                        <span style={{ fontFamily: 'var(--nx-mono)', fontSize: '0.75rem', color: 'var(--nx-green, #22c55e)' }}>
+                          ✓ Added to {applied[insight.id]}
+                        </span>
+                      ) : campaigns.length === 0 ? (
+                        <span style={{ fontFamily: 'var(--nx-mono)', fontSize: '0.72rem', color: 'var(--nx-text-4)' }}>
+                          Create a campaign to add this insight to a timeline.
+                        </span>
+                      ) : (
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <select
+                            value={applyCampaign[insight.id] ?? ''}
+                            onChange={(e) => setApplyCampaign((p) => ({ ...p, [insight.id]: e.target.value }))}
+                            style={{
+                              fontFamily: 'var(--nx-mono)', fontSize: '0.75rem', padding: '0.3rem 0.5rem',
+                              background: 'var(--nx-surface-2)', color: 'var(--nx-text-2)',
+                              border: '1px solid var(--nx-border)', borderRadius: '0.25rem',
+                            }}
+                          >
+                            <option value="">Select campaign…</option>
+                            {campaigns.map((c) => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
+                          <Button
+                            label={applyingId === insight.id ? 'Adding…' : 'Add to campaign'}
+                            size="sm"
+                            onClick={() => void applyInsight(insight.id)}
+                            disabled={!applyCampaign[insight.id] || applyingId === insight.id}
+                          />
+                          {applyErr[insight.id] && (
+                            <span style={{ fontFamily: 'var(--nx-mono)', fontSize: '0.7rem', color: 'var(--nx-red, #ef4444)' }}>
+                              {applyErr[insight.id]}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </Panel>
               ))}

@@ -124,6 +124,7 @@ app.post("/jobs", async (c) => {
   const job: DemoJob = {
     id:               jobId,
     content_piece_id,
+    workspace_id,
     target_format,
     input_payload,
   };

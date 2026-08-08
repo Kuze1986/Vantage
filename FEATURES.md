@@ -886,7 +886,13 @@ all applied in post-processing by FFmpeg before upload.
    to `queued` (campaign autopilot). Operators can override thumbnail via
    `POST /v1/demoforge/jobs/:id/set-thumbnail` `{ frame_index }`.
    Job failure with a linked piece triggers Slack/email alerts (`ALERT_SLACK_WEBHOOK` /
-   `ALERT_EMAIL` + Resend) when configured.
+   `ALERT_EMAIL` + Resend) when configured — `apps/demoforge/src/jobs/alert.ts`. DemoForge is
+   a separate Railway service and cannot import the API's `lib/alert.ts`, so it carries its own
+   copy of the same channel precedence and throttle. Alerts fire **only** for jobs tied to a
+   content piece: an untethered job is an operator experimenting in the DemoForge page, where
+   the error is already on screen. The throttle is keyed per **workspace**, not per job, because
+   a broken template fails every job in a campaign launch and one alert about that is useful
+   where forty is noise.
 
 **Template registry (`apps/api/src/lib/demoforge-templates.ts`):**
 JSON script templates under `apps/api/src/lib/demoforge-templates/`. Seeded with Shift
@@ -1672,7 +1678,11 @@ optimization.
 **UI (`apps/web/src/pages/IntelligencePage.tsx`):**
 Four-tab interface:
 - **Insights tab** — strategic recommendations displayed as cards with type badge, confidence meter,
-  description, supporting evidence links, and **Add to campaign** (campaign dropdown → apply)
+  description, supporting evidence links, and **Add to campaign** — a campaign dropdown plus an
+  apply button that turns the insight into a timeline day (`visual_type=social_graphic`).
+  Confirms inline once added, and says so plainly when no campaign exists yet.
+  *(This document claimed the control existed for some time before it did — the
+  `POST /insights/:id/apply` route was built, the UI to reach it was not.)*
 - **Trends tab** — detected trends with status indicator (emerging/peak/declining), key messaging,
   sentiment breakdown, and links to exemplifying posts
 - **Posts tab** — competitive post list with extracted themes, engagement metrics, and virality indicators
