@@ -138,6 +138,7 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
     topic_text:  input.topic_text,
     vertical:    input.vertical,
     brand_voice: input.brand_voice,
+    channel:     input.channel,
     extras: {
       subreddit: input.extras?.subreddit,
       weights: weights || undefined,
@@ -146,7 +147,13 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
       rejectionCategories: rejectionCategories || undefined,
     },
   });
-  const genOptions = { system_prompt: kuzeSystemPrompt(format), max_tokens: 1400 };
+  // Brand voice goes into the *system* prompt, where it outranks the built-in
+  // defaults, rather than sitting mid-stack in the user prompt where it lost to
+  // them.
+  const genOptions = {
+    system_prompt: kuzeSystemPrompt(format, { brandVoice: input.brand_voice, channel: input.channel }),
+    max_tokens: 1400,
+  };
 
   const rawText = (await provider.generateCompletion(userPrompt, genOptions)).trim();
 

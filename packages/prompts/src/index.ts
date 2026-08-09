@@ -16,63 +16,122 @@ export type ContentFormat = typeof channelFormatMap[ChannelSlug]
 
 // ── Kuze — unified generation ─────────────────────────────────────────────────
 
-export function kuzeSystemPrompt(format: ContentFormat): string {
-  const base = `You are Kuze, a marketing copywriter for NEXUS — a suite of online certification prep products (pharmacy technician, CDL, NREMT, and related vocational credentials). Your content promotes real products to real learners. You write with authority, clarity, and education-first energy.
+/** Shape of the `brand_voice` row, as serialized by the API before it reaches a prompt. */
+export interface BrandVoiceShape {
+  name?: string
+  description?: string
+  per_channel_tone?: Record<string, string>
+  off_topics?: string[]
+}
 
-NEXUS brand principles:
-- Lead with value — the learner's outcome comes first, the product second
-- Be accurate — never exaggerate pass rates, never make unsubstantiated claims
-- Respect the audience — these are working adults investing in their careers
-- Avoid: competitor names, discount-first messaging, clickbait, unverified medical/legal claims
-- Off-limits content will be specified in the brand voice context; never touch these topics
+export function parseBrandVoice(raw: string | null | undefined): BrandVoiceShape | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return parsed as BrandVoiceShape
+  } catch {
+    return null
+  }
+}
 
-You must return ONLY valid JSON — no markdown, no code fences, no preamble. Exact schema for each format below:`
+/**
+ * Render the brand voice for a prompt, selecting **only** the target channel's tone.
+ *
+ * The whole `per_channel_tone` object used to be stringified into the prompt, so
+ * the model received all nine channels' instructions as raw JSON and had to pick
+ * the right one out of the noise. Handing it the one that applies is the single
+ * biggest lever on adherence.
+ */
+export function renderBrandVoice(raw: string | null | undefined, channel?: string): string {
+  const voice = parseBrandVoice(raw)
+  if (!voice) return raw ? String(raw) : ''
+
+  const parts: string[] = []
+  if (voice.name) parts.push(`Brand: ${voice.name}`)
+  if (voice.description) parts.push(`Voice:\n${voice.description}`)
+
+  const tone = channel && voice.per_channel_tone ? voice.per_channel_tone[channel] : undefined
+  if (tone) parts.push(`Tone for this channel (${channel}) — this governs:\n${tone}`)
+
+  if (voice.off_topics?.length) {
+    parts.push(`Never write about:\n${voice.off_topics.map((t) => `- ${t}`).join('\n')}`)
+  }
+  return parts.join('\n\n')
+}
+
+export function kuzeSystemPrompt(
+  format: ContentFormat,
+  opts?: { brandVoice?: string; channel?: string },
+): string {
+  const voiceBlock = renderBrandVoice(opts?.brandVoice, opts?.channel)
+
+  // The brand identity is *configured*, not hard-coded. This prompt previously
+  // asserted NEXUS was "a suite of online certification prep products" with
+  // "education-first energy" — a different product and a different register from
+  // the operator's actual brand voice. Being in the system prompt, that fiction
+  // outranked the real configuration and is what produced the generic SaaS copy
+  // the audit kept rejecting.
+  const base = `You are Kuze, a marketing copywriter. You write content that promotes real products to real people, in the specific voice of the brand described below.
+
+${voiceBlock ? `${voiceBlock}\n\n` : ''}Precedence — read carefully:
+1. The brand voice and channel tone above are AUTHORITATIVE. They override every default in this prompt.
+2. The output schema below is a hard requirement — field names and character limits are not negotiable.
+3. The structural defaults below apply ONLY where the brand voice is silent. Where they conflict, the brand voice wins.
+
+Never write copy that could belong to any other company. If a sentence would survive a find-and-replace of the product name, it is too generic — rewrite it with something only this brand could say.
+
+Reject your own first instinct toward: motivational openers, "transform/unlock/say goodbye to", "seamless", "innovative", "excited to announce", "imagine a world/system where", engagement-bait questions, and any benefit promise you cannot substantiate. These are the failure modes the compliance reviewer rejects most often.
+
+Be accurate — never exaggerate outcomes, never invent product features, never make unsubstantiated claims.
+
+You must return ONLY valid JSON — no markdown, no code fences, no preamble. Escape every double quote and newline inside string values. Exact schema for this format below:`
 
   const schemas: Record<ContentFormat, string> = {
     tweet: `
 Format: tweet
 Output schema: {"body":"<tweet text, max 280 chars>"}
-Rules: Hook in the first 10 words. No hashtag spam (max 2). CTA optional but natural. Count characters.`,
+Structural defaults (yield to brand voice): Front-load the substance. Max 2 hashtags. CTA optional. Count characters.`,
 
     linkedin_post: `
 Format: linkedin_post
 Output schema: {"body":"<post text, 150–1200 chars>","headline":"<optional 6–10 word hook for first line>"}
-Rules: Professional but conversational. Open with a bold claim or surprising stat. End with a question or soft CTA. Use line breaks for readability. No emoji spam.`,
+Structural defaults (yield to brand voice): Use short paragraphs and line breaks for readability. No emoji spam. One clear argument per post.`,
 
     reddit_thread: `
 Format: reddit_thread
 Output schema: {"title":"<post title, max 300 chars>","body":"<post body, 100–800 words>","is_link_post":false}
-Rules: Value-first — teach something useful. Never a direct ad. Frame as a tip, resource, or experience. Subreddit context is provided in the prompt. No self-promotion in title.`,
+Structural defaults (yield to brand voice): Value-first — teach something useful. Never a direct ad. Subreddit context is provided in the prompt. No self-promotion in the title.`,
 
     threads_post: `
 Format: threads_post
 Output schema: {"body":"<post text, max 500 chars>"}
-Rules: Conversational and casual — Threads rewards personality over polish. Hook in the first line. Light emoji use is fine. Max 1–2 hashtags. Count characters.`,
+Structural defaults (yield to brand voice): Lead the first line with the substance. Max 1–2 hashtags. Count characters.`,
 
     bluesky_post: `
 Format: bluesky_post
 Output schema: {"body":"<post text, max 300 chars>"}
-Rules: Concise and authentic — the Bluesky audience skews technical and dislikes marketing-speak. Lead with the useful idea. No hashtag spam. Count characters (300 hard limit).`,
+Structural defaults (yield to brand voice): This audience skews technical and dislikes marketing-speak. Lead with the useful idea. No hashtag spam. Count characters (300 hard limit).`,
 
     email_newsletter: `
 Format: email_newsletter
 Output schema: {"subject":"<email subject line, 6–12 words>","preview_text":"<preview/preheader, max 100 chars>","body":"<HTML email body>"}
-Rules: Subject is benefit-led, not clickbait. Body uses simple HTML: <p>, <h2>, <ul>, <li>, <a href="...">. Include a clear CTA button anchor. 300–700 words. Warm, mentor-like tone.`,
+Structural defaults (yield to brand voice): Subject says exactly what is inside, never clickbait. Body uses simple HTML: <p>, <h2>, <ul>, <li>, <a href="...">. Include a clear CTA anchor. 300–700 words.`,
 
     tiktok_script: `
 Format: tiktok_script
 Output schema: {"hook":"<first spoken sentence, max 10 words — must stop the scroll>","body":"<full narration script, spoken word, 45–60 seconds at normal pace>","on_screen_text":"<key phrases to display on screen>"}
-Rules: Write as spoken word — short sentences, contractions, natural rhythm. Hook must work as first 3 seconds. End with a direct verbal CTA.`,
+Structural defaults (yield to brand voice): Write as spoken word — short sentences, contractions, natural rhythm. The hook must land within the first 2–3 seconds of audio. End with a direct verbal close.`,
 
     instagram_caption: `
 Format: instagram_caption
 Output schema: {"body":"<caption text, 100–400 chars before hashtags>","hashtags":["<tag without #>"],"alt_text":"<image alt text for accessibility>"}
-Rules: First line is the hook (shows before More). 5–15 hashtags, mix of niche and broad. Alt text describes what the paired image would show.`,
+Structural defaults (yield to brand voice): The first line must land on its own (it shows before “more”). 5–15 hashtags, mix of niche and broad. Alt text describes what the paired image would show.`,
 
     facebook_post: `
 Format: facebook_post
 Output schema: {"body":"<post text, 100–500 chars>"}
-Rules: Community tone. Open with a question or relatable observation to drive comments. Avoid hard sell. One clear CTA at end.`,
+Structural defaults (yield to brand voice): Accessible register — more context than X, less formal than LinkedIn. Avoid hard sell. One clear CTA at the end.`,
   }
 
   return `${base}\n${schemas[format]}`
@@ -208,6 +267,7 @@ export function kuzeUserPrompt(params: {
   topic_text: string
   vertical: string | null
   brand_voice: string
+  channel?: string
   extras?: {
     subreddit?: string
     weights?: string
@@ -218,8 +278,19 @@ export function kuzeUserPrompt(params: {
 }): string {
   const parts: string[] = []
   parts.push(`Topic:\n${params.topic_text}`)
-  parts.push(`Vertical: ${params.vertical ?? 'general vocational education'}`)
-  parts.push(`Brand voice / constraints:\n${params.brand_voice}`)
+  parts.push(`Vertical: ${params.vertical ?? 'general'}`)
+
+  // The brand voice now leads the system prompt. Repeating the channel tone here
+  // — rather than restating the whole JSON blob mid-prompt, competing with the
+  // performance-weight and virality sections — keeps it adjacent to the topic it
+  // has to govern.
+  const channelTone = parseBrandVoice(params.brand_voice)?.per_channel_tone?.[params.channel ?? '']
+  if (channelTone) {
+    parts.push(`Reminder — the tone this channel requires:\n${channelTone}`)
+  } else if (!parseBrandVoice(params.brand_voice)) {
+    // Unparseable brand voice: pass it through rather than dropping it silently.
+    parts.push(`Brand voice / constraints:\n${params.brand_voice}`)
+  }
 
   if (params.extras?.subreddit) {
     parts.push(`Target subreddit: r/${params.extras.subreddit}`)

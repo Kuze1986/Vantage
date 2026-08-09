@@ -868,7 +868,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
           .single();
         if (topicErr || !topic) throw new Error(topicErr?.message ?? 'Failed to create topic');
 
-        const gen = await generateContent({
+        let gen = await generateContent({
           workspace_id: workspaceId,
           channel,
           topic_text: topicText,
@@ -879,6 +879,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
         let auditNotes: string | null = null;
         let auditCategory: string | null = null;
         let auditPassed = true;
+        let auditIterations = 0;
         try {
           const audit = await auditContent({
             // The whole piece, not text_preview — that is a 200-char slice of a
@@ -892,6 +893,37 @@ campaignRoutes.post('/:id/launch', async (c) => {
           auditNotes = `[${audit.verdict}] ${audit.feedback}`.slice(0, 1000);
           auditPassed = audit.verdict === 'pass';
           auditCategory = audit.verdict === 'fail' ? audit.category : null;
+
+          if (!auditPassed) {
+            // Regenerate once with the reviewer's own feedback, the way the manual
+            // audit route and the scheduler both do. The launch path skipped this
+            // entirely and rejected on first failure, which is why every rejected
+            // piece from a campaign carried audit_iterations: 0 and never got the
+            // self-correction the pipeline is documented to perform.
+            auditIterations = 1;
+            const regen = await generateContent({
+              workspace_id: workspaceId,
+              channel,
+              topic_text: `${topicText}\n\nIlita feedback (must address): ${audit.feedback}`,
+              vertical: null,
+              brand_voice: brandVoiceStr,
+            });
+            const second = await auditContent({
+              content: renderForAudit(regen.content_payload),
+              format: regen.format,
+              brand_voice: brandVoiceStr,
+              workspace_id: workspaceId,
+            });
+            // Keep the retry either way: even on a second failure it is the
+            // attempt that addressed the feedback, so it is the better draft for
+            // an operator to pick up.
+            gen = regen;
+            auditPassed = second.verdict === 'pass';
+            auditCategory = second.verdict === 'fail' ? second.category : null;
+            auditNotes = auditPassed
+              ? `[pass after regen] ${second.feedback}`.slice(0, 1000)
+              : `${audit.feedback} | ${second.feedback}`.slice(0, 1000);
+          }
         } catch (auditErr) {
           // Treat audit outage as soft-fail: still produce piece for review, do not auto-queue.
           auditPassed = false;
@@ -941,7 +973,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
             status: pieceStatus,
             audit_notes: auditNotes,
             audit_category: auditCategory,
-            audit_iterations: 0,
+            audit_iterations: auditIterations,
             scheduled_for: auditPassed ? scheduledFor : null,
             media_status: mediaStatus,
           })
