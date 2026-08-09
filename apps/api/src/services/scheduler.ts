@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "../lib/supabase.js";
+import { renderForAudit } from "../lib/audit-content.js";
 import { logActivity } from "../lib/activity.js";
 import { generateContent } from "./kuze.js";
 import { auditContent } from "./ilita.js";
@@ -544,7 +545,9 @@ export async function autoGenerateTickForWorkspace(workspaceId: string): Promise
 
         // Audit it
         const auditResult = await auditContent({
-          content:      gen.text_preview || JSON.stringify(gen.content_payload),
+          // Full payload — see lib/audit-content.ts. text_preview is a 200-char
+          // slice of one field and is for display only.
+          content:      renderForAudit(gen.content_payload),
           format,
           brand_voice:  brandVoiceStr,
           workspace_id: workspaceId,
@@ -579,7 +582,7 @@ export async function autoGenerateTickForWorkspace(workspaceId: string): Promise
             vertical: topic.vertical,
             brand_voice: brandVoiceStr,
           });
-          const audit2 = await auditContent({ content: gen2.text_preview, format: gen2.format, brand_voice: brandVoiceStr, workspace_id: workspaceId });
+          const audit2 = await auditContent({ content: renderForAudit(gen2.content_payload), format: gen2.format, brand_voice: brandVoiceStr, workspace_id: workspaceId });
           const finalStatus = audit2.verdict === "pass" ? "approved" : "rejected";
           await sb.from("content_pieces").update({
             status: finalStatus,

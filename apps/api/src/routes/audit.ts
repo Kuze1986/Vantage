@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { getSupabaseAdmin } from "../lib/supabase.js";
+import { renderForAudit } from "../lib/audit-content.js";
 import { logActivity } from "../lib/activity.js";
 import { auditContent } from "../services/ilita.js";
 import { generateContent } from "../services/kuze.js";
@@ -35,7 +36,10 @@ auditRoutes.post("/", async (c) => {
 
   const format  = piece.format as ContentFormat;
   const payload = piece.content_payload as Record<string, unknown>;
-  const content = String(payload.body ?? payload.text ?? payload.hook ?? payload.title ?? JSON.stringify(payload));
+  // Every content-bearing field, not just the first one that happens to exist —
+  // hashtags, alt text and on-screen text were previously invisible to the
+  // reviewer, which had it failing pieces for omissions they did not have.
+  const content = renderForAudit(payload);
   if (!content) throw new HTTPException(400, { message: "Missing content in payload" });
 
   const { data: voices } = await sb.from("brand_voice").select("*").eq("workspace_id", ws).limit(1);
@@ -112,10 +116,10 @@ auditRoutes.post("/", async (c) => {
   }
 
   iterations = 1;
-  const newContent = String(
-    gen2.content_payload.body ?? gen2.content_payload.text ??
-    gen2.content_payload.hook ?? gen2.content_payload.title ?? ""
-  );
+  // Same full-payload render as the first pass — a regenerated piece must be
+  // judged on the same evidence, or the retry can fail for omissions the first
+  // attempt was never checked for.
+  const newContent = renderForAudit(gen2.content_payload);
   const second = await auditContent({ content: newContent, format: gen2.format, brand_voice: brandVoiceStr, workspace_id: ws });
 
   const status   = second.verdict === "pass" ? "approved" : "rejected";

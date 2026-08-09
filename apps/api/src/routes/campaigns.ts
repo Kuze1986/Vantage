@@ -25,6 +25,7 @@ import { logActivity } from '../lib/activity.js';
 import { getPreferredLLMProvider } from '../lib/llm-providers/index.js';
 import { generateContent } from '../services/kuze.js';
 import { auditContent } from '../services/ilita.js';
+import { renderForAudit } from '../lib/audit-content.js';
 import type { ChannelSlug } from '@vantage/prompts';
 import {
   buildDemoForgePayload,
@@ -880,7 +881,10 @@ campaignRoutes.post('/:id/launch', async (c) => {
         let auditPassed = true;
         try {
           const audit = await auditContent({
-            content: gen.text_preview || JSON.stringify(gen.content_payload),
+            // The whole piece, not text_preview — that is a 200-char slice of a
+            // single field, and auditing it produced phantom "cut off
+            // mid-sentence" and "no hashtags present" rejections.
+            content: renderForAudit(gen.content_payload),
             format: gen.format,
             brand_voice: brandVoiceStr,
             workspace_id: workspaceId,

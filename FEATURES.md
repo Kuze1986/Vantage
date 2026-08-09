@@ -2713,7 +2713,7 @@ engine already has it).
 
 **Status:** ✅ Shipped
 
-Vitest harness in `@vantage/api` with **328 tests across 37 files** (all passing) covering the
+Vitest harness in `@vantage/api` with **341 tests across 38 files** (all passing) covering the
 highest-risk paths: publish state
 machine (success / retry-backoff / exhausted-fail+alert / rate-limit), cadence claim lock,
 auto-generate audit gating (pass→queued, fail→regen→approved/rejected), membership/IDOR guard,
@@ -3007,7 +3007,7 @@ pieces), DemoForge (63 jobs / 36 rendered), Campaign Builder (2 campaigns), acti
 OAuth tokens, Social Kit + the seven-item Creative Studio, and the full Phase 4
 SaaS-readiness stack — multi-tenancy, tenant-aware
 scheduler, membership/roles, per-tenant credentials, claim-based publish lock, pluggable LLM
-providers across five vendors, and Threads + Bluesky. **328 tests across 37 files, plus CI.**
+providers across five vendors, and Threads + Bluesky. **341 tests across 38 files, plus CI.**
 
 **Built but never exercised:** everything downstream of publishing — engagement ingestion,
 BioLoop weight learning, Strategic Intelligence, the Audience Model, and Virality Signals.
