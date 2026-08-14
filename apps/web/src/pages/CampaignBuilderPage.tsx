@@ -144,6 +144,7 @@ function timelineDayCount(weeks: number, periodsPerWeek: number): number {
 export default function CampaignBuilderPage() {
   const [view, setView] = useState<ViewState>('list')
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [campaignLoadError, setCampaignLoadError] = useState<string | null>(null)
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [timeline, setTimeline] = useState<TimelineDay[]>([])
   const [campaignAssets, setCampaignAssets] = useState<any[]>([])
@@ -216,8 +217,10 @@ export default function CampaignBuilderPage() {
     try {
       const data = await vantageApi.listCampaigns()
       setCampaigns(data.campaigns || [])
+      setCampaignLoadError(null)
     } catch (err) {
       console.error('Failed to fetch campaigns:', err)
+      setCampaignLoadError(err instanceof Error ? err.message : 'The campaign service could not be reached.')
     }
   }
 
@@ -618,7 +621,16 @@ export default function CampaignBuilderPage() {
           </button>
         </div>
 
-        {campaigns.length === 0 ? (
+        {campaignLoadError ? (
+          <Panel title="Campaigns Unavailable">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+              <span>Existing campaigns could not be loaded. {campaignLoadError}</span>
+              <button type="button" className="nx-btn nx-btn--ghost" onClick={() => void fetchCampaigns()}>
+                RETRY
+              </button>
+            </div>
+          </Panel>
+        ) : campaigns.length === 0 ? (
           <Panel title="No Campaigns Yet">
             Create your first campaign to get started with multi-week social media planning.
           </Panel>
