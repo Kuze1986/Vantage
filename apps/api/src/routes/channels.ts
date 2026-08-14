@@ -9,7 +9,15 @@ import { buildAuthorizeUrl as liAuthorizeUrl, savePendingOAuth as liSavePending 
 import { buildAuthorizeUrl as redditAuthorizeUrl, savePendingOAuth as redditSavePending } from "../adapters/reddit.js";
 import { buildAuthorizeUrl as threadsAuthorizeUrl, savePendingOAuth as threadsSavePending } from "../adapters/threads.js";
 import { connect as blueskyConnect } from "../adapters/bluesky.js";
-import { generatePkce as ttGeneratePkce, buildAuthorizeUrl as ttAuthorizeUrl, savePendingOAuth as ttSavePending } from "../adapters/tiktok.js";
+import {
+  generatePkce as ttGeneratePkce,
+  buildAuthorizeUrl as ttAuthorizeUrl,
+  savePendingOAuth as ttSavePending,
+  fetchCreatorInfo as ttCreatorInfo,
+  fetchUserInfo as ttUserInfo,
+  fetchPublishStatus as ttPublishStatus,
+  revokeAccess as ttRevoke,
+} from "../adapters/tiktok.js";
 import { buildAuthorizeUrl as igAuthorizeUrl, savePendingOAuth as igSavePending } from "../adapters/instagram.js";
 import { buildAuthorizeUrl as fbAuthorizeUrl, savePendingOAuth as fbSavePending } from "../adapters/facebook.js";
 
@@ -209,6 +217,55 @@ channelsAuthedRoutes.post("/:slug/auth/start", async (c) => {
 const blueskyConnectSchema = z.object({
   handle:       z.string().min(1),
   app_password: z.string().min(1),
+});
+
+// ── TikTok Direct Post support ───────────────────────────────────────────────
+// These back the compose UI. TikTok's guidelines require the posting screen to
+// be rendered from a LIVE creator_info response every time it opens, so this is
+// deliberately not cached anywhere.
+
+/** GET /tiktok/creator-info — privacy options, interaction availability, limits. */
+channelsAuthedRoutes.get("/tiktok/creator-info", async (c) => {
+  const ws = c.get("workspaceId");
+  try {
+    return c.json({ creator: await ttCreatorInfo(ws) });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("not connected")) throw new HTTPException(409, { message: msg });
+    throw new HTTPException(502, { message: msg });
+  }
+});
+
+/** GET /tiktok/user-info — the connected account, for the Channels screen. */
+channelsAuthedRoutes.get("/tiktok/user-info", async (c) => {
+  const ws = c.get("workspaceId");
+  try {
+    return c.json({ user: await ttUserInfo(ws) });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("not connected")) throw new HTTPException(409, { message: msg });
+    throw new HTTPException(502, { message: msg });
+  }
+});
+
+/** GET /tiktok/publish-status/:publishId — drives the progress indicator. */
+channelsAuthedRoutes.get("/tiktok/publish-status/:publishId", async (c) => {
+  const ws = c.get("workspaceId");
+  try {
+    return c.json(await ttPublishStatus(ws, c.req.param("publishId")));
+  } catch (e) {
+    throw new HTTPException(502, { message: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+/** DELETE /tiktok/auth — revoke the token with TikTok and clear it locally. */
+channelsAuthedRoutes.delete("/tiktok/auth", async (c) => {
+  const ws = c.get("workspaceId");
+  try {
+    return c.json({ ok: true, ...(await ttRevoke(ws)) });
+  } catch (e) {
+    throw new HTTPException(502, { message: e instanceof Error ? e.message : String(e) });
+  }
 });
 
 channelsAuthedRoutes.post("/:slug/connect", async (c) => {

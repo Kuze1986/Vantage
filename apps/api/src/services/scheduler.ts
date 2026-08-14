@@ -17,6 +17,7 @@ import { listAllWorkspaceIds } from "../lib/workspace.js";
 import { sendAlert } from "../lib/alert.js";
 import { RateLimitError } from "../lib/rate-limit-error.js";
 import { recordGrowthEvent } from "../lib/growth.js";
+import { loadProductProfile } from "../lib/product-profile.js";
 import { isMediaGated, mediaGateReason, withForceMedia } from "../lib/media-gate.js";
 import { MANUAL_PUBLISH_CHANNELS } from "../lib/publish-pack.js";
 import { resolveCampaignIdForPiece } from "../lib/campaign-kpi.js";
@@ -29,7 +30,7 @@ import { postLinkedIn } from "../adapters/linkedin.js";
 import { postThread } from "../adapters/threads.js";
 import { postBluesky } from "../adapters/bluesky.js";
 import { sendEmail } from "../adapters/email.js";
-import { postTikTokVideo } from "../adapters/tiktok.js";
+import { postTikTokVideo, waitForPublish, type TikTokPostSettings } from "../adapters/tiktok.js";
 import { postInstagramMedia, postInstagramCarousel } from "../adapters/instagram.js";
 import { postFacebook, postFacebookPhotos } from "../adapters/facebook.js";
 import { carouselUrlsForChannel } from "../lib/carousel.js";
@@ -182,9 +183,23 @@ export async function publishPiece(workspaceId: string, piece: ContentPieceRow, 
       case "tiktok": {
         const videoUrl = typeof payload.video_url === "string" ? payload.video_url : piece.video_url;
         if (!videoUrl) throw new Error("TikTok post requires a video");
-        const title = String(payload.hook ?? payload.body ?? "").slice(0, 150);
-        const { id } = await postTikTokVideo(workspaceId, { videoUrl, title });
+
+        // TikTok forbids a default privacy level, so an unattended publish can
+        // only proceed with settings a human chose in the compose UI. Failing
+        // the piece is the correct outcome — posting it with an assumed privacy
+        // level would violate the Content Posting API guidelines.
+        const settings = payload.tiktok_post_settings as TikTokPostSettings | undefined;
+        if (!settings || !settings.privacy_level) {
+          throw new Error(
+            "TikTok piece has no Direct Post settings — complete the TikTok posting form before scheduling",
+          );
+        }
+        const { id } = await postTikTokVideo(workspaceId, {
+          videoUrl,
+          settings: { ...settings, title: settings.title || String(payload.hook ?? payload.body ?? "") },
+        });
         externalId = id;
+        await waitForPublish(workspaceId, id);
         break;
       }
       case "instagram": {
@@ -257,10 +272,12 @@ export async function publishPiece(workspaceId: string, piece: ContentPieceRow, 
     });
 
     const campaignId = await resolveCampaignIdForPiece(piece.id).catch(() => null);
+    const { default_product_id } = await loadProductProfile(workspaceId);
     await recordGrowthEvent({
       loop: "acquisition",
       kind: "impression",
       channel: slug,
+      product: default_product_id,
       meta: {
         content_piece_id: piece.id,
         external_post_id: externalId,

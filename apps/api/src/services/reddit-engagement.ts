@@ -15,6 +15,7 @@
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import { recordGrowthEvent, engagementKind } from "../lib/growth.js";
+import { loadProductProfile } from "../lib/product-profile.js";
 import { recordCampaignEngagement } from "../lib/campaign-kpi.js";
 import { redditFetch, redditUserAgent } from "../adapters/reddit.js";
 
@@ -73,6 +74,10 @@ export async function pollRedditEngagement(workspaceId: string): Promise<{ polle
     return { polled: 0, inserted: 0 };
   }
   if (!pieces?.length) return { polled: 0, inserted: 0 };
+
+  // Hoisted above the loop below — workspaceId is fixed for this whole poll,
+  // so this is one lookup per call rather than one per engagement event.
+  const { default_product_id } = await loadProductProfile(workspaceId);
 
   // De-duplicate post IDs (in case multiple pieces share one external post).
   // Pieces whose external_post_id isn't resolvable to a Reddit id (e.g. someone
@@ -172,6 +177,7 @@ export async function pollRedditEngagement(workspaceId: string): Promise<{ polle
             loop: "acquisition",
             kind: engagementKind("reddit_score"),
             channel: "reddit",
+            product: default_product_id,
             meta: {
               event_type: "reddit_score",
               content_piece_id: contentPieceId,

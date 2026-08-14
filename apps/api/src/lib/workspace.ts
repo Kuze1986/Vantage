@@ -44,6 +44,95 @@ export async function listAllWorkspaceIds(): Promise<string[]> {
 
 export type WorkspaceRole = "owner" | "admin" | "editor" | "viewer";
 
+export type WorkspaceSummary = { id: string; name: string; slug: string; role: WorkspaceRole };
+
+/**
+ * Every workspace a user belongs to, with their role in each.
+ *
+ * Two queries rather than a PostgREST embed: `workspaces` is a view over
+ * vantage.workspaces, and views carry no foreign keys for PostgREST to infer a
+ * relationship from, so `select('workspaces(...)')` would not resolve.
+ */
+export async function listWorkspacesForUser(userId: string): Promise<WorkspaceSummary[]> {
+  const sb = getSupabaseAdmin();
+  const { data: memberships, error } = await sb
+    .from("workspace_members")
+    .select("workspace_id, role")
+    .eq("user_id", userId);
+  if (error) throw new Error(error.message);
+  if (!memberships?.length) return [];
+
+  const roleById = new Map(memberships.map((m) => [m.workspace_id as string, m.role as WorkspaceRole]));
+  const { data: rows, error: wsErr } = await sb
+    .from("workspaces")
+    .select("id, name, slug")
+    .in("id", [...roleById.keys()])
+    .order("name", { ascending: true });
+  if (wsErr) throw new Error(wsErr.message);
+
+  return (rows ?? []).map((w) => ({
+    id: w.id as string,
+    name: w.name as string,
+    slug: w.slug as string,
+    role: roleById.get(w.id as string)!,
+  }));
+}
+
+/** URL-safe stem for a workspace slug. Empty for names with no alphanumerics. */
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+/** Postgres unique_violation. */
+const UNIQUE_VIOLATION = "23505";
+
+/**
+ * Create a workspace owned by `userId`, with an owner membership and the
+ * default channel rows.
+ *
+ * `workspaces.slug` is globally UNIQUE, and the lazy path in
+ * resolveOrCreateWorkspace derives its slug deterministically from the user id
+ * — so it can only ever produce one workspace per user. Named workspaces need
+ * their own strategy: try the slugified name, then fall back to short random
+ * suffixes. Retrying on 23505 rather than pre-checking avoids the race between
+ * a SELECT and the INSERT.
+ */
+export async function createWorkspace(userId: string, name: string): Promise<WorkspaceSummary> {
+  const sb = getSupabaseAdmin();
+  const stem = slugify(name) || `workspace-${userId.slice(0, 8)}`;
+
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const slug = attempt === 0 ? stem : `${stem}-${Math.random().toString(36).slice(2, 6)}`;
+    const { data, error } = await sb
+      .from("workspaces")
+      .insert({ owner_id: userId, name, slug })
+      .select("id, name, slug")
+      .single();
+
+    if (error) {
+      if (error.code === UNIQUE_VIOLATION) continue; // slug taken — try another
+      throw new Error(error.message);
+    }
+    if (!data) throw new Error("Failed to create workspace");
+
+    const workspaceId = data.id as string;
+    const { error: memberErr } = await sb
+      .from("workspace_members")
+      .insert({ workspace_id: workspaceId, user_id: userId, role: "owner" });
+    if (memberErr) throw new Error(memberErr.message);
+    await seedDefaultChannels(sb, workspaceId);
+
+    return { id: workspaceId, name: data.name as string, slug: data.slug as string, role: "owner" };
+  }
+
+  throw new Error(`Could not allocate a unique slug for "${name}" — try a different name`);
+}
+
 /**
  * The caller's role in a workspace, or null if they are not a member.
  * This is the authorization primitive the guard and member routes build on.

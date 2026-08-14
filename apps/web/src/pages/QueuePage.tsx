@@ -1,5 +1,7 @@
 import React from 'react'
 import { vantageApi } from '../api/vantage'
+import type { TikTokPostSettings } from '../api/vantage'
+import { TikTokComposeModal } from './TikTokComposeModal'
 import { Panel, Badge, DataTable, PreviewModal, MediaLightbox } from '../ds'
 import { QuoteCardStudio } from '../creative/QuoteCard'
 import { OgCardStudio } from '../creative/OgCard'
@@ -446,6 +448,7 @@ export function QueuePage() {
   const [carouselPiece, setCarouselPiece] = React.useState<Piece | null>(null)
   const [lightbox, setLightbox]         = React.useState<{ pieceId: string; items: LightboxItem[]; index: number } | null>(null)
   const [publishPack, setPublishPack]   = React.useState<PublishPack | null>(null)
+  const [tiktokCompose, setTikTokCompose] = React.useState<Piece | null>(null)
   const [packBusy, setPackBusy]         = React.useState<string | null>(null)
   const [selected, setSelected]         = React.useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy]         = React.useState(false)
@@ -861,12 +864,20 @@ export function QueuePage() {
               className="nx-btn nx-btn--primary nx-btn--sm"
               disabled={busy === p.id}
               onClick={() => {
+                // TikTok can't be published in one click: the Content Posting
+                // API requires the user to choose privacy, interaction and
+                // disclosure settings against live creator info first.
+                if (p.channel_slug === 'tiktok') { setTikTokCompose(p); return }
                 setBusy(p.id)
                 void action(() => vantageApi.publish(p.channel_slug, p.id), 'Published').finally(() => setBusy(null))
               }}
-              title={isMediaGated(p) ? 'Blocked until media is ready — use Force Publish' : 'Publish now'}
+              title={
+                p.channel_slug === 'tiktok'
+                  ? 'Open the TikTok posting form'
+                  : isMediaGated(p) ? 'Blocked until media is ready — use Force Publish' : 'Publish now'
+              }
             >
-              {busy === p.id ? '…' : 'Publish'}
+              {busy === p.id ? '…' : p.channel_slug === 'tiktok' ? 'Post to TikTok…' : 'Publish'}
             </button>
             {isMediaGated(p) && (
               <button
@@ -962,6 +973,23 @@ export function QueuePage() {
       {/* 3B-5: Preview modal */}
       {previewPiece && (
         <PreviewModal piece={previewPiece} onClose={() => setPreviewPiece(null)} />
+      )}
+      {tiktokCompose && (
+        <TikTokComposeModal
+          pieceId={tiktokCompose.id}
+          videoUrl={pieceVideoUrl(tiktokCompose)}
+          initialTitle={String(
+            (tiktokCompose.content_payload?.hook as string | undefined) ??
+            (tiktokCompose.content_payload?.body as string | undefined) ?? '',
+          )}
+          initial={tiktokCompose.content_payload?.tiktok_post_settings as Partial<TikTokPostSettings> | undefined}
+          onClose={() => setTikTokCompose(null)}
+          onPublished={() => {
+            setTikTokCompose(null)
+            setMsg('Posted to TikTok')
+            void load()
+          }}
+        />
       )}
       {publishPack && (
         <PublishPackModal pack={publishPack} onClose={() => setPublishPack(null)} />

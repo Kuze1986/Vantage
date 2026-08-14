@@ -3,6 +3,8 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigat
 import { supabase } from './lib/supabase'
 import { signOut } from './lib/auth/sso'
 import { NavItem } from './ds'
+import { useWorkspace } from './lib/WorkspaceContext'
+import { WorkspaceSwitcher } from './components/WorkspaceSwitcher'
 import { LoginPage } from './pages/LoginPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { QueuePage } from './pages/QueuePage'
@@ -21,8 +23,10 @@ import MediaGalleryPage from './pages/MediaGalleryPage'
 import { LandingPage } from './landing/LandingPage'
 import { LegalPage } from './pages/legal/LegalPage'
 import { LegalEditorPage } from './pages/LegalEditorPage'
+import { CreationStudioPage } from './pages/CreationStudioPage'
 
 const NAV = [
+  { label: 'Creation Studio', path: '/creation-studio', icon: '✦' },
   { label: 'Dashboard', path: '/dashboard', icon: '◈' },
   { label: 'Queue',     path: '/queue',      icon: '≋' },
   { label: 'Calendar',  path: '/calendar',   icon: '▦' },
@@ -54,6 +58,7 @@ function Sidebar() {
         <p className="vg-sidebar__brand-name">Vantage</p>
         <p className="vg-sidebar__brand-sub">Nexus Marketing OS</p>
       </div>
+      <WorkspaceSwitcher />
       <div className="vg-sidebar__divider" />
       <nav className="vg-sidebar__nav">
         <div className="vg-sidebar__section-label">Navigation</div>
@@ -85,11 +90,18 @@ function Sidebar() {
 }
 
 function Layout() {
+  const { workspaceId } = useWorkspace()
   return (
     <div className="vg-layout nx-app">
       <Sidebar />
       <main className="vg-main">
-        <Outlet />
+        {/*
+          Remount the page tree whenever the workspace changes. Pages fetch on
+          mount, and vantageFetch reads the workspace from a module-level cache
+          at request time — without a fresh mount they would keep displaying the
+          previous tenant's data until something else happened to refetch.
+        */}
+        <Outlet key={workspaceId ?? 'no-workspace'} />
       </main>
     </div>
   )
@@ -139,6 +151,7 @@ export function App() {
             </RequireAuth>
           }
         >
+          <Route path="/creation-studio" element={<CreationStudioPage />} />
           <Route path="/dashboard"  element={<DashboardPage />} />
           <Route path="/queue"      element={<QueuePage />} />
           <Route path="/calendar"   element={<CalendarPage />} />

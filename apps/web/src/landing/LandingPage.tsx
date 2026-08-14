@@ -407,13 +407,52 @@ function LandingLoop() {
   )
 }
 
+interface ProofStat { v: string; l: string; spark: number[]; c: string }
+
+// Shown until (or if) the live endpoint responds — see the note above
+// FALLBACK_STATS for why these particular numbers, not the fetch itself.
+const FALLBACK_STATS: ProofStat[] = [
+  { v: '—', l: 'PIECES PUBLISHED · 30D', spark: [0, 0, 0, 0, 0, 0, 0, 0], c: 'var(--nx-accent)' },
+  { v: '—', l: 'ENGAGEMENT EVENTS · 30D', spark: [0, 0, 0, 0, 0, 0, 0, 0], c: 'var(--nx-green)' },
+  { v: '—', l: 'ENGAGEMENT PER PIECE', spark: [0, 0, 0, 0, 0, 0, 0, 0], c: 'var(--nx-accent-2)' },
+  { v: '—', l: 'SHIFT SIGNUPS ATTRIBUTED · 30D', spark: [0, 0, 0, 0, 0, 0, 0, 0], c: 'var(--nx-silver)' },
+]
+
+function useProofStats(): ProofStat[] {
+  const [stats, setStats] = React.useState<ProofStat[]>(FALLBACK_STATS)
+
+  React.useEffect(() => {
+    const base = ((import.meta.env.VITE_VANTAGE_API_URL as string | undefined) ?? '').replace(/\/$/, '')
+    if (!base) return
+    let cancelled = false
+    // Unauthenticated on purpose — this page renders pre-login, and
+    // /v1/public/proof is mounted outside authMiddleware for exactly that
+    // reason. A failed or slow fetch must never block the landing page, so
+    // this only ever upgrades FALLBACK_STATS; it never blocks render on it.
+    void fetch(`${base}/v1/public/proof`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { stats?: { value: string; label: string; spark: number[]; color?: string }[] } | null) => {
+        if (cancelled || !data?.stats?.length) return
+        setStats(data.stats.map((s) => ({ v: s.value, l: s.label, spark: s.spark, c: s.color ?? 'var(--nx-accent)' })))
+      })
+      .catch(() => {
+        // Fallback stats already showing — nothing to do.
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  return stats
+}
+
 function LandingProof() {
-  const stats = [
-    { v: '2.4M', l: 'MONTHLY REACH ORCHESTRATED', spark: [10, 14, 12, 18, 22, 20, 26, 30], c: 'var(--nx-accent)' },
-    { v: '3.8x', l: 'AVERAGE ROAS HELD', spark: [20, 18, 22, 26, 24, 30, 32, 38], c: 'var(--nx-green)' },
-    { v: '−31%', l: 'CPA VS MANUAL BUYING', spark: [40, 36, 34, 30, 28, 24, 22, 18], c: 'var(--nx-accent-2)' },
-    { v: '1,400+', l: 'AUTONOMOUS DECISIONS / DAY', spark: [8, 12, 16, 14, 20, 24, 28, 34], c: 'var(--nx-silver)' },
-  ]
+  // These are pieces Vantage actually published, engagement events it
+  // actually recorded, and signups actually attributed back from Shift's
+  // conversion webhook — not fabricated ad-buying metrics (this section used
+  // to show a flat 2.4M reach / 3.8x ROAS / −31% CPA regardless of whether
+  // Vantage had run at all, none of which the pipeline has ever tracked).
+  // Real numbers start small; they're true, and they grow as the
+  // Shift↔Vantage loop runs.
+  const stats = useProofStats()
   return (
     <section id="proof" style={{ padding: '70px 40px', borderTop: '1px solid var(--nx-border)', background: 'var(--nx-bg)' }}>
       <div style={{ maxWidth: 1280, margin: '0 auto' }}>

@@ -92,7 +92,16 @@ auditRoutes.post("/", async (c) => {
 
   // Regen with feedback
   const { data: topic } = await sb.from("topics")
-    .select("topic_text, vertical").eq("workspace_id", ws).eq("id", piece.topic_id as string).single();
+    .select("topic_text, vertical, context_payload").eq("workspace_id", ws).eq("id", piece.topic_id as string).single();
+
+  // Campaign-launched pieces carry their campaign id in the topic's
+  // context_payload (see routes/campaigns.ts launch loop) — pass it through
+  // so a manually-retried piece still resolves the campaign's own
+  // destination_url rather than falling back to the workspace default.
+  const topicCampaignId =
+    typeof (topic?.context_payload as Record<string, unknown> | null)?.campaign_id === "string"
+      ? ((topic!.context_payload as Record<string, unknown>).campaign_id as string)
+      : null;
 
   const regenTopicText = `${topic?.topic_text ?? ""}\n\nIlita feedback (must address): ${first.feedback}`;
   let gen2: Awaited<ReturnType<typeof generateContent>>;
@@ -103,6 +112,7 @@ auditRoutes.post("/", async (c) => {
       topic_text:  regenTopicText,
       vertical:    (topic?.vertical as string | null) ?? null,
       brand_voice: brandVoiceStr,
+      campaign_id: topicCampaignId,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

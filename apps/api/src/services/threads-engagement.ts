@@ -25,6 +25,7 @@
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import { recordGrowthEvent, engagementKind } from "../lib/growth.js";
+import { loadProductProfile } from "../lib/product-profile.js";
 import { recordCampaignEngagement } from "../lib/campaign-kpi.js";
 import { getThreadsAccessToken } from "../adapters/threads.js";
 
@@ -55,6 +56,10 @@ export async function pollThreadsEngagement(workspaceId: string): Promise<{ poll
     return { polled: 0, inserted: 0 };
   }
   if (!pieces?.length) return { polled: 0, inserted: 0 };
+
+  // Hoisted above the loop below — workspaceId is fixed for this whole poll,
+  // so this is one lookup per call rather than one per engagement event.
+  const { default_product_id } = await loadProductProfile(workspaceId);
 
   let token: string;
   try {
@@ -131,6 +136,7 @@ export async function pollThreadsEngagement(workspaceId: string): Promise<{ poll
           loop: "acquisition",
           kind: engagementKind(e.event_type),
           channel: "threads",
+          product: default_product_id,
           meta: { event_type: e.event_type, content_piece_id: contentPieceId, workspace_id: workspaceId, polled: true },
         });
       }

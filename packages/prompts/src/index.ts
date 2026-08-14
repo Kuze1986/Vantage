@@ -14,6 +14,30 @@ export const channelFormatMap = {
 export type ChannelSlug = keyof typeof channelFormatMap
 export type ContentFormat = typeof channelFormatMap[ChannelSlug]
 
+// ── Cross-promotion — per-channel link delivery ───────────────────────────────
+
+/**
+ * How a resolved destination URL reaches the audience on a given channel.
+ *
+ *   inline — the link goes in the post body and is clickable there.
+ *   bio    — the platform does not render clickable links in captions
+ *            (TikTok, Instagram); the destination lives in the account bio
+ *            instead, and nothing is written into the piece itself.
+ */
+export type LinkPolicy = 'inline' | 'bio'
+
+export const CHANNEL_LINK_POLICY: Record<ChannelSlug, LinkPolicy> = {
+  x:         'inline',
+  linkedin:  'inline',
+  reddit:    'inline',
+  threads:   'inline',
+  bluesky:   'inline',
+  email:     'inline',
+  tiktok:    'bio',
+  instagram: 'bio',
+  facebook:  'inline',
+}
+
 // ── Kuze — unified generation ─────────────────────────────────────────────────
 
 /** Shape of the `brand_voice` row, as serialized by the API before it reaches a prompt. */
@@ -62,9 +86,18 @@ export function renderBrandVoice(raw: string | null | undefined, channel?: strin
 
 export function kuzeSystemPrompt(
   format: ContentFormat,
-  opts?: { brandVoice?: string; channel?: string },
+  opts?: { brandVoice?: string; channel?: string; reserveForLink?: boolean },
 ): string {
   const voiceBlock = renderBrandVoice(opts?.brandVoice, opts?.channel)
+  // A destination URL is appended deterministically after generation (see
+  // apps/api/src/lib/destination.ts) — never written by the model, because an
+  // LLM asked to emit a URL will hallucinate or drop it. This is schema-level
+  // (tier 2: non-negotiable), not a structural default the brand voice could
+  // override, since the append happens unconditionally once a destination is
+  // resolved and the model must leave room for it regardless of voice.
+  const linkNote = opts?.reserveForLink
+    ? ' A destination link is appended automatically after you respond — do not write a URL yourself, and leave room for it.'
+    : ''
 
   // The brand identity is *configured*, not hard-coded. This prompt previously
   // asserted NEXUS was "a suite of online certification prep products" with
@@ -87,36 +120,40 @@ Be accurate — never exaggerate outcomes, never invent product features, never 
 
 You must return ONLY valid JSON — no markdown, no code fences, no preamble. Escape every double quote and newline inside string values. Exact schema for this format below:`
 
+  const tweetMax = opts?.reserveForLink ? 256 : 280
+  const threadsMax = opts?.reserveForLink ? 476 : 500
+  const blueskyMax = opts?.reserveForLink ? 276 : 300
+
   const schemas: Record<ContentFormat, string> = {
     tweet: `
 Format: tweet
-Output schema: {"body":"<tweet text, max 280 chars>"}
-Structural defaults (yield to brand voice): Front-load the substance. Max 2 hashtags. CTA optional. Count characters.`,
+Output schema: {"body":"<tweet text, max ${tweetMax} chars>"}
+Structural defaults (yield to brand voice): Front-load the substance. Max 2 hashtags. CTA optional. Count characters.${linkNote}`,
 
     linkedin_post: `
 Format: linkedin_post
 Output schema: {"body":"<post text, 150–1200 chars>","headline":"<optional 6–10 word hook for first line>"}
-Structural defaults (yield to brand voice): Use short paragraphs and line breaks for readability. No emoji spam. One clear argument per post.`,
+Structural defaults (yield to brand voice): Use short paragraphs and line breaks for readability. No emoji spam. One clear argument per post.${linkNote}`,
 
     reddit_thread: `
 Format: reddit_thread
 Output schema: {"title":"<post title, max 300 chars>","body":"<post body, 100–800 words>","is_link_post":false}
-Structural defaults (yield to brand voice): Value-first — teach something useful. Never a direct ad. Subreddit context is provided in the prompt. No self-promotion in the title.`,
+Structural defaults (yield to brand voice): Value-first — teach something useful. Never a direct ad. Subreddit context is provided in the prompt. No self-promotion in the title.${linkNote}`,
 
     threads_post: `
 Format: threads_post
-Output schema: {"body":"<post text, max 500 chars>"}
-Structural defaults (yield to brand voice): Lead the first line with the substance. Max 1–2 hashtags. Count characters.`,
+Output schema: {"body":"<post text, max ${threadsMax} chars>"}
+Structural defaults (yield to brand voice): Lead the first line with the substance. Max 1–2 hashtags. Count characters.${linkNote}`,
 
     bluesky_post: `
 Format: bluesky_post
-Output schema: {"body":"<post text, max 300 chars>"}
-Structural defaults (yield to brand voice): This audience skews technical and dislikes marketing-speak. Lead with the useful idea. No hashtag spam. Count characters (300 hard limit).`,
+Output schema: {"body":"<post text, max ${blueskyMax} chars>"}
+Structural defaults (yield to brand voice): This audience skews technical and dislikes marketing-speak. Lead with the useful idea. No hashtag spam. Count characters (${blueskyMax} hard limit).${linkNote}`,
 
     email_newsletter: `
 Format: email_newsletter
 Output schema: {"subject":"<email subject line, 6–12 words>","preview_text":"<preview/preheader, max 100 chars>","body":"<HTML email body>"}
-Structural defaults (yield to brand voice): Subject says exactly what is inside, never clickbait. Body uses simple HTML: <p>, <h2>, <ul>, <li>, <a href="...">. Include a clear CTA anchor. 300–700 words.`,
+Structural defaults (yield to brand voice): Subject says exactly what is inside, never clickbait. Body uses simple HTML: <p>, <h2>, <ul>, <li>, <a href="...">. Include a clear CTA anchor. 300–700 words.${linkNote}`,
 
     tiktok_script: `
 Format: tiktok_script
@@ -131,7 +168,7 @@ Structural defaults (yield to brand voice): The first line must land on its own 
     facebook_post: `
 Format: facebook_post
 Output schema: {"body":"<post text, 100–500 chars>"}
-Structural defaults (yield to brand voice): Accessible register — more context than X, less formal than LinkedIn. Avoid hard sell. One clear CTA at the end.`,
+Structural defaults (yield to brand voice): Accessible register — more context than X, less formal than LinkedIn. Avoid hard sell. One clear CTA at the end.${linkNote}`,
   }
 
   return `${base}\n${schemas[format]}`
@@ -373,6 +410,7 @@ Universal compliance rules (apply to ALL formats):
 - No content that touches the operator-specified off-topics
 - Must accurately represent NEXUS products (do not invent features)
 - Must be appropriate for the target professional audience
+- A single destination link is appended to the body after generation, deterministically — this is expected on every format and is not by itself self-promotion, an overt ad, or a hard sell, even where the format's rules below say to avoid those
 
 Format-specific rules for this review:
 ${rules[format]}

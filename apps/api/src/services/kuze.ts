@@ -2,6 +2,7 @@ import { kuzeSystemPrompt, kuzeUserPrompt, channelFormatMap } from "@vantage/pro
 import type { ChannelSlug, ContentFormat, ViralityPatternExtra } from "@vantage/prompts";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { tagUrls } from "../lib/utm.js";
+import { resolveDestination, appendDestination } from "../lib/destination.js";
 import { resolveProvider } from "../lib/llm.js";
 import { extractJsonArray, extractJsonObject, LlmJsonError } from "../lib/llm-json.js";
 
@@ -114,6 +115,15 @@ export interface GenerateContentInput {
   vertical: string | null;
   brand_voice: string;
   pieceId?: string;
+  /**
+   * The launching campaign, if any — lets its `destination_url` override the
+   * workspace's default product link. Every regeneration path (audit
+   * retries, launch retries, autogen retries) re-enters through this same
+   * function, so passing it once here covers first-pass and retried
+   * generations alike without each caller having to remember to append a
+   * link a second time.
+   */
+  campaign_id?: string | null;
   extras?: { subreddit?: string };
 }
 
@@ -125,12 +135,14 @@ export interface GenerateContentOutput {
 
 export async function generateContent(input: GenerateContentInput): Promise<GenerateContentOutput> {
   const format = channelFormatMap[input.channel] as ContentFormat;
-  const [weights, avoidWeights, viralityPatterns, rejectionCategories] = await Promise.all([
+  const [weights, avoidWeights, viralityPatterns, rejectionCategories, destination] = await Promise.all([
     loadWeights(input.workspace_id, input.channel),
     loadUnderperformingWeights(input.workspace_id, input.channel),
     loadViralityPatterns(input.workspace_id, input.channel),
     loadRejectionCategories(input.workspace_id, input.channel),
+    resolveDestination(input.workspace_id, input.channel, input.campaign_id),
   ]);
+  const reserveForLink = destination.policy === "inline" && !!destination.url;
   const provider = await resolveProvider("generate", input.workspace_id, "kuze.generateContent");
 
   const userPrompt = kuzeUserPrompt({
@@ -151,7 +163,11 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
   // defaults, rather than sitting mid-stack in the user prompt where it lost to
   // them.
   const genOptions = {
-    system_prompt: kuzeSystemPrompt(format, { brandVoice: input.brand_voice, channel: input.channel }),
+    system_prompt: kuzeSystemPrompt(format, {
+      brandVoice: input.brand_voice,
+      channel: input.channel,
+      reserveForLink,
+    }),
     max_tokens: 1400,
   };
 
@@ -191,11 +207,26 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
     }
   }
 
-  // Tweet-specific length guard
-  if (format === "tweet") {
+  // Append the resolved destination before any length check runs, so a link
+  // that pushes a piece over budget is caught here rather than shipping a
+  // silently truncated post — see destination.ts for why this is
+  // deterministic rather than left to the model.
+  parsed = appendDestination(parsed, destination);
+
+  // Hard-capped platforms: a model that ignores its instructed budget (with
+  // or without an appended link) must fail generation, not publish a post
+  // the platform truncates or rejects outright. Bluesky's 300-grapheme cap in
+  // particular fails at the adapter/API layer with a worse error than this.
+  const LENGTH_LIMITS: Partial<Record<ContentFormat, number>> = {
+    tweet: 280,
+    threads_post: 500,
+    bluesky_post: 300,
+  };
+  const limit = LENGTH_LIMITS[format];
+  if (limit != null) {
     const body = typeof parsed.body === "string" ? parsed.body : "";
-    if (body.length > 280) {
-      throw new Error(`Kuze tweet exceeds 280 chars (${body.length})`);
+    if (body.length > limit) {
+      throw new Error(`Kuze ${format} exceeds ${limit} chars${reserveForLink ? " after destination link" : ""} (${body.length})`);
     }
   }
 

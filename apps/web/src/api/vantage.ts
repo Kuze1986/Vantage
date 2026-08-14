@@ -33,6 +33,31 @@ export async function vantageFetch(path: string, init: RequestInit = {}) {
   return body;
 }
 
+/** Live account state backing the TikTok posting form (never cached). */
+export type TikTokCreatorInfo = {
+  creator_avatar_url: string
+  creator_username: string
+  creator_nickname: string
+  privacy_level_options: string[]
+  comment_disabled: boolean
+  duet_disabled: boolean
+  stitch_disabled: boolean
+  max_video_post_duration_sec: number
+}
+
+/** Mirrors TikTokPostSettings in apps/api/src/adapters/tiktok.ts. */
+export type TikTokPostSettings = {
+  title: string
+  privacy_level: string
+  disable_comment?: boolean
+  disable_duet?: boolean
+  disable_stitch?: boolean
+  video_cover_timestamp_ms?: number
+  brand_content_toggle?: boolean
+  brand_organic_toggle?: boolean
+  is_aigc?: boolean
+}
+
 export type BrandKitRecord = {
   id: string;
   name: string;
@@ -262,6 +287,27 @@ export const vantageApi = {
       id: string; image_url: string | null; video_url: string | null;
       media_status: string; content_payload: Record<string, unknown>;
     } }>,
+
+  // ── TikTok Direct Post ────────────────────────────────────────────────────
+  // creator-info is fetched fresh every time the compose form opens — TikTok
+  // requires the options shown to reflect the account's current settings.
+  getTikTokCreatorInfo: () =>
+    vantageFetch("/v1/channels/tiktok/creator-info") as Promise<{ creator: TikTokCreatorInfo }>,
+
+  getTikTokUserInfo: () =>
+    vantageFetch("/v1/channels/tiktok/user-info") as Promise<{
+      user: { open_id: string; display_name: string; avatar_url: string };
+    }>,
+
+  getTikTokPublishStatus: (publishId: string) =>
+    vantageFetch(`/v1/channels/tiktok/publish-status/${publishId}`) as Promise<{
+      status: string; fail_reason?: string; publicly_available_post_id?: string[];
+    }>,
+
+  disconnectTikTok: () =>
+    vantageFetch("/v1/channels/tiktok/auth", { method: "DELETE" }) as Promise<{
+      ok: boolean; revoked: boolean;
+    }>,
 
   // 3A-6: Retry a permanently-failed piece
   retryPiece: (id: string) =>
@@ -496,9 +542,14 @@ export const vantageApi = {
     if (use_case) params.set("use_case", use_case);
     const qs = params.toString();
     return vantageFetch(`/v1/music${qs ? `?${qs}` : ""}`) as Promise<{
-      tracks: { id: string; title: string; artist: string | null; mood: string; use_case: string; duration_secs: number | null; bpm: number | null }[]
+      tracks: { id: string; title: string; artist: string | null; mood: string; use_case: string; duration_secs: number | null; bpm: number | null; storage_path: string; public_url: string }[]
     }>;
   },
+  uploadMusicTrack: (body: { title: string; data_url: string }) => vantageFetch('/v1/music/upload', { method: 'POST', body: JSON.stringify(body) }) as Promise<{ track: any }>,
+  listMusicProjects: () => vantageFetch('/v1/music/projects') as Promise<{ projects: any[] }>,
+  createMusicProject: (body: any) => vantageFetch('/v1/music/projects', { method: 'POST', body: JSON.stringify(body) }) as Promise<{ project: any }>,
+  updateMusicProject: (id: string, body: any) => vantageFetch(`/v1/music/projects/${id}`, { method: 'PUT', body: JSON.stringify(body) }) as Promise<{ project: any }>,
+  deleteMusicProject: (id: string) => vantageFetch(`/v1/music/projects/${id}`, { method: 'DELETE' }) as Promise<{ ok: boolean }>,
 
   // ── Sound Effects Library (Phase 3D-SE) ─────────────────────────────────────
   listSoundEffects: (category?: string, use_case?: string) => {
@@ -699,6 +750,9 @@ export const vantageApi = {
 
   getCampaign: (id: string) =>
     vantageFetch(`/v1/campaigns/${id}`) as Promise<any>,
+  listCampaignAssets: (id: string) => vantageFetch(`/v1/campaigns/${id}/assets`) as Promise<{ assets: any[] }>,
+  addCampaignAsset: (id: string, body: { title: string; asset_type: 'visual' | 'gif' | 'video' | 'music_project'; source_url?: string | null; source_ref?: string | null; metadata?: Record<string, unknown> }) =>
+    vantageFetch(`/v1/campaigns/${id}/assets`, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ asset: any }>,
 
   createCampaign: (body: any) =>
     vantageFetch("/v1/campaigns", { method: "POST", body: JSON.stringify(body) }) as Promise<any>,

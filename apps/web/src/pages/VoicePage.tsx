@@ -1,10 +1,14 @@
 import React from 'react'
 import { supabase } from '../lib/supabase'
+import { useWorkspace } from '../lib/WorkspaceContext'
 import { Panel } from '../ds'
 
-const CHANNELS = ['x', 'linkedin', 'reddit', 'email', 'tiktok', 'instagram', 'facebook']
+// Must stay in step with DEFAULT_CHANNELS in apps/api/src/lib/workspace.ts —
+// a channel missing here silently generates with no per-channel tone.
+const CHANNELS = ['x', 'linkedin', 'reddit', 'threads', 'bluesky', 'email', 'tiktok', 'instagram', 'facebook']
 
 export function VoicePage() {
+  const { workspaceId } = useWorkspace()
   const [id, setId] = React.useState<string | null>(null)
   const [name, setName] = React.useState('Brandon default')
   const [description, setDescription] = React.useState('')
@@ -16,13 +20,20 @@ export function VoicePage() {
   const [msg, setMsg] = React.useState<string | null>(null)
   const [saving, setSaving] = React.useState(false)
 
+  // Scoped by workspace: brand_voice is one row per workspace (unique index
+  // brand_voice_workspace_uidx). Without the filter this loads whichever row
+  // RLS happens to return first, which is the wrong product's voice as soon as
+  // the operator belongs to more than one workspace.
   React.useEffect(() => {
+    if (!workspaceId) return
+    let cancelled = false
     void (async () => {
       const { data, error } = await supabase
         .from('brand_voice')
         .select('*')
-        .limit(1)
+        .eq('workspace_id', workspaceId)
         .maybeSingle()
+      if (cancelled) return
       if (error) { setErr(error.message); return }
       if (data) {
         setId(data.id as string)
@@ -31,11 +42,21 @@ export function VoicePage() {
         const pt = (data.per_channel_tone ?? {}) as Record<string, string>
         setTones((prev) => ({ ...prev, ...pt }))
         setOffTopics(((data.off_topics as string[]) ?? []).join('\n'))
+      } else {
+        // Switched into a workspace with no voice yet — clear the previous one
+        // rather than leaving it on screen ready to be saved over the new id.
+        setId(null)
+        setName('')
+        setDescription('')
+        setTones(Object.fromEntries(CHANNELS.map((c) => [c, ''])))
+        setOffTopics('')
       }
     })()
-  }, [])
+    return () => { cancelled = true }
+  }, [workspaceId])
 
   const save = async () => {
+    if (!workspaceId) { setErr('No active workspace'); return }
     setSaving(true)
     setErr(null)
     setMsg(null)
@@ -52,11 +73,21 @@ export function VoicePage() {
       updated_at: new Date().toISOString(),
     }
     if (id) {
-      const { error } = await supabase.from('brand_voice').update(row).eq('id', id)
+      // Scope the update by workspace too, so a stale id from a previous
+      // workspace can never overwrite another product's voice.
+      const { error } = await supabase
+        .from('brand_voice')
+        .update(row)
+        .eq('id', id)
+        .eq('workspace_id', workspaceId)
       if (error) setErr(error.message)
       else setMsg('Brand voice saved')
     } else {
-      const { data, error } = await supabase.from('brand_voice').insert(row).select('id').single()
+      const { data, error } = await supabase
+        .from('brand_voice')
+        .insert({ ...row, workspace_id: workspaceId })
+        .select('id')
+        .single()
       if (error) setErr(error.message)
       else { setId(data?.id as string); setMsg('Brand voice created') }
     }

@@ -15,6 +15,7 @@ interface Campaign {
   kpi_targets: Record<string, number>
   default_brand_id?: string | null
   default_demoforge_template_id?: string | null
+  destination_url?: string | null
   created_at: string
   updated_at: string
 }
@@ -145,6 +146,7 @@ export default function CampaignBuilderPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [timeline, setTimeline] = useState<TimelineDay[]>([])
+  const [campaignAssets, setCampaignAssets] = useState<any[]>([])
   const [kpiMetrics, setKpiMetrics] = useState<KPIMetrics[]>([])
   const [formData, setFormData] = useState(createInitialFormData)
 
@@ -157,6 +159,7 @@ export default function CampaignBuilderPage() {
     channel_mix: Record<string, { daily: number }>
     default_brand_id: string
     default_demoforge_template_id: string
+    destination_url: string
   }>({
     name: '',
     description: '',
@@ -164,6 +167,7 @@ export default function CampaignBuilderPage() {
     channel_mix: { ...DEFAULT_CHANNEL_MIX },
     default_brand_id: 'shift',
     default_demoforge_template_id: '',
+    destination_url: '',
   })
   const [launchInfo, setLaunchInfo] = useState<string | null>(null)
   const [templates, setTemplates] = useState<DemoForgeTemplateMeta[]>([])
@@ -219,14 +223,16 @@ export default function CampaignBuilderPage() {
 
   const fetchCampaignDetails = async (campaignId: string) => {
     try {
-      const [campaignData, timelineData, kpiData] = await Promise.all([
+      const [campaignData, timelineData, kpiData, assetData] = await Promise.all([
         vantageApi.getCampaign(campaignId),
         vantageApi.getCampaignTimeline(campaignId),
         vantageApi.getCampaignKPI(campaignId),
+        vantageApi.listCampaignAssets(campaignId),
       ])
       setSelectedCampaign(campaignData)
       setTimeline(timelineData.timeline || [])
       setKpiMetrics(kpiData.kpi_tracking || [])
+      setCampaignAssets(assetData.assets || [])
     } catch (err) {
       console.error('Failed to fetch campaign details:', err)
     }
@@ -470,6 +476,7 @@ export default function CampaignBuilderPage() {
       channel_mix: mix,
       default_brand_id: selectedCampaign.default_brand_id || 'shift',
       default_demoforge_template_id: selectedCampaign.default_demoforge_template_id || '',
+      destination_url: selectedCampaign.destination_url || '',
     })
     setEditingCampaign(true)
   }
@@ -478,6 +485,10 @@ export default function CampaignBuilderPage() {
     if (!selectedCampaign) return
     if (!Object.keys(editData.channel_mix).length) {
       alert('Select at least one channel')
+      return
+    }
+    if (editData.destination_url.trim() && !/^https?:\/\//i.test(editData.destination_url.trim())) {
+      alert('Destination URL must start with http:// or https://')
       return
     }
     setBusy('campaign')
@@ -489,6 +500,7 @@ export default function CampaignBuilderPage() {
         channel_mix: editData.channel_mix,
         default_brand_id: editData.default_brand_id || 'shift',
         default_demoforge_template_id: editData.default_demoforge_template_id || null,
+        destination_url: editData.destination_url.trim() || null,
       })
       setSelectedCampaign(updated)
       setEditingCampaign(false)
@@ -978,6 +990,23 @@ export default function CampaignBuilderPage() {
                 </div>
               </div>
 
+              <div>
+                <label style={labelStyle}>Destination URL</label>
+                <input
+                  style={inputStyle}
+                  type="url"
+                  placeholder="— use workspace default (Settings → Product profile) —"
+                  value={editData.destination_url}
+                  onChange={(e) => setEditData({ ...editData, destination_url: e.target.value })}
+                />
+                <p style={{ fontSize: '0.75rem', color: 'var(--vg-text-dim, #888)', marginTop: '0.25rem' }}>
+                  Every piece this campaign launches links here instead of the workspace's default product
+                  URL — use this to promote a different NEXUS product from this campaign. Appended
+                  automatically to inline-link channels (X, LinkedIn, Reddit, Threads, Bluesky, Facebook,
+                  Email); TikTok and Instagram require a bio link instead, since captions aren't clickable.
+                </p>
+              </div>
+
               {renderChannelMixEditor(editData.channel_mix, (channel_mix) =>
                 setEditData({ ...editData, channel_mix }),
               )}
@@ -1041,6 +1070,24 @@ export default function CampaignBuilderPage() {
             ))}
           </div>
         </div>
+
+        <Panel title="Creation Studio Assets">
+          {campaignAssets.length === 0 ? (
+            <p className="nx-mono" style={{ margin: 0, fontSize: 11, color: 'var(--nx-text-4)' }}>
+              No assets attached yet. Use Creation Studio’s guided workflow to add visuals, GIFs, videos, and soundtrack projects.
+            </p>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {campaignAssets.map((asset) => (
+                <div key={asset.id} style={{ minWidth: 160, padding: 10, border: '1px solid var(--nx-border)', borderRadius: 4 }}>
+                  <div className="nx-label" style={{ fontSize: 9 }}>{String(asset.asset_type).replace('_', ' ')}</div>
+                  <div style={{ fontSize: 12, marginTop: 5 }}>{asset.title}</div>
+                  {asset.metadata?.channel && <div className="nx-mono" style={{ fontSize: 9, color: 'var(--nx-text-4)', marginTop: 5 }}>{String(asset.metadata.channel).toUpperCase()}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
 
         <Panel title="Shift Packs · Evergreen · Calendar">
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>

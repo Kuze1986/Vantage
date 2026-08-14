@@ -27,6 +27,9 @@ const productProfileSchema = z.object({
   default_brand_id: z.string().min(1).optional(),
   default_demoforge_template_id: z.string().optional(),
   default_brand_kit_id: z.string().optional(),
+  // Empty string clears it — unlike the other fields there's no fallback value,
+  // so "no bio link configured" has to be expressible.
+  bio_link_url: z.union([z.string().url(), z.literal("")]).optional(),
 });
 
 settingsRoutes.patch("/product-profile", async (c) => {

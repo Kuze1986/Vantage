@@ -61,6 +61,7 @@ type ProductProfile = {
   default_brand_id: string
   default_demoforge_template_id: string
   default_brand_kit_id: string
+  bio_link_url: string
 }
 
 export function SettingsPage() {
@@ -191,6 +192,27 @@ export function SettingsPage() {
                   <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginTop: 4 }}>{hint}</div>
                 </div>
               ))}
+              <div>
+                <label className="vg-label" style={{ display: 'block', marginBottom: 6 }}>Bio link (TikTok / Instagram)</label>
+                <input
+                  className="vg-input"
+                  value={profileDraft.bio_link_url}
+                  onChange={(e) => setProfileDraft((prev) => prev ? { ...prev, bio_link_url: e.target.value } : prev)}
+                  placeholder="https://…"
+                  style={{ width: '100%', maxWidth: 420 }}
+                />
+                <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginTop: 4 }}>
+                  TikTok and Instagram don't render clickable links in captions, so the destination link
+                  can't be appended to those pieces the way it is everywhere else — it has to already be
+                  live in the account bio. Set it here to match, and to whatever campaign is currently
+                  driving traffic there.
+                </div>
+                {!profileDraft.bio_link_url.trim() && (profileDraft.product_base_url.trim() || '') && (
+                  <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-amber)', marginTop: 4 }}>
+                    ⚠ No bio link configured — TikTok and Instagram posts are publishing with nothing to click.
+                  </div>
+                )}
+              </div>
               <div>
                 <label className="vg-label" style={{ display: 'block', marginBottom: 6 }}>Default brand kit</label>
                 <select

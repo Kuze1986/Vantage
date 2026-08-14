@@ -46,6 +46,23 @@ export const API_CHANNELS: ChannelSlug[] = ["x", "linkedin", "reddit", "threads"
 // Channels that require manual upload
 export const MANUAL_CHANNELS: ChannelSlug[] = ["tiktok", "instagram", "facebook"];
 
+export type MusicTrackType = "music" | "narration" | "effect";
+export interface MusicTrack {
+  id: string; title: string; artist: string | null; mood: string; use_case: string;
+  duration_secs: number | null; bpm: number | null; storage_path: string; public_url: string;
+}
+export interface MusicClip {
+  id?: string; track_type: MusicTrackType; music_track_id?: string | null; title: string;
+  storage_path?: string | null; start_secs: number; trim_start_secs: number; trim_end_secs?: number | null;
+  duration_secs: number; volume: number; fade_in_secs: number; fade_out_secs: number;
+  loop_enabled: boolean; muted: boolean;
+}
+export interface MusicExportSettings { format?: "wav" | "mp3"; sample_rate?: number; channels?: number; }
+export interface MusicProject {
+  id: string; workspace_id: string; name: string; duration_secs: number; master_volume: number;
+  export_settings: MusicExportSettings; music_project_clips: MusicClip[]; created_at: string; updated_at: string;
+}
+
 // ── Cadence config ─────────────────────────────────────────────────────────────
 export const cadenceConfigSchema = z.object({
   posts_per_day:    z.number().min(0).max(24).optional(),

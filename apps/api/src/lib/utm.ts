@@ -15,7 +15,9 @@ export function tagUrls(
 ): string {
   const params = new URLSearchParams({
     utm_source:   channel,
-    utm_medium:   "social",
+    // "social" was hardcoded here even for the email adapter (adapters/email.ts),
+    // which mislabeled every newsletter click as social traffic in analytics.
+    utm_medium:   channel === "email" ? "email" : "social",
     utm_campaign: campaign || DEFAULT_UTM_CAMPAIGN,
     utm_content:  pieceId,
   });

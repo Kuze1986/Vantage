@@ -4,6 +4,7 @@ import { createHmac } from "node:crypto";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import { recordGrowthEvent, engagementKind } from "../lib/growth.js";
+import { loadProductProfile } from "../lib/product-profile.js";
 import { recordCampaignEngagement, recordCampaignConversion, resolveCampaignIdForPiece } from "../lib/campaign-kpi.js";
 import { crcResponseToken } from "../adapters/x.js";
 import type Stripe from "stripe";
@@ -39,10 +40,12 @@ async function afterEngagement(opts: {
       eventType: opts.eventType,
     });
   }
+  const { default_product_id } = await loadProductProfile(opts.workspaceId);
   await recordGrowthEvent({
     loop: "acquisition",
     kind: engagementKind(opts.eventType),
     channel: opts.channel,
+    product: default_product_id,
     meta: {
       event_type: opts.eventType,
       content_piece_id: opts.contentPieceId,
@@ -469,10 +472,12 @@ webhooksRoutes.post("/conversion", async (c) => {
 
   const campaignId = await recordCampaignConversion({ contentPieceId: pieceId, channel, value });
 
+  const { default_product_id } = await loadProductProfile(workspaceId);
   await recordGrowthEvent({
     loop: "conversion",
     kind: eventType,
     channel,
+    product: default_product_id,
     value: value ?? null,
     meta: { content_piece_id: pieceId, workspace_id: workspaceId, source_system: sourceSystem, ...(campaignId ? { campaign_id: campaignId } : {}) },
   });

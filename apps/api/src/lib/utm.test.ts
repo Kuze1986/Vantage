@@ -43,4 +43,17 @@ describe("tagUrls", () => {
     // the URL is tagged; the sentence period is handled by the URL regex boundary
     expect(out).toContain("utm_content=p");
   });
+
+  it("tags the email channel utm_medium as email, not social", () => {
+    const out = tagUrls("https://example.com", "email", "p");
+    expect(out).toContain("utm_medium=email");
+    expect(out).not.toContain("utm_medium=social");
+  });
+
+  it("tags every other channel's utm_medium as social", () => {
+    for (const channel of ["x", "linkedin", "reddit", "threads", "bluesky", "tiktok", "instagram", "facebook"]) {
+      const out = tagUrls("https://example.com", channel, "p");
+      expect(out, channel).toContain("utm_medium=social");
+    }
+  });
 });

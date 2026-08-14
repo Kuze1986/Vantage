@@ -19,16 +19,43 @@ Source of truth for requirements (fetched, not from memory):
 
 ---
 
+## 0a. Build status
+
+| Item | Status |
+|------|--------|
+| §2 `user.info.basic` actually used (`fetchUserInfo` + Channels account card) | **done** |
+| §3a `creator_info/query` + `GET /v1/channels/tiktok/creator-info` | **done** |
+| §3b Direct Post compose UI (`TikTokComposeModal`) | **done** |
+| §3c Settings persisted on the piece; publish refuses without them | **done** |
+| §3d Full `post_info` payload (interactions, disclosure, AIGC, cover) | **done** |
+| §3e `is_aigc` toggle | **done** |
+| §3f Chunked upload (5–64 MB, ≤1000 chunks) | **done** |
+| §3g Publish progress polling + `GET .../publish-status/:id` | **done** |
+| §3h Revoke + `DELETE /v1/channels/tiktok/auth` + Disconnect button | **done** |
+| §3i Hardening (merge auth_state, expire state, `needs_reauth`) | **done** |
+| Caption limit 150 → 2200 | **done** |
+| Duration validation against `max_video_post_duration_sec` | **done** |
+| §1 `product_slug` on `channels` | **blocked** — needs the fork decision in §7 step 0 |
+| §1 Redirect URI moved to the web domain | not started |
+| §1/§6 Landing-page footer links + real Terms/Privacy content | not started |
+| §4 Sandbox setup, rehearsal, recording | not started |
+
+Verification: `pnpm build` clean, `pnpm test` 367 passed (40 files, incl. 13 new in
+`apps/api/src/adapters/tiktok.test.ts`).
+
 ## 0. Verdict
 
-The current integration (`apps/api/src/adapters/tiktok.ts`) is a *working pipe*, not a
-*reviewable product*. OAuth + PKCE, token refresh, `video/init` + `PUT` + status polling
-all exist and the endpoint URLs are correct. But review is not a functional test — it is a
-UX-compliance test, and Vantage fails it on five counts today. **There is no way to film an
-acceptable demo video against the current UI.** The engineering work in §3 is the gating
-item; everything else is paperwork.
+The integration started as a *working pipe*, not a *reviewable product*: OAuth + PKCE, token
+refresh, `video/init` + `PUT` + status polling existed and the endpoint URLs were correct,
+but review is a UX-compliance test rather than a functional one, and it failed on five
+counts.
 
-### The five hard blockers
+Four of those five are now built (see §0a). The one that remains is B1 — the schema change
+that lets more than one product connect a TikTok account — because it depends on a decision
+that has not been made (§7 step 0). What is left after that is configuration, legal copy,
+and filming.
+
+### The five hard blockers (original assessment)
 
 | # | Blocker | Where |
 |---|---------|-------|

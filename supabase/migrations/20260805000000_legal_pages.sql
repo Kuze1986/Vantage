@@ -14,17 +14,15 @@ CREATE TABLE IF NOT EXISTS vantage.legal_pages (
 
 ALTER TABLE vantage.legal_pages ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "legal_pages_auth"
-  ON vantage.legal_pages
-  FOR ALL
-  USING (auth.role() = 'authenticated')
-  WITH CHECK (auth.role() = 'authenticated');
-
-CREATE POLICY "legal_pages_service"
-  ON vantage.legal_pages
-  FOR ALL
-  USING (auth.role() = 'service_role')
-  WITH CHECK (auth.role() = 'service_role');
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'vantage' AND tablename = 'legal_pages' AND policyname = 'legal_pages_auth') THEN
+    CREATE POLICY "legal_pages_auth" ON vantage.legal_pages FOR ALL USING (auth.role() = 'authenticated') WITH CHECK (auth.role() = 'authenticated');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'vantage' AND tablename = 'legal_pages' AND policyname = 'legal_pages_service') THEN
+    CREATE POLICY "legal_pages_service" ON vantage.legal_pages FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+  END IF;
+END $$;
 
 -- Public view for PostgREST (same pattern as brand_kits, music_tracks) —
 -- the API's admin client reads/writes through this; anon grants stay revoked.

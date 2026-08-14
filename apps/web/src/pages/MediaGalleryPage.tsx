@@ -12,6 +12,7 @@ import { vantageApi } from '../api/vantage'
 import type { MediaGalleryItem } from '../api/vantage'
 import { Panel, Badge, MediaLightbox } from '../ds'
 import type { LightboxItem, BadgeVariant } from '../ds'
+import { uploadDataUrl } from '../lib/storage'
 
 const PAGE_SIZE = 60
 
@@ -109,6 +110,44 @@ export default function MediaGalleryPage() {
   const [more, setMore]       = React.useState(false)
   const [err, setErr]         = React.useState<string | null>(null)
   const [lightbox, setLightbox] = React.useState<number | null>(null)
+  const [composerOpen, setComposerOpen] = React.useState(false)
+  const [selected, setSelected] = React.useState<string[]>([])
+  const [delay, setDelay] = React.useState(500)
+  const [creating, setCreating] = React.useState(false)
+  const [createError, setCreateError] = React.useState<string | null>(null)
+
+  const frameItems = items.filter((item) => item.kind === 'image' || item.thumbnail_url)
+  const toggleFrame = (url: string) => setSelected((current) => current.includes(url) ? current.filter((value) => value !== url) : [...current, url])
+  const createGif = async () => {
+    if (selected.length < 2) return
+    setCreating(true); setCreateError(null)
+    try {
+      const { GIFEncoder, quantize, applyPalette } = await import('gifenc')
+      const frames: Uint8ClampedArray[] = []
+      let width = 480; let height = 480
+      for (const url of selected) {
+        const image = new Image(); image.crossOrigin = 'anonymous'; image.src = url
+        await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('Could not load one of the selected frames')) })
+        const scale = Math.min(480 / image.width, 480 / image.height)
+        width = Math.max(2, Math.floor(image.width * scale)); height = Math.max(2, Math.floor(image.height * scale))
+        const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height
+        const context = canvas.getContext('2d')!; context.drawImage(image, 0, 0, width, height)
+        frames.push(context.getImageData(0, 0, width, height).data)
+      }
+      const encoder = GIFEncoder()
+      frames.forEach((frame) => {
+        const palette = quantize(frame, 256)
+        encoder.writeFrame(applyPalette(frame, palette), width, height, { palette, delay, repeat: 0 })
+      })
+      encoder.finish()
+      const bytes = encoder.bytes(); const dataUrl = `data:image/gif;base64,${btoa(String.fromCharCode(...bytes))}`
+      await uploadDataUrl(`creative/gif-${Date.now()}.gif`, dataUrl)
+      setComposerOpen(false); setSelected([])
+      setKind(''); setSource('');
+      const res = await vantageApi.mediaGallery({ limit: PAGE_SIZE }); setItems(res.items); setTotal(res.total); setNext(res.next_offset)
+    } catch (error) { setCreateError(error instanceof Error ? error.message : 'GIF creation failed') }
+    finally { setCreating(false) }
+  }
 
   // Refetch from scratch whenever a filter changes.
   React.useEffect(() => {
@@ -160,7 +199,10 @@ export default function MediaGalleryPage() {
           <h1 className="vg-page-title">Media</h1>
           <p className="vg-page-sub">Every image and video this workspace has produced</p>
         </div>
-        <Badge label={`${total} asset${total === 1 ? '' : 's'}`} variant={total ? 'active' : 'soon'} />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button type="button" className="nx-btn nx-btn--primary" onClick={() => setComposerOpen(true)}>CREATE GIF</button>
+          <Badge label={`${total} asset${total === 1 ? '' : 's'}`} variant={total ? 'active' : 'soon'} />
+        </div>
       </div>
 
       {err && (
@@ -259,6 +301,22 @@ export default function MediaGalleryPage() {
           startIndex={lightbox}
           onClose={() => setLightbox(null)}
         />
+      )}
+      {composerOpen && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 20, background: 'rgba(0,0,0,.72)', display: 'grid', placeItems: 'center', padding: 20 }}>
+          <Panel title="Create animated GIF" titleAccent="cyan">
+            <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 11 }}>Select at least two image frames in order.</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, maxHeight: 360, overflow: 'auto' }}>
+              {frameItems.map((item) => {
+                const frameUrl = item.kind === 'image' ? item.url : item.thumbnail_url!
+                return <button key={item.id} type="button" onClick={() => toggleFrame(frameUrl)} style={{ padding: 3, border: selected.includes(frameUrl) ? '2px solid var(--nx-cyan)' : '1px solid var(--nx-border)', background: 'none' }}><img src={frameUrl} alt={item.label} style={{ width: '100%', aspectRatio: '1', objectFit: 'cover' }} /></button>
+              })}
+            </div>
+            <label style={{ display: 'block', marginTop: 12, fontFamily: 'var(--nx-mono)', fontSize: 11 }}>Frame delay: {delay}ms <input type="range" min="100" max="2000" step="100" value={delay} onChange={(event) => setDelay(Number(event.target.value))} /></label>
+            {createError && <p style={{ color: 'var(--nx-red)', fontSize: 11 }}>{createError}</p>}
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}><button type="button" className="nx-btn nx-btn--primary" disabled={selected.length < 2 || creating} onClick={() => void createGif()}>{creating ? 'CREATING…' : `CREATE (${selected.length} FRAMES)`}</button><button type="button" className="nx-btn nx-btn--secondary" onClick={() => setComposerOpen(false)}>CANCEL</button></div>
+          </Panel>
+        </div>
       )}
     </>
   )

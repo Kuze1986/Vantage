@@ -120,6 +120,10 @@ const createCampaignSchema = z.object({
   kpi_targets: kpiTargetsSchema,
   default_brand_id: z.string().min(1).nullable().optional(),
   default_demoforge_template_id: z.string().min(1).nullable().optional(),
+  // Overrides the workspace's default product_base_url for every piece this
+  // campaign launches — what lets one Vantage instance promote a different
+  // sibling product per campaign. See apps/api/src/lib/destination.ts.
+  destination_url: z.string().url().max(2048).nullable().optional(),
 });
 
 const updateCampaignSchema = createCampaignSchema.partial().omit({
@@ -251,6 +255,36 @@ campaignRoutes.get('/:id', async (c) => {
   }
 
   return c.json(data);
+});
+
+const campaignAssetSchema = z.object({
+  title: z.string().min(1).max(180),
+  asset_type: z.enum(['visual', 'gif', 'video', 'music_project']),
+  source_url: z.string().url().nullable().optional(),
+  source_ref: z.string().nullable().optional(),
+  metadata: z.record(z.unknown()).default({}),
+});
+
+campaignRoutes.get('/:id/assets', async (c) => {
+  const workspaceId = c.req.header('x-workspace-id');
+  if (!workspaceId) throw new HTTPException(400, { message: 'x-workspace-id header is required' });
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb.from('campaign_assets').select('*').eq('campaign_id', c.req.param('id')).eq('workspace_id', workspaceId).order('created_at', { ascending: false });
+  if (error) throw new HTTPException(500, { message: error.message });
+  return c.json({ assets: data ?? [] });
+});
+
+campaignRoutes.post('/:id/assets', async (c) => {
+  const workspaceId = c.req.header('x-workspace-id');
+  if (!workspaceId) throw new HTTPException(400, { message: 'x-workspace-id header is required' });
+  const parsed = campaignAssetSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+  const sb = getSupabaseAdmin();
+  const { data: campaign } = await sb.from('campaigns').select('id').eq('id', c.req.param('id')).eq('workspace_id', workspaceId).single();
+  if (!campaign) throw new HTTPException(404, { message: 'Campaign not found' });
+  const { data, error } = await sb.from('campaign_assets').insert({ ...parsed.data, campaign_id: campaign.id, workspace_id: workspaceId }).select().single();
+  if (error) throw new HTTPException(500, { message: error.message });
+  return c.json({ asset: data }, 201);
 });
 
 // PATCH /v1/campaigns/:id — update campaign
@@ -874,6 +908,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
           topic_text: topicText,
           vertical: null,
           brand_voice: brandVoiceStr,
+          campaign_id: campaignId,
         });
 
         let auditNotes: string | null = null;
@@ -907,6 +942,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
               topic_text: `${topicText}\n\nIlita feedback (must address): ${audit.feedback}`,
               vertical: null,
               brand_voice: brandVoiceStr,
+              campaign_id: campaignId,
             });
             const second = await auditContent({
               content: renderForAudit(regen.content_payload),

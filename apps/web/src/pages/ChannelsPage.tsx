@@ -409,11 +409,15 @@ export function ChannelsPage() {
                 </button>
               )}
               {/* Already connected — show disconnect hint */}
-              {supportsOAuth && connected && (
+              {supportsOAuth && connected && slug !== 'tiktok' && (
                 <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', marginTop: 6, textAlign: 'center' }}>
                   ✓ Connected — click tile to configure cadence
                 </p>
               )}
+              {/* TikTok shows the actual connected account (the only consumer of
+                  the user.info.basic scope) plus a real revoke action. Both are
+                  required for app review — see docs/tiktok-app-review.md §2, §3h. */}
+              {slug === 'tiktok' && connected && <TikTokAccountCard onDisconnect={load} />}
 
               {/* Bluesky credential connect form */}
               {slug === 'bluesky' && !connected && (
@@ -476,5 +480,68 @@ export function ChannelsPage() {
         </Panel>
       </div>
     </>
+  )
+}
+
+/**
+ * The connected TikTok account, read via Login Kit's user.info.basic scope.
+ *
+ * This exists for two reasons, both required by TikTok's app review:
+ *   1. It is the only consumer of user.info.basic — requesting a scope the app
+ *      never uses delays or fails review.
+ *   2. With several brand accounts in the portfolio, the operator must be able
+ *      to confirm WHICH account is linked before anything is published.
+ */
+function TikTokAccountCard({ onDisconnect }: { onDisconnect: () => void }) {
+  const [user, setUser] = React.useState<{ display_name: string; avatar_url: string } | null>(null)
+  const [err, setErr]   = React.useState<string | null>(null)
+  const [busy, setBusy] = React.useState(false)
+
+  React.useEffect(() => {
+    let alive = true
+    vantageApi.getTikTokUserInfo()
+      .then((r) => { if (alive) setUser(r.user) })
+      .catch((e) => { if (alive) setErr(String((e as Error).message)) })
+    return () => { alive = false }
+  }, [])
+
+  async function disconnect() {
+    if (!window.confirm('Disconnect this TikTok account? Vantage will revoke its access token.')) return
+    setBusy(true)
+    try {
+      await vantageApi.disconnectTikTok()
+      onDisconnect()
+    } catch (e) {
+      setErr(String((e as Error).message))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
+      {user && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {user.avatar_url
+            ? <img src={user.avatar_url} alt="" style={{ width: 24, height: 24, borderRadius: '50%' }} />
+            : null}
+          <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-3)' }}>
+            {user.display_name}
+          </span>
+        </div>
+      )}
+      {err && (
+        <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-red, #ff5555)' }}>{err}</span>
+      )}
+      <button
+        type="button"
+        className="nx-btn nx-btn--ghost nx-btn--sm nx-btn--full"
+        disabled={busy}
+        onClick={() => void disconnect()}
+        title="Revoke Vantage's access to this TikTok account"
+      >
+        {busy ? '…' : 'Disconnect'}
+      </button>
+    </div>
   )
 }

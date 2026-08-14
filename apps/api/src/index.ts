@@ -15,6 +15,7 @@ import { publishRoutes } from "./routes/publish.js";
 import { scheduleRoutes } from "./routes/schedule.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
 import { webhooksRoutes } from "./routes/webhooks.js";
+import { publicRoutes } from "./routes/public.js";
 import { channelsAuthedRoutes } from "./routes/channels.js";
 import { queueRoutes } from "./routes/queue.js";
 import { subscribersRoutes } from "./routes/subscribers.js";
@@ -58,6 +59,7 @@ app.use(
 app.get("/health", (c) => c.json({ ok: true }));
 
 app.route("/v1/webhooks", webhooksRoutes);
+app.route("/v1/public", publicRoutes);
 app.get("/v1/channels/:slug/auth/callback", (c) => oauthCallbackGet(c));
 
 // Public — Terms & Conditions / Privacy Policy must be viewable without auth

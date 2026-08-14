@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import { recordGrowthEvent } from "../lib/growth.js";
+import { loadProductProfile } from "../lib/product-profile.js";
 import { assertMediaReady, withForceMedia } from "../lib/media-gate.js";
 import { resolveCampaignIdForPiece } from "../lib/campaign-kpi.js";
 import { MANUAL_PUBLISH_CHANNELS } from "../lib/publish-pack.js";
@@ -14,7 +15,7 @@ import { postLinkedIn } from "../adapters/linkedin.js";
 import { postThread } from "../adapters/threads.js";
 import { postBluesky } from "../adapters/bluesky.js";
 import { sendEmail } from "../adapters/email.js";
-import { postTikTokVideo } from "../adapters/tiktok.js";
+import { postTikTokVideo, waitForPublish, type TikTokPostSettings } from "../adapters/tiktok.js";
 import { postInstagramMedia, postInstagramCarousel } from "../adapters/instagram.js";
 import { postFacebook, postFacebookPhotos } from "../adapters/facebook.js";
 import { carouselUrlsForChannel } from "../lib/carousel.js";
@@ -141,8 +142,28 @@ publishRoutes.post("/:channel", async (c) => {
       case "tiktok": {
         const videoUrl = typeof payload.video_url === "string" ? payload.video_url : piece.video_url;
         if (!videoUrl) throw new Error("TikTok post requires a video");
-        const title = String(payload.hook ?? payload.body ?? "").slice(0, 150);
-        ({ id: externalId } = await postTikTokVideo(ws, { videoUrl, title }));
+
+        // Direct Post settings are captured in the compose UI against a live
+        // creator_info response and stored on the piece. There is deliberately
+        // NO fallback: TikTok's guidelines forbid a default privacy level, so a
+        // piece without settings must not be posted rather than be posted
+        // with an assumed one. See docs/tiktok-app-review.md §3c.
+        const stored = payload.tiktok_post_settings as TikTokPostSettings | undefined;
+        if (!stored || !stored.privacy_level) {
+          throw new Error(
+            "TikTok posts require Direct Post settings (privacy level, interaction and disclosure choices). " +
+            "Open the piece and complete the TikTok posting form before publishing.",
+          );
+        }
+        const settings: TikTokPostSettings = {
+          ...stored,
+          title: stored.title || String(payload.hook ?? payload.body ?? ""),
+        };
+        const result = await postTikTokVideo(ws, { videoUrl, settings });
+        externalId = result.id;
+        // No UI is attached to a scheduler-driven publish, so wait here for a
+        // terminal status. Interactive publishes poll the status route instead.
+        await waitForPublish(ws, result.id);
         break;
       }
       case "instagram": {
@@ -212,8 +233,12 @@ publishRoutes.post("/:channel", async (c) => {
       workspace_id: ws,
     });
     // Growth OS — Loop A: a published piece is an acquisition impression.
+    // product identifies which NEXUS product this workspace is publishing
+    // for (recordGrowthEvent defaults to "vantage" when omitted, which is
+    // wrong for every non-Vantage workspace — e.g. ws-shift).
+    const { default_product_id } = await loadProductProfile(ws);
     await recordGrowthEvent({
-      loop: "acquisition", kind: "impression", channel: slug,
+      loop: "acquisition", kind: "impression", channel: slug, product: default_product_id,
       meta: {
         content_piece_id, external_post_id: externalId, workspace_id: ws,
         ...(campaignId ? { campaign_id: campaignId } : {}),

@@ -11,6 +11,16 @@ export interface ProductProfile {
   default_brand_id: string;
   default_demoforge_template_id: string;
   default_brand_kit_id: string;
+  /**
+   * The link currently set in the workspace's TikTok/Instagram account bio.
+   * Those platforms don't render clickable links in captions, so a resolved
+   * destination (see lib/destination.ts) can't be appended to the piece the
+   * way it is on every other channel — it has to already be live in the bio.
+   * This is standing config the operator maintains, not a per-piece field,
+   * and it exists so the UI can warn when a bio-policy channel has content
+   * to promote but no configured bio link to send it to.
+   */
+  bio_link_url: string;
 }
 
 const DEFAULTS: ProductProfile = {
@@ -19,6 +29,7 @@ const DEFAULTS: ProductProfile = {
   default_brand_id: DEFAULT_BRAND_ID,
   default_demoforge_template_id: "",
   default_brand_kit_id: "",
+  bio_link_url: "",
 };
 
 export async function loadProductProfile(workspaceId: string): Promise<ProductProfile> {
@@ -37,6 +48,7 @@ export async function loadProductProfile(workspaceId: string): Promise<ProductPr
       default_brand_id: str("default_brand_id") || DEFAULTS.default_brand_id,
       default_demoforge_template_id: str("default_demoforge_template_id"),
       default_brand_kit_id: str("default_brand_kit_id"),
+      bio_link_url: str("bio_link_url"),
     };
   } catch {
     return { ...DEFAULTS };

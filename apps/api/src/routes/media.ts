@@ -19,7 +19,7 @@ import {
 
 export const mediaRoutes = new Hono();
 
-const ALLOWED_PREFIXES = ["og/", "quotes/", "thumbnails/", "creative/"] as const;
+const ALLOWED_PREFIXES = ["og/", "quotes/", "thumbnails/", "creative/", "music/"] as const;
 
 const uploadSchema = z.object({
   path: z.string().min(3).max(240),
@@ -30,11 +30,14 @@ function parseDataUrl(dataUrl: string): { buffer: Buffer; contentType: string; e
   const m = /^data:([^;]+);base64,(.+)$/i.exec(dataUrl.trim());
   if (!m) throw new HTTPException(400, { message: "data_url must be a base64 data URL" });
   const contentType = m[1]!.toLowerCase();
-  if (!contentType.startsWith("image/")) {
-    throw new HTTPException(400, { message: "Upload must be an image data URL" });
+  if (!contentType.startsWith("image/") && !contentType.startsWith("audio/")) {
+    throw new HTTPException(400, { message: "Upload must be an image or audio data URL" });
   }
   const ext =
-    contentType.includes("png") ? "png"
+    contentType.includes("mpeg") || contentType.includes("mp3") ? "mp3"
+    : contentType.includes("wav") ? "wav"
+    : contentType.includes("ogg") ? "ogg"
+    : contentType.includes("png") ? "png"
     : contentType.includes("webp") ? "webp"
     : contentType.includes("gif") ? "gif"
     : "jpg";
@@ -53,7 +56,7 @@ function sanitizePath(raw: string, ext: string, workspaceId: string): string {
     });
   }
   const withExt =
-    cleaned.endsWith(".png") || cleaned.endsWith(".jpg") || cleaned.endsWith(".jpeg") || cleaned.endsWith(".webp")
+    /\.(png|jpg|jpeg|webp|gif|mp3|wav|ogg)$/i.test(cleaned)
       ? cleaned
       : `${cleaned}.${ext}`;
   // Namespace under workspace so objects stay tenant-scoped.

@@ -2,9 +2,47 @@ import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { z } from 'zod';
 import { getSupabaseAdmin } from '../lib/supabase.js';
-import { resolveOrCreateWorkspace, getMembershipRole } from '../lib/workspace.js';
+import {
+  resolveOrCreateWorkspace,
+  getMembershipRole,
+  listWorkspacesForUser,
+  createWorkspace,
+} from '../lib/workspace.js';
 
 export const workspaceRoutes = new Hono();
+
+/**
+ * GET /v1/workspaces
+ * Every workspace the caller belongs to, with their role. Backs the switcher.
+ */
+workspaceRoutes.get('/', async (c) => {
+  c.header('Cache-Control', 'no-store');
+  const user = c.get('user');
+  return c.json({ workspaces: await listWorkspacesForUser(user.id) });
+});
+
+const createWorkspaceSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+});
+
+/**
+ * POST /v1/workspaces
+ * Create an additional workspace owned by the caller. Each one is a separate
+ * tenant: its own brand voice, channel credentials, subscribers — and its own
+ * billing quota, so a new workspace starts on Trial unless it is listed in
+ * BILLING_EXEMPT_WORKSPACES.
+ */
+workspaceRoutes.post('/', async (c) => {
+  const user = c.get('user');
+  const parsed = createWorkspaceSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+
+  try {
+    return c.json(await createWorkspace(user.id, parsed.data.name), 201);
+  } catch (err) {
+    throw new HTTPException(500, { message: err instanceof Error ? err.message : 'Failed to create workspace' });
+  }
+});
 
 /**
  * GET /v1/workspaces/me
