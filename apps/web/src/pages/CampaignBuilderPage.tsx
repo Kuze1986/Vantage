@@ -591,6 +591,16 @@ export default function CampaignBuilderPage() {
     setBusy(`gen-day:${day.day_number}`)
     setLaunchInfo(null)
     try {
+      // The day editor is local state. Persist it before launching: launch
+      // refreshes the timeline when complete, which otherwise discarded a
+      // just-selected visual asset or soundtrack and generated with defaults.
+      await vantageApi.updateCampaignTimelineDay(selectedCampaign.id, day.day_number, {
+        primary_channel: day.primary_channel,
+        secondary_channels: day.secondary_channels ?? [],
+        content_type: day.content_type,
+        messaging_pillar_id: day.messaging_pillar_id ?? null,
+        content_ideas: day.content_ideas,
+      })
       const res = await vantageApi.launchCampaign(selectedCampaign.id, [day.day_number])
       if (res.failed) {
         alert(`Generation failed: ${res.failures[0]?.error ?? 'Unknown error'}`)
