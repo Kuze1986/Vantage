@@ -7,7 +7,7 @@ import { channelAuthMethod, supportsOAuthConnect } from "../lib/channel-auth.js"
 import { generatePkce, buildAuthorizeUrl as xAuthorizeUrl, savePendingOAuth as xSavePending } from "../adapters/x.js";
 import { buildAuthorizeUrl as liAuthorizeUrl, savePendingOAuth as liSavePending } from "../adapters/linkedin.js";
 import { buildAuthorizeUrl as redditAuthorizeUrl, savePendingOAuth as redditSavePending } from "../adapters/reddit.js";
-import { buildAuthorizeUrl as threadsAuthorizeUrl, savePendingOAuth as threadsSavePending } from "../adapters/threads.js";
+import { buildAuthorizeUrl as threadsAuthorizeUrl, getThreadsTokenStatus, savePendingOAuth as threadsSavePending } from "../adapters/threads.js";
 import { connect as blueskyConnect } from "../adapters/bluesky.js";
 import {
   generatePkce as ttGeneratePkce,
@@ -46,14 +46,19 @@ channelsAuthedRoutes.get("/", async (c) => {
   const rows = (channels ?? []).map((ch: Record<string, unknown>) => {
     // Adapters store credentials in auth_state.tokens on successful connect.
     // Fall back to the legacy access_token_hash column if present.
-    const tokens = (ch.auth_state as { tokens?: unknown } | null)?.tokens;
+    const tokens = (ch.auth_state as { tokens?: { expires_at?: unknown } } | null)?.tokens;
     const slug   = String(ch.slug);
+    const expiresAt = typeof tokens?.expires_at === "string" ? tokens.expires_at : null;
+    const authStatus = slug === "threads" ? getThreadsTokenStatus(expiresAt ?? undefined) : null;
+    const expired = authStatus === "expired";
     return {
       slug:           ch.slug,
       enabled:        ch.enabled,
       cadence_config: ch.cadence_config,
-      connected:      !!tokens || !!ch.access_token_hash,
+      connected:      (!!tokens || !!ch.access_token_hash) && !expired,
       connected_at:   ch.connected_at ?? null,
+      auth_status:    authStatus,
+      auth_expires_at: expiresAt,
       // Derived, never read from the stale channels.auth_method column — see
       // lib/channel-auth.ts. This keeps the UI in step with what the publish
       // path actually does, with no migration required.

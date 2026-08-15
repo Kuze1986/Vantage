@@ -381,7 +381,9 @@ export function ChannelsPage() {
 
       <Panel title="API Channels" titleAccent="amber">
         <div className="vg-channel-grid">
-          {apiChannels.map(({ slug, meta, row, connected, supportsOAuth }) => (
+          {apiChannels.map(({ slug, meta, row, connected, supportsOAuth }) => {
+            const tokenExpired = row?.auth_status === 'expired'
+            return (
             <div key={slug} style={{ display: 'flex', flexDirection: 'column' }}>
               <ModeTile
                 name={slug.toUpperCase()}
@@ -389,7 +391,9 @@ export function ChannelsPage() {
                 icon={meta.icon}
                 accent={meta.accent}
                 meta={meta.meta}
-                badge={connected
+                badge={tokenExpired
+                  ? { label: 'Token expired', variant: 'critical' }
+                  : connected
                   ? { label: 'Connected', variant: 'active' }
                   : { label: 'Not connected', variant: 'soon' }
                 }
@@ -397,19 +401,19 @@ export function ChannelsPage() {
               />
 
               {/* OAuth connect button for OAuth channels */}
-              {supportsOAuth && !connected && (
+              {supportsOAuth && (!connected || slug === 'threads') && (
                 <button
                   type="button"
                   className="nx-btn nx-btn--secondary nx-btn--sm nx-btn--full"
                   style={{ marginTop: 6 }}
                   onClick={() => void connectOAuth(slug)}
-                  title={`Connect ${slug} via OAuth 2.0`}
+                  title={`${connected ? 'Reconnect' : 'Connect'} ${slug} via OAuth 2.0`}
                 >
-                  Connect {slug === 'x' ? '𝕏' : slug} via OAuth
+                  {tokenExpired ? 'Reconnect expired Threads token' : `${connected ? 'Reconnect' : 'Connect'} ${slug === 'x' ? '𝕏' : slug} via OAuth`}
                 </button>
               )}
               {/* Already connected — show disconnect hint */}
-              {supportsOAuth && connected && slug !== 'tiktok' && (
+              {supportsOAuth && connected && slug !== 'tiktok' && slug !== 'threads' && (
                 <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', marginTop: 6, textAlign: 'center' }}>
                   ✓ Connected — click tile to configure cadence
                 </p>
@@ -446,7 +450,7 @@ export function ChannelsPage() {
                 </p>
               )}
             </div>
-          ))}
+          )})}
         </div>
       </Panel>
 

@@ -15,6 +15,17 @@ type ThreadsAuthState = {
   tokens?: { access_token: string; expires_at?: string; user_id?: string };
 };
 
+export type ThreadsTokenStatus = "valid" | "expires_soon" | "expired" | "unknown";
+
+/** Classify a stored Threads OAuth expiry without exposing credentials. */
+export function getThreadsTokenStatus(expiresAt?: string, now = Date.now()): ThreadsTokenStatus {
+  if (!expiresAt) return "unknown";
+  const expiresMs = Date.parse(expiresAt);
+  if (!Number.isFinite(expiresMs)) return "unknown";
+  if (expiresMs <= now) return "expired";
+  return expiresMs <= now + 7 * 24 * 60 * 60_000 ? "expires_soon" : "valid";
+}
+
 function requireEnv(): { clientId: string; clientSecret: string; redirect: string } {
   const clientId     = process.env.THREADS_CLIENT_ID;
   const clientSecret = process.env.THREADS_CLIENT_SECRET;
@@ -98,6 +109,9 @@ async function getAccessToken(workspaceId: string): Promise<{ token: string; use
 
   // Long-lived tokens are refreshable within their 60-day window; refresh when <7 days remain.
   const exp = auth.expires_at ? Date.parse(auth.expires_at) : 0;
+  if (exp && exp <= Date.now()) {
+    throw new Error("Threads access token expired — reconnect the Threads channel before publishing");
+  }
   if (exp && Date.now() > exp - 7 * 24 * 60 * 60 * 1000) {
     try {
       const refUrl = new URL(TH_REFRESH);

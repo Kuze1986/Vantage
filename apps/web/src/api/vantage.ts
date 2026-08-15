@@ -124,6 +124,9 @@ export type ChannelStatus = {
     newsletter_day?: string;
   };
   connected_at: string | null;
+  /** Threads only: whether its OAuth token can still publish. */
+  auth_status?: 'valid' | 'expires_soon' | 'expired' | 'unknown' | null;
+  auth_expires_at?: string | null;
   /** Derived server-side from MANUAL_PUBLISH_CHANNELS — see api/src/lib/channel-auth.ts. */
   auth_method: 'oauth' | 'api_key' | 'manual';
   /** True when the operator can start an OAuth flow for this channel. */
