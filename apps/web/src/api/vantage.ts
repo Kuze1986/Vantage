@@ -315,6 +315,13 @@ export const vantageApi = {
   retryPiece: (id: string) =>
     vantageFetch(`/v1/queue/${id}/retry`, { method: "POST" }) as Promise<{ ok: boolean }>,
 
+  /** Operator override: accept a rejected draft while keeping its audit trail. */
+  forceApprovePiece: (id: string, reason?: string) =>
+    vantageFetch(`/v1/queue/${id}/force-approve`, {
+      method: "POST",
+      body: JSON.stringify(reason ? { reason } : {}),
+    }) as Promise<{ ok: boolean; piece: { id: string; status: string; media_status: string | null; scheduled_for: string | null } | null }>,
+
   /** Soft-dismiss — status → rejected (still visible on Rejected tab). */
   rejectPiece: (id: string, reason?: string) =>
     vantageFetch(`/v1/queue/${id}/reject`, {

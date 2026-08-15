@@ -533,6 +533,22 @@ export default function CampaignBuilderPage() {
     }
   }
 
+  const handleForceApprove = async (piece: CampaignMediaPiece) => {
+    if (!selectedCampaign) return
+    const reason = prompt(`Why is day ${(piece.day_number ?? 0) + 1}/${piece.channel} accurate and safe to publish?`, 'Operator confirmed content accuracy')
+    if (reason === null) return
+    setBusy(`force-approve:${piece.id}`)
+    try {
+      const result = await vantageApi.forceApprovePiece(piece.id, reason)
+      setLaunchInfo(`Day ${(piece.day_number ?? 0) + 1}/${piece.channel} was force-approved and is now ${result.piece?.status ?? 'ready for media review'}.`)
+      await fetchCampaignDetails(selectedCampaign.id)
+    } catch (error) {
+      setLaunchInfo(`Could not force-approve the piece: ${error instanceof Error ? error.message : 'Request failed'}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const handleAttachAssetToPiece = async (piece: CampaignMediaPiece) => {
     if (!selectedCampaign) return
     const asset = campaignAssets.find((item) => item.id === assetForPiece[piece.id])
@@ -1439,6 +1455,13 @@ export default function CampaignBuilderPage() {
                       <a href={`/queue?piece=${piece.id}`} className="nx-btn nx-btn--ghost nx-btn--sm" style={{ textDecoration: 'none' }}>OPEN PIECE →</a>
                     </div>
                     {piece.media_error && <p role="alert" className="nx-mono" style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--nx-red)', lineHeight: 1.5 }}>{piece.media_error}</p>}
+                    {piece.status === 'rejected' && (
+                      <div style={{ marginTop: 9 }}>
+                        <button type="button" className="nx-btn nx-btn--secondary nx-btn--sm" disabled={busy !== null} onClick={() => void handleForceApprove(piece)} title="Override the audit rejection while preserving its reason in the audit trail">
+                          {busy === `force-approve:${piece.id}` ? 'FORCING…' : 'FORCE APPROVE CONTENT'}
+                        </button>
+                      </div>
+                    )}
                     {isBlocked && (
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 9 }}>
                         <button type="button" className="nx-btn nx-btn--secondary nx-btn--sm" disabled={busy !== null || !piece.demoforge_template_id} onClick={() => void handleRetryMedia(piece)}>

@@ -310,6 +310,68 @@ queueRoutes.post("/:id/retry", async (c) => {
   return c.json({ ok: true });
 });
 
+// POST /v1/queue/:id/force-approve — explicit operator override for a rejected
+// draft. This never hides the audit result: it stamps the override into both
+// the payload and audit notes, then returns the piece to the normal media gate.
+queueRoutes.post("/:id/force-approve", async (c) => {
+  const id = c.req.param("id");
+  const ws = c.get("workspaceId");
+  const parsed = z.object({ reason: z.string().trim().max(500).optional() })
+    .safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+  const reason = parsed.data.reason || "Operator confirmed content accuracy";
+  const sb = getSupabaseAdmin();
+  const { data: piece, error: loadErr } = await sb
+    .from("content_pieces")
+    .select("id,status,content_payload,audit_notes,media_status")
+    .eq("workspace_id", ws)
+    .eq("id", id)
+    .single();
+  if (loadErr || !piece) throw new HTTPException(404, { message: "Not found" });
+  if (piece.status !== "rejected") {
+    throw new HTTPException(400, { message: `Only rejected pieces can be force-approved (current status: '${piece.status}')` });
+  }
+
+  const now = new Date().toISOString();
+  const payload = piece.content_payload && typeof piece.content_payload === "object" && !Array.isArray(piece.content_payload)
+    ? { ...(piece.content_payload as Record<string, unknown>) }
+    : {};
+  payload.manual_approval = { approved_at: now, reason };
+  const notes = [`[force-approved] ${reason}`, piece.audit_notes].filter(Boolean).join("\n").slice(0, 1000);
+  const { error } = await sb
+    .from("content_pieces")
+    .update({
+      status: "approved",
+      scheduled_for: now,
+      locked_at: null,
+      content_payload: payload,
+      audit_notes: notes,
+      updated_at: now,
+    })
+    .eq("workspace_id", ws)
+    .eq("id", id);
+  if (error) throw new HTTPException(500, { message: error.message });
+
+  // Media remains an independent gate. Ready/text-only pieces are queued now;
+  // media-pending pieces remain approved until their asset becomes ready.
+  await maybeAutoQueuePiece(ws, id);
+  const { data: updated } = await sb
+    .from("content_pieces")
+    .select("id,status,media_status,scheduled_for")
+    .eq("workspace_id", ws)
+    .eq("id", id)
+    .single();
+  await logActivity({
+    source: "queue",
+    source_type: "system",
+    event_type: "piece_force_approved",
+    summary: `Force-approved content piece ${id}: ${reason}`.slice(0, 500),
+    payload: { content_piece_id: id, reason, media_status: updated?.media_status ?? piece.media_status },
+    workspace_id: ws,
+  });
+  return c.json({ ok: true, piece: updated });
+});
+
 // POST /v1/queue/:id/reject — soft-dismiss (keep row, hide from publish path)
 queueRoutes.post("/:id/reject", async (c) => {
   const id = c.req.param("id");

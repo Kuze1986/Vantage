@@ -813,6 +813,22 @@ export function QueuePage() {
             )}
           </>
         )}
+        {p.status === 'rejected' && (
+          <button
+            type="button"
+            className="nx-btn nx-btn--secondary nx-btn--sm"
+            disabled={busy === p.id}
+            onClick={() => {
+              const reason = prompt('Why is this rejected draft accurate and safe to publish?', 'Operator confirmed content accuracy')
+              if (reason === null) return
+              setBusy(p.id)
+              void action(() => vantageApi.forceApprovePiece(p.id, reason), 'Force-approved; media rules still apply').finally(() => setBusy(null))
+            }}
+            title="Override the audit rejection, preserve the audit trail, and return the piece to the normal media gate"
+          >
+            {busy === p.id ? '…' : 'Force approve'}
+          </button>
+        )}
         {MANUAL_CHANNELS.has(p.channel_slug) && (
           <button
             type="button"
