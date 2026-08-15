@@ -110,6 +110,46 @@ const kpiTargetsSchema = z.object({
 
 const VISUAL_TYPES = ['demo_video', 'product_still', 'social_graphic', 'none'] as const;
 
+type CampaignAssetForMedia = {
+  id: string;
+  asset_type: string;
+  source_url: string | null;
+};
+
+/** A campaign only needs DemoForge when a timeline item has no uploaded visual. */
+function campaignNeedsDemoForge(days: Array<{ content_ideas?: unknown }>, assets: CampaignAssetForMedia[]): boolean {
+  const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+  return days.some((day) => {
+    const idea = Array.isArray(day.content_ideas) && day.content_ideas[0] && typeof day.content_ideas[0] === 'object'
+      ? day.content_ideas[0] as Record<string, unknown>
+      : {};
+    const visualType = typeof idea.visual_type === 'string' ? idea.visual_type : 'demo_video';
+    const assetId = typeof idea.visual_asset_id === 'string'
+      ? idea.visual_asset_id
+      : typeof idea.campaign_asset_id === 'string'
+        ? idea.campaign_asset_id
+        : null;
+    const asset = assetId ? assetsById.get(assetId) : undefined;
+    const hasVisual = Boolean(asset?.source_url) && asset?.asset_type !== 'music_project';
+    return !hasVisual && (visualType === 'demo_video' || visualType === 'product_still');
+  });
+}
+
+async function checkDemoForgeReadiness(): Promise<{ ready: boolean; message: string }> {
+  const configured = process.env.DEMOFORGE_URL?.trim();
+  if (!configured) return { ready: false, message: 'DemoForge is not configured. Set DEMOFORGE_URL before launching generated media.' };
+  const base = (configured.startsWith('http://') || configured.startsWith('https://') ? configured : `https://${configured}`).replace(/\/$/, '');
+  try {
+    const response = await fetch(`${base}/health`, { signal: AbortSignal.timeout(5_000) });
+    if (!response.ok) return { ready: false, message: `DemoForge health check returned ${response.status}.` };
+    const body = await response.json().catch(() => null) as { ok?: unknown; service?: unknown } | null;
+    if (body?.ok !== true) return { ready: false, message: 'DemoForge health check did not confirm readiness.' };
+    return { ready: true, message: 'DemoForge is ready.' };
+  } catch (error) {
+    return { ready: false, message: `DemoForge health check failed: ${error instanceof Error ? error.message : 'unreachable'}` };
+  }
+}
+
 const createCampaignSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
@@ -276,7 +316,68 @@ campaignRoutes.get('/:id/preflight', async (c) => {
   const fact = validateFactSheet(campaign.fact_sheet);
   const errors = [...fact.errors];
   if (volume.total_pieces > 500) errors.push(`Campaign volume ${volume.total_pieces} exceeds the 500-piece safety cap.`);
-  return c.json({ valid: errors.length === 0, errors, volume, fact_sheet_revision: campaign.fact_sheet_revision ?? 0, expected_media_jobs: volume.total_pieces });
+  const sb = getSupabaseAdmin();
+  const [timelineResult, assetsResult] = await Promise.all([
+    sb.from('campaign_timeline').select('content_ideas').eq('campaign_id', campaign.id),
+    sb.from('campaign_assets').select('id,asset_type,source_url').eq('campaign_id', campaign.id).eq('workspace_id', workspaceId),
+  ]);
+  if (timelineResult.error ?? assetsResult.error) {
+    throw new HTTPException(500, { message: (timelineResult.error ?? assetsResult.error)!.message });
+  }
+  const requiresDemoForge = campaignNeedsDemoForge(timelineResult.data ?? [], assetsResult.data ?? []);
+  const demoForge = requiresDemoForge
+    ? await checkDemoForgeReadiness()
+    : { ready: true, message: 'No DemoForge render is required by the current timeline.' };
+  const launchErrors = [...errors, ...(demoForge.ready ? [] : [demoForge.message])];
+  return c.json({
+    valid: errors.length === 0,
+    launch_valid: launchErrors.length === 0,
+    errors,
+    launch_errors: launchErrors,
+    volume,
+    fact_sheet_revision: campaign.fact_sheet_revision ?? 0,
+    expected_media_jobs: volume.total_pieces,
+    media: { requires_demoforge: requiresDemoForge, ready: demoForge.ready, message: demoForge.message },
+  });
+});
+
+// A campaign launch is asynchronous at the media layer. Expose the per-piece
+// ledger so the studio can show a repairable state instead of one aggregate
+// "pending media" count.
+campaignRoutes.get('/:id/media-status', async (c) => {
+  const workspaceId = c.req.header('x-workspace-id');
+  if (!workspaceId) throw new HTTPException(400, { message: 'x-workspace-id header is required' });
+  const campaignId = c.req.param('id');
+  const sb = getSupabaseAdmin();
+  const { data: campaign } = await sb.from('campaigns').select('id').eq('id', campaignId).eq('workspace_id', workspaceId).maybeSingle();
+  if (!campaign) throw new HTTPException(404, { message: 'Campaign not found' });
+  const { data, error } = await sb
+    .from('content_pieces')
+    .select('id,channel_slug,status,media_status,audit_notes,content_payload,image_url,video_url,created_at')
+    .eq('workspace_id', workspaceId)
+    .contains('content_payload', { campaign_id: campaignId })
+    .order('created_at', { ascending: false });
+  if (error) throw new HTTPException(500, { message: error.message });
+  const pieces = (data ?? []).map((piece) => {
+    const payload = piece.content_payload && typeof piece.content_payload === 'object' && !Array.isArray(piece.content_payload)
+      ? piece.content_payload as Record<string, unknown>
+      : {};
+    return {
+      id: piece.id,
+      channel: piece.channel_slug,
+      status: piece.status,
+      media_status: piece.media_status,
+      day_number: typeof payload.day_number === 'number' ? payload.day_number : null,
+      visual_type: typeof payload.visual_type === 'string' ? payload.visual_type : null,
+      demoforge_template_id: typeof payload.demoforge_template_id === 'string' ? payload.demoforge_template_id : null,
+      media_error: typeof payload.media_error === 'string' ? payload.media_error : null,
+      audit_notes: piece.audit_notes,
+      image_url: piece.image_url ?? (typeof payload.image_url === 'string' ? payload.image_url : null),
+      video_url: piece.video_url ?? (typeof payload.video_url === 'string' ? payload.video_url : null),
+      created_at: piece.created_at,
+    };
+  });
+  return c.json({ pieces });
 });
 
 const campaignAssetSchema = z.object({
@@ -851,6 +952,12 @@ campaignRoutes.post('/:id/launch', async (c) => {
     .select('id,title,asset_type,source_url,metadata')
     .eq('campaign_id', campaignId)
     .eq('workspace_id', workspaceId);
+  if (campaignNeedsDemoForge(timeline, campaignAssets ?? [])) {
+    const demoForge = await checkDemoForgeReadiness();
+    if (!demoForge.ready) {
+      throw new HTTPException(503, { message: `Campaign launch blocked: ${demoForge.message} Upload a visual asset or restore DemoForge, then try again.` });
+    }
+  }
   const assetsById = new Map((campaignAssets ?? []).map((asset) => [asset.id as string, asset]));
   const soundtrackAsset = (campaignAssets ?? []).find((asset) => asset.asset_type === 'music_project' && typeof asset.source_url === 'string');
   const { data: recentPieces } = await sb.from('content_pieces').select('content_payload').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(40);

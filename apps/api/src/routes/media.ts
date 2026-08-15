@@ -77,6 +77,22 @@ mediaRoutes.post("/upload", async (c) => {
   const { buffer, contentType, ext } = parseDataUrl(parsed.data.data_url);
   const storagePath = sanitizePath(parsed.data.path, ext, ws);
   const sb = getSupabaseAdmin();
+  const catalogMedia = contentType.startsWith("image/") || contentType.startsWith("video/");
+  let cataloged = false;
+
+  // Check the catalog before touching Storage. That lets a retry reuse an
+  // already-registered object and avoids ever deleting an object whose prior
+  // ownership we could not establish.
+  if (catalogMedia) {
+    const { data: existing, error: lookupError } = await sb
+      .from("media_assets")
+      .select("id")
+      .eq("workspace_id", ws)
+      .eq("storage_path", storagePath)
+      .maybeSingle();
+    if (lookupError) throw new HTTPException(500, { message: `Media catalog lookup failed before upload: ${lookupError.message}` });
+    cataloged = Boolean(existing);
+  }
 
   const { error } = await sb.storage
     .from("vantage-media")
@@ -84,13 +100,25 @@ mediaRoutes.post("/upload", async (c) => {
   if (error) throw new HTTPException(500, { message: `Storage upload failed: ${error.message}` });
 
   const { data } = sb.storage.from("vantage-media").getPublicUrl(storagePath);
-  if (contentType.startsWith("image/") || contentType.startsWith("video/")) {
+  if (catalogMedia) {
     const kind = contentType.startsWith("video/") ? "video" : "image";
     const title = parsed.data.title ?? storagePath.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "Uploaded media";
-    const { error: assetError } = await sb.from("media_assets").insert(
-      { workspace_id: ws, storage_path: storagePath, title, kind },
-    );
-    if (assetError) throw new HTTPException(500, { message: `Media catalog update failed: ${assetError.message}` });
+    // Storage has accepted the object at this point. Register it only when it
+    // was not cataloged before the upload; repeat submissions remain safe.
+    if (!cataloged) {
+      const { error: assetError } = await sb.from("media_assets").insert(
+        { workspace_id: ws, storage_path: storagePath, title, kind },
+      );
+      if (assetError) {
+        // A concurrent retry may have won the catalog insert. Its row owns the
+        // object now, so do not roll back the shared Storage path.
+        if (assetError.code === "23505") {
+          return c.json({ public_url: data.publicUrl, storage_path: storagePath });
+        }
+        await sb.storage.from("vantage-media").remove([storagePath]);
+        throw new HTTPException(500, { message: `Media catalog update failed; the upload was rolled back: ${assetError.message}` });
+      }
+    }
   }
   return c.json({ public_url: data.publicUrl, storage_path: storagePath });
 });

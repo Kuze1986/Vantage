@@ -780,7 +780,18 @@ export const vantageApi = {
   generateCampaignTimeline: (campaignId: string) =>
     vantageFetch(`/v1/campaigns/${campaignId}/timeline/generate`, { method: "POST" }) as Promise<{ timeline: any[] }>,
   getCampaignPreflight: (campaignId: string) =>
-    vantageFetch(`/v1/campaigns/${campaignId}/preflight`) as Promise<{ valid: boolean; errors: string[]; volume: { days: number; posts_per_day: number; total_pieces: number }; expected_media_jobs: number }> ,
+    vantageFetch(`/v1/campaigns/${campaignId}/preflight`) as Promise<{
+      valid: boolean; launch_valid: boolean; errors: string[]; launch_errors: string[];
+      volume: { days: number; posts_per_day: number; total_pieces: number };
+      expected_media_jobs: number;
+      media: { requires_demoforge: boolean; ready: boolean; message: string };
+    }> ,
+  getCampaignMediaStatus: (campaignId: string) =>
+    vantageFetch(`/v1/campaigns/${campaignId}/media-status`) as Promise<{ pieces: Array<{
+      id: string; channel: string; status: string; media_status: 'none' | 'pending' | 'ready' | 'failed' | null;
+      day_number: number | null; visual_type: string | null; demoforge_template_id: string | null;
+      media_error: string | null; audit_notes: string | null; image_url: string | null; video_url: string | null; created_at: string;
+    }> }>,
 
   addCampaignTimelineDays: (campaignId: string, days: any | any[]) =>
     vantageFetch(`/v1/campaigns/${campaignId}/timeline`, { method: "POST", body: JSON.stringify(days) }) as Promise<{ timeline_entries: any[] }>,

@@ -77,6 +77,9 @@ interface KPIMetrics {
   virality_score: number
 }
 
+type CampaignPreflight = Awaited<ReturnType<typeof vantageApi.getCampaignPreflight>>
+type CampaignMediaPiece = Awaited<ReturnType<typeof vantageApi.getCampaignMediaStatus>>['pieces'][number]
+
 type ViewState = 'list' | 'create' | 'details'
 
 const STATUS_VARIANTS: Record<string, 'active' | 'pending' | 'critical' | 'new' | 'core' | 'soon' | 'default'> = {
@@ -150,7 +153,10 @@ export default function CampaignBuilderPage() {
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [timeline, setTimeline] = useState<TimelineDay[]>([])
   const [campaignAssets, setCampaignAssets] = useState<any[]>([])
-  const [preflight, setPreflight] = useState<{ valid: boolean; errors: string[]; volume: { days: number; posts_per_day: number; total_pieces: number }; expected_media_jobs: number } | null>(null)
+  const [preflight, setPreflight] = useState<CampaignPreflight | null>(null)
+  const [mediaPieces, setMediaPieces] = useState<CampaignMediaPiece[]>([])
+  const [assetForPiece, setAssetForPiece] = useState<Record<string, string>>({})
+  const [dayForAsset, setDayForAsset] = useState<Record<string, string>>({})
   const [uploadingCampaignAsset, setUploadingCampaignAsset] = useState(false)
   const [campaignAssetUploadError, setCampaignAssetUploadError] = useState<string | null>(null)
   const [kpiMetrics, setKpiMetrics] = useState<KPIMetrics[]>([])
@@ -234,18 +240,20 @@ export default function CampaignBuilderPage() {
 
   const fetchCampaignDetails = async (campaignId: string) => {
     try {
-      const [campaignData, timelineData, kpiData, assetData, preflightData] = await Promise.all([
+      const [campaignData, timelineData, kpiData, assetData, preflightData, mediaData] = await Promise.all([
         vantageApi.getCampaign(campaignId),
         vantageApi.getCampaignTimeline(campaignId),
         vantageApi.getCampaignKPI(campaignId),
         vantageApi.listCampaignAssets(campaignId),
         vantageApi.getCampaignPreflight(campaignId),
+        vantageApi.getCampaignMediaStatus(campaignId),
       ])
       setSelectedCampaign(campaignData)
       setTimeline(timelineData.timeline || [])
       setKpiMetrics(kpiData.kpi_tracking || [])
       setCampaignAssets(assetData.assets || [])
       setPreflight(preflightData)
+      setMediaPieces(mediaData.pieces || [])
     } catch (err) {
       console.error('Failed to fetch campaign details:', err)
     }
@@ -341,6 +349,17 @@ export default function CampaignBuilderPage() {
       const secs = Array.isArray(day.secondary_channels) ? day.secondary_channels.length : 0
       return n + 1 + secs
     }, 0)
+    try {
+      const readiness = await vantageApi.getCampaignPreflight(selectedCampaign.id)
+      setPreflight(readiness)
+      if (!readiness.launch_valid) {
+        setLaunchInfo(`Launch blocked: ${readiness.launch_errors.join(' ')}`)
+        return
+      }
+    } catch (error) {
+      setLaunchInfo(`Could not verify media readiness: ${error instanceof Error ? error.message : 'Request failed'}`)
+      return
+    }
     if (!confirm(
       `Launch or resume autopilot for ${timeline.length} day(s) (up to ~${channelEstimate} pieces)? ` +
       'Each day runs as a separate request, so a slow launch can safely resume without duplicating completed pieces.',
@@ -487,6 +506,85 @@ export default function CampaignBuilderPage() {
         `${failures.length ? `; ${failures.length} day/channel request(s) need attention` : ''}.${failDetail}`,
       )
       await fetchCampaignDetails(selectedCampaign.id)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleRetryMedia = async (piece: CampaignMediaPiece) => {
+    if (!selectedCampaign) return
+    if (!piece.demoforge_template_id) {
+      setLaunchInfo(`Day ${(piece.day_number ?? 0) + 1}/${piece.channel}: no DemoForge template is recorded. Attach an uploaded asset instead.`)
+      return
+    }
+    setBusy(`retry-media:${piece.id}`)
+    try {
+      await vantageApi.createDemoForgeJobFromTemplate({
+        content_piece_id: piece.id,
+        template_id: piece.demoforge_template_id,
+        channel: piece.channel,
+      })
+      setLaunchInfo(`Re-render queued for day ${(piece.day_number ?? 0) + 1}/${piece.channel}.`)
+      await fetchCampaignDetails(selectedCampaign.id)
+    } catch (error) {
+      setLaunchInfo(`Could not retry day ${(piece.day_number ?? 0) + 1}/${piece.channel}: ${error instanceof Error ? error.message : 'Request failed'}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleAttachAssetToPiece = async (piece: CampaignMediaPiece) => {
+    if (!selectedCampaign) return
+    const asset = campaignAssets.find((item) => item.id === assetForPiece[piece.id])
+    if (!asset?.source_url) {
+      setLaunchInfo('Select an uploaded image, GIF, or video before attaching it.')
+      return
+    }
+    setBusy(`attach-media:${piece.id}`)
+    try {
+      const isVideo = asset.asset_type === 'video'
+      await vantageApi.patchQueuePiece(piece.id, {
+        ...(isVideo ? { video_url: asset.source_url } : { image_url: asset.source_url }),
+        media_status: 'ready',
+        content_payload_patch: {
+          campaign_asset_id: asset.id,
+          campaign_asset_title: asset.title,
+          media_error: null,
+          ...(isVideo ? { video_url: asset.source_url } : { image_url: asset.source_url }),
+        },
+      })
+      setLaunchInfo(`Attached ${asset.title} to day ${(piece.day_number ?? 0) + 1}/${piece.channel}; the piece is ready to queue.`)
+      await fetchCampaignDetails(selectedCampaign.id)
+    } catch (error) {
+      setLaunchInfo(`Could not attach the asset: ${error instanceof Error ? error.message : 'Request failed'}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleAssignAssetToDay = async (asset: any) => {
+    if (!selectedCampaign) return
+    const dayNumber = Number(dayForAsset[asset.id])
+    const day = timeline.find((item) => item.day_number === dayNumber)
+    if (!Number.isInteger(dayNumber) || !day || (day.published_pieces?.length ?? 0) > 0) {
+      setLaunchInfo('Choose an ungenerated timeline day before assigning an asset.')
+      return
+    }
+    const idea = (day.content_ideas?.[0] as any) || { title: '', outline: '' }
+    const content_ideas = [{ ...idea, visual_asset_id: asset.id, campaign_asset_id: undefined }]
+    setBusy(`assign-asset:${asset.id}`)
+    try {
+      await vantageApi.updateCampaignTimelineDay(selectedCampaign.id, day.day_number, {
+        primary_channel: day.primary_channel,
+        secondary_channels: day.secondary_channels ?? [],
+        content_type: day.content_type,
+        messaging_pillar_id: day.messaging_pillar_id ?? null,
+        content_ideas,
+      })
+      updateDayLocal(day.day_number, { content_ideas })
+      setLaunchInfo(`${asset.title} is assigned to day ${day.day_number + 1}. Generate that day when you are ready.`)
+    } catch (error) {
+      setLaunchInfo(`Could not assign the asset: ${error instanceof Error ? error.message : 'Request failed'}`)
     } finally {
       setBusy(null)
     }
@@ -1123,10 +1221,11 @@ export default function CampaignBuilderPage() {
           <Panel title="Reactor Note">{launchInfo}</Panel>
         )}
         {preflight && (
-          <Panel title={preflight.valid ? 'Campaign Preflight · Ready' : 'Campaign Preflight · Action Required'}>
-            <div className="nx-mono" style={{ fontSize: 11, lineHeight: 1.7, color: preflight.valid ? 'var(--nx-green)' : 'var(--nx-amber)' }}>
+          <Panel title={preflight.launch_valid ? 'Campaign Preflight · Ready to Launch' : 'Campaign Preflight · Action Required'}>
+            <div className="nx-mono" style={{ fontSize: 11, lineHeight: 1.7, color: preflight.launch_valid ? 'var(--nx-green)' : 'var(--nx-amber)' }}>
               {preflight.volume.posts_per_day} posts/day × {preflight.volume.days} days = {preflight.volume.total_pieces} drafts · {preflight.expected_media_jobs} expected media jobs
-              {!preflight.valid && <><br />{preflight.errors.join(' ')}</>}
+              <br />Media renderer: {preflight.media.message}
+              {!preflight.launch_valid && <><br />{preflight.launch_errors.join(' ')}</>}
             </div>
           </Panel>
         )}
@@ -1301,8 +1400,64 @@ export default function CampaignBuilderPage() {
                   {asset.metadata?.audio_upload && asset.source_url && <audio controls preload="metadata" src={asset.source_url} style={{ width: '100%', height: 28, marginTop: 8 }} />}
                   {!asset.metadata?.audio_upload && asset.source_url && (asset.asset_type === 'video' ? <video controls preload="metadata" src={asset.source_url} style={{ width: '100%', maxHeight: 100, marginTop: 8 }} /> : <img src={asset.source_url} alt={asset.title} style={{ width: '100%', maxHeight: 100, marginTop: 8, objectFit: 'cover' }} />)}
                   {asset.metadata?.channel && <div className="nx-mono" style={{ fontSize: 9, color: 'var(--nx-text-4)', marginTop: 5 }}>{String(asset.metadata.channel).toUpperCase()}</div>}
+                  {asset.asset_type !== 'music_project' && timeline.some((day) => (day.published_pieces?.length ?? 0) === 0) && (
+                    <div style={{ display: 'flex', gap: 5, marginTop: 9, alignItems: 'center' }}>
+                      <select aria-label={`Assign ${asset.title} to timeline day`} style={{ ...inputStyle, minWidth: 0, flex: 1, padding: '4px 6px', fontSize: 10 }} value={dayForAsset[asset.id] ?? ''} onChange={(event) => setDayForAsset((current) => ({ ...current, [asset.id]: event.target.value }))}>
+                        <option value="">Use in day…</option>
+                        {timeline.filter((day) => (day.published_pieces?.length ?? 0) === 0).map((day) => <option key={day.day_number} value={day.day_number}>Day {day.day_number + 1}</option>)}
+                      </select>
+                      <button type="button" className="nx-btn nx-btn--primary nx-btn--sm" disabled={busy !== null || !dayForAsset[asset.id]} onClick={() => void handleAssignAssetToDay(asset)}>
+                        {busy === `assign-asset:${asset.id}` ? '…' : 'ASSIGN'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Media Readiness & Recovery">
+          <p className="nx-mono" style={{ margin: '0 0 12px', fontSize: 10, color: 'var(--nx-text-4)', lineHeight: 1.6 }}>
+            Review each generated piece here. A failed render can be retried, or replaced with an uploaded campaign asset without restarting the campaign.
+          </p>
+          {mediaPieces.length === 0 ? (
+            <p className="nx-mono" style={{ margin: 0, fontSize: 11, color: 'var(--nx-text-4)' }}>No generated pieces yet. Launch a timeline day to begin media work.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {mediaPieces.map((piece) => {
+                const isBlocked = piece.media_status === 'pending' || piece.media_status === 'failed'
+                const canAttach = campaignAssets.some((asset) => asset.source_url && asset.asset_type !== 'music_project')
+                return (
+                  <div key={piece.id} style={{ border: '1px solid var(--nx-border)', borderRadius: 5, padding: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <strong style={{ fontSize: 12 }}>Day {(piece.day_number ?? 0) + 1} · {piece.channel.toUpperCase()}</strong>
+                        <Badge label={`media: ${piece.media_status ?? 'none'}`} variant={piece.media_status === 'failed' ? 'critical' : piece.media_status === 'pending' ? 'pending' : piece.media_status === 'ready' ? 'active' : 'default'} />
+                        <Badge label={piece.status} variant={STATUS_VARIANTS[piece.status] || 'default'} />
+                      </div>
+                      <a href={`/queue?piece=${piece.id}`} className="nx-btn nx-btn--ghost nx-btn--sm" style={{ textDecoration: 'none' }}>OPEN PIECE →</a>
+                    </div>
+                    {piece.media_error && <p role="alert" className="nx-mono" style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--nx-red)', lineHeight: 1.5 }}>{piece.media_error}</p>}
+                    {isBlocked && (
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginTop: 9 }}>
+                        <button type="button" className="nx-btn nx-btn--secondary nx-btn--sm" disabled={busy !== null || !piece.demoforge_template_id} onClick={() => void handleRetryMedia(piece)}>
+                          {busy === `retry-media:${piece.id}` ? 'RETRYING…' : 'RETRY RENDER'}
+                        </button>
+                        {canAttach && <>
+                          <select style={{ ...inputStyle, width: 'min(250px, 100%)', padding: '5px 8px', fontSize: 11 }} value={assetForPiece[piece.id] ?? ''} onChange={(event) => setAssetForPiece((current) => ({ ...current, [piece.id]: event.target.value }))}>
+                            <option value="">Replace with uploaded asset…</option>
+                            {campaignAssets.filter((asset) => asset.source_url && asset.asset_type !== 'music_project').map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}
+                          </select>
+                          <button type="button" className="nx-btn nx-btn--primary nx-btn--sm" disabled={busy !== null || !assetForPiece[piece.id]} onClick={() => void handleAttachAssetToPiece(piece)}>
+                            {busy === `attach-media:${piece.id}` ? 'ATTACHING…' : 'ATTACH & MARK READY'}
+                          </button>
+                        </>}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </Panel>
