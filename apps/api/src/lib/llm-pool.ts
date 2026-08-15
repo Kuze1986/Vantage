@@ -254,6 +254,11 @@ export function classifyLLMError(err: unknown): ErrorClass {
   if (AUTH_RE.test(msg)) return 'auth';
 
   if (status !== null) {
+    // A provider 404 commonly means a retired model or compatibility route. It
+    // cannot be repaired by retrying the same slot, but a configured fallback
+    // can still complete the task. Other request-shaped 4xx responses remain
+    // blocking below.
+    if (status === 404) return 'transient';
     if (status === 429 || status === 402 || status === 408 || status >= 500) return 'transient';
     if (status >= 400) return 'fatal';
   }

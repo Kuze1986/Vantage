@@ -67,9 +67,11 @@ export const PROVIDER_SPECS: Record<ProviderName, ProviderSpec> = {
     // Google's OpenAI-compatibility layer — lets Gemini ride the existing `openai`
     // SDK instead of adding @google/genai as a dependency.
     defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-    defaultModel: 'gemini-2.0-flash',
-    cheapModel: 'gemini-2.0-flash',
-    candidates: ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-2.5-pro'],
+    // Gemini 2.0 Flash was shut down on 2026-06-01. Keep the registry on
+    // Google's supported replacement so an unconfigured Gemini slot is usable.
+    defaultModel: 'gemini-3.6-flash',
+    cheapModel: 'gemini-3.5-flash-lite',
+    candidates: ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'],
   },
   grok: {
     // Registry key stays `grok` (not `xai`): PROVIDER_NAMES and persisted

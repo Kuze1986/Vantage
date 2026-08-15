@@ -16,7 +16,7 @@ export class GeminiProvider extends OpenAICompatibleProvider {
   readonly name: ProviderName = 'gemini';
 
   getCost(): { input_per_1k: number; output_per_1k: number } {
-    // gemini-2.0-flash pricing
+    // Conservative placeholder until current Gemini 3 pricing is configured.
     return {
       input_per_1k: 0.0001,
       output_per_1k: 0.0004,

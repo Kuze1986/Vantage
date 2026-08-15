@@ -240,6 +240,11 @@ describe('classifyLLMError', () => {
     expect(classifyLLMError(err)).toBe('transient');
   });
 
+  it('fails over from a provider 404 with no response body', () => {
+    const err = Object.assign(new Error('404 status code (no body)'), { status: 404 });
+    expect(classifyLLMError(err)).toBe('transient');
+  });
+
   it('classifies bad credentials as auth', () => {
     const err = Object.assign(new Error('Incorrect API key provided'), { status: 401 });
     expect(classifyLLMError(err)).toBe('auth');
