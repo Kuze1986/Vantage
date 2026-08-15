@@ -16,6 +16,7 @@ import { uploadDataUrl } from '../lib/storage'
 
 const PAGE_SIZE = 24
 const MAX_UPLOAD_BYTES = 24 * 1024 * 1024
+const MAX_GIF_FRAMES = 12
 
 const SOURCE_FILTERS: Array<{ value: string; label: string }> = [
   { value: '',           label: 'All' },
@@ -122,21 +123,30 @@ export default function MediaGalleryPage() {
   const uploadInputRef = React.useRef<HTMLInputElement | null>(null)
 
   const frameItems = items.filter((item) => item.kind === 'image' || item.thumbnail_url)
-  const toggleFrame = (url: string) => setSelected((current) => current.includes(url) ? current.filter((value) => value !== url) : [...current, url])
+  const toggleFrame = (url: string) => setSelected((current) => {
+    if (current.includes(url)) return current.filter((value) => value !== url)
+    if (current.length >= MAX_GIF_FRAMES) {
+      setCreateError(`Choose up to ${MAX_GIF_FRAMES} frames per GIF.`)
+      return current
+    }
+    setCreateError(null)
+    return [...current, url]
+  })
   const createGif = async () => {
     if (selected.length < 2) return
     setCreating(true); setCreateError(null)
     try {
       const { GIFEncoder, quantize, applyPalette } = await import('gifenc')
       const frames: Uint8ClampedArray[] = []
-      let width = 480; let height = 480
+      const width = selected.length > 6 ? 360 : 480
+      const height = width
       for (const url of selected) {
         const image = new Image(); image.crossOrigin = 'anonymous'; image.src = url
         await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('Could not load one of the selected frames')) })
-        const scale = Math.min(480 / image.width, 480 / image.height)
-        width = Math.max(2, Math.floor(image.width * scale)); height = Math.max(2, Math.floor(image.height * scale))
+        const scale = Math.min(width / image.width, height / image.height)
+        const frameWidth = Math.max(2, Math.floor(image.width * scale)); const frameHeight = Math.max(2, Math.floor(image.height * scale))
         const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height
-        const context = canvas.getContext('2d')!; context.drawImage(image, 0, 0, width, height)
+        const context = canvas.getContext('2d')!; context.drawImage(image, Math.floor((width - frameWidth) / 2), Math.floor((height - frameHeight) / 2), frameWidth, frameHeight)
         frames.push(context.getImageData(0, 0, width, height).data)
       }
       const encoder = GIFEncoder()
@@ -145,7 +155,13 @@ export default function MediaGalleryPage() {
         encoder.writeFrame(applyPalette(frame, palette), width, height, { palette, delay, repeat: 0 })
       })
       encoder.finish()
-      const bytes = encoder.bytes(); const dataUrl = `data:image/gif;base64,${btoa(String.fromCharCode(...bytes))}`
+      const bytes = encoder.bytes()
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error('Could not prepare the GIF for upload'))
+        reader.readAsDataURL(new Blob([bytes.buffer as ArrayBuffer], { type: 'image/gif' }))
+      })
       await uploadDataUrl(`creative/gif-${Date.now()}.gif`, dataUrl)
       setComposerOpen(false); setSelected([])
       setKind(''); setSource('');
@@ -349,7 +365,7 @@ export default function MediaGalleryPage() {
       {composerOpen && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 20, background: 'rgba(0,0,0,.72)', display: 'grid', placeItems: 'center', padding: 20 }}>
           <Panel title="Create animated GIF" titleAccent="cyan">
-            <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 11 }}>Select at least two image frames in order.</p>
+            <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 11 }}>Select 2–{MAX_GIF_FRAMES} image frames in order. GIFs with 7–12 frames render at 360px for reliable export.</p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, maxHeight: 360, overflow: 'auto' }}>
               {frameItems.map((item) => {
                 const frameUrl = item.kind === 'image' ? item.url : item.thumbnail_url!
@@ -358,7 +374,7 @@ export default function MediaGalleryPage() {
             </div>
             <label style={{ display: 'block', marginTop: 12, fontFamily: 'var(--nx-mono)', fontSize: 11 }}>Frame delay: {delay}ms <input type="range" min="100" max="2000" step="100" value={delay} onChange={(event) => setDelay(Number(event.target.value))} /></label>
             {createError && <p style={{ color: 'var(--nx-red)', fontSize: 11 }}>{createError}</p>}
-            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}><button type="button" className="nx-btn nx-btn--primary" disabled={selected.length < 2 || creating} onClick={() => void createGif()}>{creating ? 'CREATING…' : `CREATE (${selected.length} FRAMES)`}</button><button type="button" className="nx-btn nx-btn--secondary" onClick={() => setComposerOpen(false)}>CANCEL</button></div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}><button type="button" className="nx-btn nx-btn--primary" disabled={selected.length < 2 || selected.length > MAX_GIF_FRAMES || creating} onClick={() => void createGif()}>{creating ? 'CREATING…' : `CREATE (${selected.length} FRAMES)`}</button><button type="button" className="nx-btn nx-btn--secondary" onClick={() => setComposerOpen(false)}>CANCEL</button></div>
           </Panel>
         </div>
       )}
