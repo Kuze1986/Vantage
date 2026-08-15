@@ -353,7 +353,7 @@ campaignRoutes.get('/:id/media-status', async (c) => {
   if (!campaign) throw new HTTPException(404, { message: 'Campaign not found' });
   const { data, error } = await sb
     .from('content_pieces')
-    .select('id,channel_slug,status,media_status,audit_notes,content_payload,image_url,video_url,created_at')
+    .select('id,channel_slug,status,media_status,audit_notes,audit_category,validation_result,similarity_score,final_character_count,content_payload,image_url,video_url,created_at')
     .eq('workspace_id', workspaceId)
     .contains('content_payload', { campaign_id: campaignId })
     .order('created_at', { ascending: false });
@@ -361,6 +361,9 @@ campaignRoutes.get('/:id/media-status', async (c) => {
   const pieces = (data ?? []).map((piece) => {
     const payload = piece.content_payload && typeof piece.content_payload === 'object' && !Array.isArray(piece.content_payload)
       ? piece.content_payload as Record<string, unknown>
+      : {};
+    const validation = piece.validation_result && typeof piece.validation_result === 'object' && !Array.isArray(piece.validation_result)
+      ? piece.validation_result as Record<string, unknown>
       : {};
     return {
       id: piece.id,
@@ -372,6 +375,12 @@ campaignRoutes.get('/:id/media-status', async (c) => {
       demoforge_template_id: typeof payload.demoforge_template_id === 'string' ? payload.demoforge_template_id : null,
       media_error: typeof payload.media_error === 'string' ? payload.media_error : null,
       audit_notes: piece.audit_notes,
+      audit_category: piece.audit_category,
+      validation_errors: Array.isArray(validation.errors)
+        ? validation.errors.filter((error): error is string => typeof error === 'string')
+        : [],
+      similarity_score: typeof piece.similarity_score === 'number' ? piece.similarity_score : null,
+      final_character_count: typeof piece.final_character_count === 'number' ? piece.final_character_count : null,
       image_url: piece.image_url ?? (typeof payload.image_url === 'string' ? payload.image_url : null),
       video_url: piece.video_url ?? (typeof payload.video_url === 'string' ? payload.video_url : null),
       created_at: piece.created_at,

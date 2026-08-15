@@ -268,7 +268,10 @@ export const vantageApi = {
     vantageFetch(`/v1/queue?limit=${limit}`) as Promise<{ pieces: {
       id: string; status: string; channel_slug: string; format: string;
       content_payload: Record<string, unknown>; audit_notes: string | null;
-      audit_iterations: number; created_at: string;
+      audit_category?: string | null; audit_iterations: number;
+      validation_result?: { valid?: boolean; errors?: string[] } | null;
+      similarity_score?: number | null; final_character_count?: number | null;
+      created_at: string;
       image_url?: string | null;
       video_url?: string | null;
       media_status?: string | null;
@@ -797,7 +800,9 @@ export const vantageApi = {
     vantageFetch(`/v1/campaigns/${campaignId}/media-status`) as Promise<{ pieces: Array<{
       id: string; channel: string; status: string; media_status: 'none' | 'pending' | 'ready' | 'failed' | null;
       day_number: number | null; visual_type: string | null; demoforge_template_id: string | null;
-      media_error: string | null; audit_notes: string | null; image_url: string | null; video_url: string | null; created_at: string;
+      media_error: string | null; audit_notes: string | null; audit_category: string | null;
+      validation_errors: string[]; similarity_score: number | null; final_character_count: number | null;
+      image_url: string | null; video_url: string | null; created_at: string;
     }> }>,
 
   addCampaignTimelineDays: (campaignId: string, days: any | any[]) =>

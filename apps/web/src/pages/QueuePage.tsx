@@ -20,6 +20,9 @@ export type Piece = {
   audit_notes: string | null
   audit_category?: string | null
   audit_iterations: number
+  validation_result?: { valid?: boolean; errors?: string[] } | null
+  similarity_score?: number | null
+  final_character_count?: number | null
   created_at: string
   image_url?: string | null
   video_url?: string | null
@@ -580,6 +583,16 @@ export function QueuePage() {
           <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-text-4)', marginTop: 3 }}>
             {p.audit_category && <Badge label={p.audit_category.replace(/_/g, ' ')} variant="pending" />}
             {' '}Ilita: {p.audit_notes.slice(0, 300)}{p.audit_notes.length > 300 ? '…' : ''}
+          </div>
+        )}
+        {p.status === 'rejected' && (
+          <div role="alert" style={{ marginTop: 7, padding: '7px 8px', border: '1px solid var(--nx-red)', borderRadius: 4, background: 'color-mix(in srgb, var(--nx-red) 7%, transparent)', fontFamily: 'var(--nx-mono)', fontSize: 10, lineHeight: 1.45 }}>
+            <div style={{ fontSize: 9, letterSpacing: '.06em', color: 'var(--nx-red)', marginBottom: 3 }}>REJECTION DIAGNOSIS</div>
+            {p.audit_notes && <div><strong>Audit:</strong> {p.audit_notes}</div>}
+            {(p.validation_result?.errors ?? []).map((error, index) => <div key={`${p.id}-validation-${index}`}><strong>Platform check:</strong> {error}</div>)}
+            {typeof p.similarity_score === 'number' && p.similarity_score >= 0.72 && <div><strong>Similarity:</strong> {Math.round(p.similarity_score * 100)}% to recent campaign copy (limit: 72%).</div>}
+            {typeof p.content_payload.media_error === 'string' && <div><strong>Media:</strong> {p.content_payload.media_error}</div>}
+            {!p.audit_notes && !(p.validation_result?.errors?.length) && !(typeof p.similarity_score === 'number' && p.similarity_score >= 0.72) && typeof p.content_payload.media_error !== 'string' && <div>No detailed reason was stored for this legacy rejection.</div>}
           </div>
         )}
         {/* Media status + previews */}

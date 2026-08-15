@@ -1454,10 +1454,18 @@ export default function CampaignBuilderPage() {
                       </div>
                       <a href={`/queue?piece=${piece.id}`} className="nx-btn nx-btn--ghost nx-btn--sm" style={{ textDecoration: 'none' }}>OPEN PIECE →</a>
                     </div>
-                    {piece.media_error && <p role="alert" className="nx-mono" style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--nx-red)', lineHeight: 1.5 }}>{piece.media_error}</p>}
+                    {piece.media_error && piece.status !== 'rejected' && <p role="alert" className="nx-mono" style={{ margin: '8px 0 0', fontSize: 10, color: 'var(--nx-red)', lineHeight: 1.5 }}>{piece.media_error}</p>}
                     {piece.status === 'rejected' && (
                       <div style={{ marginTop: 9 }}>
-                        <button type="button" className="nx-btn nx-btn--secondary nx-btn--sm" disabled={busy !== null} onClick={() => void handleForceApprove(piece)} title="Override the audit rejection while preserving its reason in the audit trail">
+                        <div role="alert" className="nx-mono" style={{ padding: '7px 8px', border: '1px solid var(--nx-red)', borderRadius: 4, background: 'color-mix(in srgb, var(--nx-red) 7%, transparent)', fontSize: 10, lineHeight: 1.5 }}>
+                          <div style={{ fontSize: 9, letterSpacing: '.06em', color: 'var(--nx-red)', marginBottom: 3 }}>REJECTION DIAGNOSIS</div>
+                          {piece.audit_notes && <div><strong>Audit:</strong> {piece.audit_notes}</div>}
+                          {piece.validation_errors.map((error, index) => <div key={`${piece.id}-validation-${index}`}><strong>Platform check:</strong> {error}</div>)}
+                          {typeof piece.similarity_score === 'number' && piece.similarity_score >= 0.72 && <div><strong>Similarity:</strong> {Math.round(piece.similarity_score * 100)}% to recent campaign copy (limit: 72%).</div>}
+                          {piece.media_error && <div><strong>Media:</strong> {piece.media_error}</div>}
+                          {!piece.audit_notes && piece.validation_errors.length === 0 && !(typeof piece.similarity_score === 'number' && piece.similarity_score >= 0.72) && !piece.media_error && <div>No detailed reason was stored for this legacy rejection.</div>}
+                        </div>
+                        <button type="button" className="nx-btn nx-btn--secondary nx-btn--sm" style={{ marginTop: 8 }} disabled={busy !== null} onClick={() => void handleForceApprove(piece)} title="Override the audit rejection while preserving its reason in the audit trail">
                           {busy === `force-approve:${piece.id}` ? 'FORCING…' : 'FORCE APPROVE CONTENT'}
                         </button>
                       </div>
