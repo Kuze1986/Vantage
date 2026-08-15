@@ -326,25 +326,103 @@ export default function CampaignBuilderPage() {
       return n + 1 + secs
     }, 0)
     if (!confirm(
-      `Launch autopilot for ${timeline.length} day(s) (~${channelEstimate} pieces)? ` +
-      'Ilita audits each piece; media-ready pieces auto-queue for cadence publish.',
+      `Launch or resume autopilot for ${timeline.length} day(s) (up to ~${channelEstimate} pieces)? ` +
+      'Each day runs as a separate request, so a slow launch can safely resume without duplicating completed pieces.',
     )) return
     setBusy('launch')
     setLaunchInfo(null)
     try {
-      const res = await vantageApi.launchCampaign(selectedCampaign.id)
-      const failDetail = Array.isArray(res.failures) && res.failures.length
-        ? `\nFailures: ${res.failures.slice(0, 8).map((f: { day_number?: number; channel?: string; error?: string }) =>
+      let launched = 0
+      let skipped = 0
+      const failures: { day_number?: number; channel?: string; error?: string }[] = []
+
+      // Keep every API request below the reverse-proxy timeout. The endpoint is
+      // idempotent per timeline day/channel, so rerunning this loop after a tab
+      // close or network failure only fills the gaps.
+      for (const [index, day] of timeline.entries()) {
+        setLaunchInfo(`Launching day ${index + 1} of ${timeline.length}…`)
+        try {
+          const res = await vantageApi.launchCampaign(selectedCampaign.id, [day.day_number])
+          launched += res.launched
+          skipped += res.skipped ?? 0
+          failures.push(...(res.failures ?? []))
+        } catch (err) {
+          failures.push({
+            day_number: day.day_number,
+            error: err instanceof Error ? err.message : 'Request failed',
+          })
+          // Stop at a transport failure. Earlier days are committed and the next
+          // click resumes safely; continuing would hide an outage behind noise.
+          break
+        }
+      }
+      const failDetail = failures.length
+        ? `\nFailures: ${failures.slice(0, 8).map((f) =>
             `day ${(f.day_number ?? 0) + 1}${f.channel ? '/' + f.channel : ''}: ${f.error ?? 'error'}`,
-          ).join('; ')}${res.failures.length > 8 ? '…' : ''}`
+          ).join('; ')}${failures.length > 8 ? '…' : ''}`
         : ''
       setLaunchInfo(
-        `Autopilot launched ${res.launched} piece(s)${res.failed ? `, ${res.failed} failed` : ''}. ` +
+        `Autopilot added ${launched} piece(s)${skipped ? ` and kept ${skipped} existing piece(s)` : ''}` +
+        `${failures.length ? `; ${failures.length} day/channel request(s) need attention` : ''}. ` +
         `Text-only pieces are queued; DemoForge media auto-queues when ready.${failDetail}`,
       )
       await fetchCampaignDetails(selectedCampaign.id)
     } catch (err) {
       alert('Failed to launch campaign: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const handleRegenerateRejected = async () => {
+    if (!selectedCampaign) return
+    const daysWithRejections = timeline.filter((day) =>
+      Array.isArray(day.published_pieces) && day.published_pieces.some((piece) => piece?.status === 'rejected'),
+    )
+    if (!daysWithRejections.length) {
+      alert('There are no rejected campaign pieces to regenerate.')
+      return
+    }
+    const rejectedCount = daysWithRejections.reduce(
+      (count, day) => count + day.published_pieces.filter((piece) => piece?.status === 'rejected').length,
+      0,
+    )
+    if (!confirm(
+      `Regenerate ${rejectedCount} rejected piece(s) across ${daysWithRejections.length} day(s)? ` +
+      'The rejected originals stay in the audit history; only their failed day/channel slots will be retried.',
+    )) return
+
+    setBusy('retry-rejected')
+    setLaunchInfo(null)
+    let launched = 0
+    let skipped = 0
+    const failures: { day_number?: number; channel?: string; error?: string }[] = []
+    try {
+      for (const [index, day] of daysWithRejections.entries()) {
+        setLaunchInfo(`Regenerating rejected pieces: day ${index + 1} of ${daysWithRejections.length}…`)
+        try {
+          const res = await vantageApi.launchCampaign(selectedCampaign.id, [day.day_number], true)
+          launched += res.launched
+          skipped += res.skipped ?? 0
+          failures.push(...(res.failures ?? []))
+        } catch (err) {
+          failures.push({
+            day_number: day.day_number,
+            error: err instanceof Error ? err.message : 'Request failed',
+          })
+          break
+        }
+      }
+      const failDetail = failures.length
+        ? `\nFailures: ${failures.slice(0, 8).map((f) =>
+            `day ${(f.day_number ?? 0) + 1}${f.channel ? '/' + f.channel : ''}: ${f.error ?? 'error'}`,
+          ).join('; ')}${failures.length > 8 ? '…' : ''}`
+        : ''
+      setLaunchInfo(
+        `Regenerated ${launched} rejected piece(s)${skipped ? `; ${skipped} already-valid piece(s) were kept` : ''}` +
+        `${failures.length ? `; ${failures.length} day/channel request(s) need attention` : ''}.${failDetail}`,
+      )
+      await fetchCampaignDetails(selectedCampaign.id)
     } finally {
       setBusy(null)
     }
@@ -930,6 +1008,15 @@ export default function CampaignBuilderPage() {
               disabled={busy !== null || timeline.length === 0}
             >
               {busy === 'launch' ? 'LAUNCHING…' : '▶ ENGAGE AUTOPILOT'}
+            </button>
+            <button
+              type="button"
+              className="nx-btn"
+              style={{ fontSize: 10, padding: '8px 12px' }}
+              onClick={() => void handleRegenerateRejected()}
+              disabled={busy !== null || !timeline.some((day) => Array.isArray(day.published_pieces) && day.published_pieces.some((piece) => piece?.status === 'rejected'))}
+            >
+              {busy === 'retry-rejected' ? 'REGENERATING…' : '↻ REGENERATE REJECTED'}
             </button>
           </div>
         </div>

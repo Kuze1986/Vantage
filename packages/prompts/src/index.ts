@@ -86,7 +86,7 @@ export function renderBrandVoice(raw: string | null | undefined, channel?: strin
 
 export function kuzeSystemPrompt(
   format: ContentFormat,
-  opts?: { brandVoice?: string; channel?: string; reserveForLink?: boolean },
+  opts?: { brandVoice?: string; channel?: string; reserveForLink?: boolean; linkReserveChars?: number },
 ): string {
   const voiceBlock = renderBrandVoice(opts?.brandVoice, opts?.channel)
   // A destination URL is appended deterministically after generation (see
@@ -120,9 +120,14 @@ Be accurate — never exaggerate outcomes, never invent product features, never 
 
 You must return ONLY valid JSON — no markdown, no code fences, no preamble. Escape every double quote and newline inside string values. Exact schema for this format below:`
 
-  const tweetMax = opts?.reserveForLink ? 256 : 280
-  const threadsMax = opts?.reserveForLink ? 476 : 500
-  const blueskyMax = opts?.reserveForLink ? 276 : 300
+  // Leave room for the final URL *and* its attribution parameters. A static
+  // 24-character allowance was too small for real campaign links, so Kuze
+  // would produce otherwise-valid posts that failed after the link was added.
+  const linkReserve = opts?.reserveForLink ? Math.max(0, opts.linkReserveChars ?? 24) : 0
+  const inlineLimit = (limit: number) => Math.max(40, limit - linkReserve)
+  const tweetMax = inlineLimit(280)
+  const threadsMax = inlineLimit(500)
+  const blueskyMax = inlineLimit(300)
 
   const schemas: Record<ContentFormat, string> = {
     tweet: `
@@ -133,7 +138,7 @@ Structural defaults (yield to brand voice): Front-load the substance. Max 2 hash
     linkedin_post: `
 Format: linkedin_post
 Output schema: {"body":"<post text, 150–1200 chars>","headline":"<optional 6–10 word hook for first line>"}
-Structural defaults (yield to brand voice): Use short paragraphs and line breaks for readability. No emoji spam. One clear argument per post.${linkNote}`,
+Structural defaults (yield to brand voice): Open with a concrete practitioner observation, not a slogan. Use short paragraphs and line breaks for readability. No emoji spam. One clear argument per post.${linkNote}`,
 
     reddit_thread: `
 Format: reddit_thread
@@ -143,7 +148,7 @@ Structural defaults (yield to brand voice): Value-first — teach something usef
     threads_post: `
 Format: threads_post
 Output schema: {"body":"<post text, max ${threadsMax} chars>"}
-Structural defaults (yield to brand voice): Lead the first line with the substance. Max 1–2 hashtags. Count characters.${linkNote}`,
+Structural defaults (yield to brand voice): Lead with a concrete, conversational observation — not a label or generic promotional hook. Max 1–2 hashtags. Count characters.${linkNote}`,
 
     bluesky_post: `
 Format: bluesky_post
@@ -168,7 +173,7 @@ Structural defaults (yield to brand voice): The first line must land on its own 
     facebook_post: `
 Format: facebook_post
 Output schema: {"body":"<post text, 100–500 chars>"}
-Structural defaults (yield to brand voice): Accessible register — more context than X, less formal than LinkedIn. Avoid hard sell. One clear CTA at the end.${linkNote}`,
+Structural defaults (yield to brand voice): Accessible register — more context than X, less formal than LinkedIn. Avoid hard sell. End with either one concrete, non-bait discussion question or one restrained CTA.${linkNote}`,
   }
 
   return `${base}\n${schemas[format]}`
@@ -389,14 +394,14 @@ export type IlitaRejectionCategory = typeof ILITA_REJECTION_CATEGORIES[number]
 export function ilitaAuditSystemPrompt(format: ContentFormat): string {
   const rules: Record<ContentFormat, string> = {
     tweet: 'Tweet (max 280 chars): verify character count, hook quality, brand compliance.',
-    linkedin_post: 'LinkedIn post: verify professional tone, accuracy of any statistics cited, no unsubstantiated claims.',
+    linkedin_post: 'LinkedIn post: verify professional tone, a concrete practitioner observation rather than a slogan, accuracy of any statistics cited, and no unsubstantiated claims.',
     reddit_thread: 'Reddit thread: verify value-first framing, no overt advertising, subreddit-appropriate tone.',
-    threads_post: 'Threads post (max 500 chars): verify character count, conversational hook, minimal hashtags, brand compliance.',
+    threads_post: 'Threads post (max 500 chars): verify character count, a concrete conversational opening (not a label or generic promotional hook), minimal hashtags, and brand compliance.',
     bluesky_post: 'Bluesky post (max 300 chars): verify character count, authentic non-markety tone, no hashtag spam, brand compliance.',
     email_newsletter: 'Email newsletter: verify subject line is not clickbait, HTML is well-formed, CTA is present and honest.',
     tiktok_script: 'TikTok script: verify hook lands in ≤3 seconds, pacing is natural for spoken word, CTA is verbal and clear.',
     instagram_caption: 'Instagram caption: verify hook is in first line, hashtags are relevant and not spammy, alt text is descriptive.',
-    facebook_post: 'Facebook post: verify community tone, question or engagement hook is present, no hard sell.',
+    facebook_post: 'Facebook post: verify community tone and either a concrete, non-bait discussion question or a restrained CTA is present; do not require both. No hard sell.',
   }
 
   return `You are Ilita, a strict brand and compliance reviewer for NEXUS education product marketing.

@@ -787,12 +787,15 @@ export const vantageApi = {
   deleteCampaignTimelineDay: (campaignId: string, dayNumber: number) =>
     vantageFetch(`/v1/campaigns/${campaignId}/timeline/${dayNumber}`, { method: "DELETE" }) as Promise<{ success: boolean }>,
 
-  launchCampaign: (campaignId: string, dayNumbers?: number[]) =>
+  launchCampaign: (campaignId: string, dayNumbers?: number[], retryRejected = false) =>
     vantageFetch(`/v1/campaigns/${campaignId}/launch`, {
       method: "POST",
-      body: JSON.stringify(dayNumbers ? { day_numbers: dayNumbers } : {}),
+      body: JSON.stringify({
+        ...(dayNumbers ? { day_numbers: dayNumbers } : {}),
+        ...(retryRejected ? { retry_rejected: true } : {}),
+      }),
     }) as Promise<{
-      launched: number; failed: number;
+      launched: number; skipped: number; failed: number;
       pieces: {
         content_piece_id: string; channel: string; day_number: number;
         media_status: string; demoforge_job_id?: string;

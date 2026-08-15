@@ -143,6 +143,12 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
     resolveDestination(input.workspace_id, input.channel, input.campaign_id),
   ]);
   const reserveForLink = destination.policy === "inline" && !!destination.url;
+  // UTM decoration happens after a content piece exists. Reserve for both the
+  // raw destination and the bounded attribution suffix now, so the finished
+  // post rather than just Kuze's pre-link draft fits platform hard limits.
+  const linkReserveChars = reserveForLink
+    ? destination.url!.length + 2 + 130
+    : 0;
   const provider = await resolveProvider("generate", input.workspace_id, "kuze.generateContent");
 
   const userPrompt = kuzeUserPrompt({
@@ -167,6 +173,7 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
       brandVoice: input.brand_voice,
       channel: input.channel,
       reserveForLink,
+      linkReserveChars,
     }),
     max_tokens: 1400,
   };

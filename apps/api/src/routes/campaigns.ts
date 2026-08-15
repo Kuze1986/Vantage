@@ -744,10 +744,13 @@ campaignRoutes.post('/:id/launch', async (c) => {
   }
 
   // Optional { day_numbers: [...] } restricts generation to specific days.
+  // retry_rejected permits a deliberate revision of failed day/channel slots;
+  // the original pieces remain in the timeline as an audit trail.
   const body = await c.req.json().catch(() => ({}));
   const dayFilter: number[] | null = Array.isArray(body?.day_numbers)
     ? body.day_numbers.map((n: unknown) => Number(n)).filter((n: number) => Number.isFinite(n))
     : null;
+  const retryRejected = body?.retry_rejected === true;
 
   const { data: allDays } = await sb
     .from('campaign_timeline')
@@ -794,6 +797,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
     demoforge_job_id?: string;
   }[] = [];
   const failures: { day_number: number; channel?: string; error: string }[] = [];
+  let skipped = 0;
 
   const campaignDefaultBrand =
     typeof campaign.default_brand_id === 'string' ? campaign.default_brand_id : null;
@@ -870,8 +874,23 @@ campaignRoutes.post('/:id/launch', async (c) => {
       .filter(Boolean)
       .join('\n\n');
     const published = Array.isArray(day.published_pieces) ? [...day.published_pieces] : [];
+    // A browser, proxy, or deploy may interrupt a multi-day launch after some
+    // days have committed. The timeline is the durable launch ledger, so never
+    // create a second piece for a day/channel that is already recorded there.
+    // This also makes a manual retry safe.
+    const existingChannels = new Set(
+      published
+        .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object' && !Array.isArray(entry))
+        .filter((entry) => !retryRejected || entry.status !== 'rejected')
+        .map((entry) => typeof entry.channel === 'string' ? entry.channel : null)
+        .filter((channel): channel is string => channel !== null),
+    );
 
     for (const [channelIndex, channel] of channelsForDay.entries()) {
+      if (existingChannels.has(channel)) {
+        skipped++;
+        continue;
+      }
       const templateId = resolveTemplateId({
         ideaTemplateId: idea.demoforge_template_id,
         campaignDefaultTemplateId: campaignDefaultTemplate,
@@ -1147,7 +1166,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
     payload: { campaign_id: campaignId, created: created.length, failed: failures.length },
   });
 
-  return c.json({ launched: created.length, failed: failures.length, pieces: created, failures }, 201);
+  return c.json({ launched: created.length, skipped, failed: failures.length, pieces: created, failures }, 201);
 });
 
 // POST /v1/campaigns/:id/add-pack — append Shift pack items as timeline days
