@@ -551,6 +551,9 @@ export const vantageApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     }) as Promise<{ public_url: string; storage_path: string }>,
+
+  deleteMediaAsset: (id: string) =>
+    vantageFetch(`/v1/media/gallery/${encodeURIComponent(id)}`, { method: 'DELETE' }) as Promise<{ ok: boolean; removed_from_storage: boolean }>,
   uploadMusicTrack: (body: { title: string; data_url: string }) => vantageFetch('/v1/music/upload', { method: 'POST', body: JSON.stringify(body) }) as Promise<{ track: any }>,
   listMusicProjects: () => vantageFetch('/v1/music/projects') as Promise<{ projects: any[] }>,
   createMusicProject: (body: any) => vantageFetch('/v1/music/projects', { method: 'POST', body: JSON.stringify(body) }) as Promise<{ project: any }>,

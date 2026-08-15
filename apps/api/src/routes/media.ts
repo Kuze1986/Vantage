@@ -109,7 +109,7 @@ mediaRoutes.get("/gallery", async (c) => {
   // Every query is workspace-filtered — that, not the Storage path layout, is
   // what makes the gallery tenant-safe. See lib/media-gallery.ts.
   const scanLimit = Math.min(GALLERY_SCAN_LIMIT, Math.max(100, offset + limit));
-  const [pieces, jobs, kits, clips, uploads] = await Promise.all([
+  const [pieces, jobs, kits, clips, uploads, deletions] = await Promise.all([
     sb.from("content_pieces")
       .select("id, channel_slug, image_url, video_url, content_payload, created_at")
       .eq("workspace_id", ws).order("created_at", { ascending: false }).limit(scanLimit),
@@ -127,9 +127,10 @@ mediaRoutes.get("/gallery", async (c) => {
     sb.from("media_assets")
       .select("id, title, kind, storage_path, created_at")
       .eq("workspace_id", ws).order("created_at", { ascending: false }).limit(scanLimit),
+    sb.from("media_asset_deletions").select("item_id").eq("workspace_id", ws),
   ]);
 
-  const firstErr = pieces.error ?? jobs.error ?? kits.error ?? clips.error ?? uploads.error;
+  const firstErr = pieces.error ?? jobs.error ?? kits.error ?? clips.error ?? uploads.error ?? deletions.error;
   if (firstErr) throw new HTTPException(500, { message: firstErr.message });
 
   const publicUrlFor = (path: string) =>
@@ -153,5 +154,35 @@ mediaRoutes.get("/gallery", async (c) => {
     })),
   ];
 
-  return c.json({ ...assembleGallery(all, { source, kind, limit, offset }), scan_limit: GALLERY_SCAN_LIMIT });
+  const deletedIds = new Set((deletions.data ?? []).map((item) => item.item_id));
+  return c.json({ ...assembleGallery(all.filter((item) => !deletedIds.has(item.id)), { source, kind, limit, offset }), scan_limit: scanLimit });
+});
+
+// DELETE /v1/media/gallery/:id — removes uploads from Storage and hides generated assets from the gallery.
+mediaRoutes.delete("/gallery/:id", async (c) => {
+  const ws = c.get("workspaceId");
+  const itemId = decodeURIComponent(c.req.param("id"));
+  const sb = getSupabaseAdmin();
+
+  if (itemId.startsWith("upload:")) {
+    const uploadId = itemId.slice("upload:".length);
+    const { data: asset, error } = await sb.from("media_assets")
+      .select("id, storage_path").eq("workspace_id", ws).eq("id", uploadId).maybeSingle();
+    if (error) throw new HTTPException(500, { message: error.message });
+    if (asset) {
+      const { error: storageError } = await sb.storage.from("vantage-media").remove([asset.storage_path]);
+      if (storageError) throw new HTTPException(500, { message: `Storage deletion failed: ${storageError.message}` });
+      const { error: catalogError } = await sb.from("media_assets").delete().eq("workspace_id", ws).eq("id", uploadId);
+      if (catalogError) throw new HTTPException(500, { message: catalogError.message });
+    }
+  }
+
+  const { data: existing, error: existingError } = await sb.from("media_asset_deletions")
+    .select("id").eq("workspace_id", ws).eq("item_id", itemId).maybeSingle();
+  if (existingError) throw new HTTPException(500, { message: existingError.message });
+  if (!existing) {
+    const { error } = await sb.from("media_asset_deletions").insert({ workspace_id: ws, item_id: itemId });
+    if (error) throw new HTTPException(500, { message: error.message });
+  }
+  return c.json({ ok: true, removed_from_storage: itemId.startsWith("upload:") });
 });

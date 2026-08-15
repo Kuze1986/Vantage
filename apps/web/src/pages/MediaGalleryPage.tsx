@@ -121,6 +121,7 @@ export default function MediaGalleryPage() {
   const [uploading, setUploading] = React.useState(false)
   const [uploadError, setUploadError] = React.useState<string | null>(null)
   const uploadInputRef = React.useRef<HTMLInputElement | null>(null)
+  const [deletingId, setDeletingId] = React.useState<string | null>(null)
 
   const frameItems = items.filter((item) => item.kind === 'image' || item.thumbnail_url)
   const toggleFrame = (url: string) => setSelected((current) => {
@@ -198,6 +199,22 @@ export default function MediaGalleryPage() {
     } finally {
       setUploading(false)
       if (uploadInputRef.current) uploadInputRef.current.value = ''
+    }
+  }
+
+  const deleteAsset = async (item: MediaGalleryItem) => {
+    const action = item.source === 'upload' ? 'permanently delete this uploaded file' : 'remove this asset from the gallery'
+    if (!window.confirm(`Do you want to ${action}?`)) return
+    setDeletingId(item.id); setErr(null)
+    try {
+      await vantageApi.deleteMediaAsset(item.id)
+      setItems((current) => current.filter((asset) => asset.id !== item.id))
+      setTotal((current) => Math.max(0, current - 1))
+      setLightbox(null)
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'Could not remove the asset.')
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -324,6 +341,13 @@ export default function MediaGalleryPage() {
                         }}
                       >JOB →</a>
                     )}
+                    <button
+                      type="button"
+                      className="nx-btn nx-btn--sm"
+                      onClick={() => void deleteAsset(item)}
+                      disabled={deletingId === item.id}
+                      style={{ color: 'var(--nx-red)', padding: '2px 6px' }}
+                    >{deletingId === item.id ? 'REMOVING…' : item.source === 'upload' ? 'DELETE' : 'REMOVE'}</button>
                   </div>
                 </div>
               ))}
