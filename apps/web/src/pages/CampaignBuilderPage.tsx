@@ -1,4 +1,4 @@
-import { useState, useEffect, type CSSProperties } from 'react'
+import { useState, useEffect, useRef, type CSSProperties } from 'react'
 import { vantageApi } from '../api/vantage'
 import { Panel, Button, Badge } from '../ds'
 
@@ -104,6 +104,7 @@ const DEFAULT_WEEKS = 3
 /** Content days per week. The generator's day count is weeks × periodsPerWeek, so a
  *  value of 1 yields one post per week — not a daily plan. Exposed in the form. */
 const DEFAULT_PERIODS_PER_WEEK = 3
+const MAX_CAMPAIGN_ASSET_UPLOAD_BYTES = 24 * 1024 * 1024
 
 /** Initial create-form state. A factory, not a shared object, so resetting after a
  *  create can't hand back a mutated reference. */
@@ -148,6 +149,8 @@ export default function CampaignBuilderPage() {
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [timeline, setTimeline] = useState<TimelineDay[]>([])
   const [campaignAssets, setCampaignAssets] = useState<any[]>([])
+  const [uploadingCampaignAsset, setUploadingCampaignAsset] = useState(false)
+  const [campaignAssetUploadError, setCampaignAssetUploadError] = useState<string | null>(null)
   const [kpiMetrics, setKpiMetrics] = useState<KPIMetrics[]>([])
   const [formData, setFormData] = useState(createInitialFormData)
 
@@ -174,6 +177,7 @@ export default function CampaignBuilderPage() {
   const [templates, setTemplates] = useState<DemoForgeTemplateMeta[]>([])
   const [shiftPacks, setShiftPacks] = useState<ShiftPackMeta[]>([])
   const [selectedPackId, setSelectedPackId] = useState('')
+  const campaignAssetInputRef = useRef<HTMLInputElement | null>(null)
 
   // Start Date, End Date, and Duration (weeks) used to be three independently-editable
   // fields with no sync between them — a user could set a 3-week end date while leaving
@@ -371,6 +375,52 @@ export default function CampaignBuilderPage() {
       alert('Failed to launch campaign: ' + (err instanceof Error ? err.message : 'Unknown error'))
     } finally {
       setBusy(null)
+    }
+  }
+
+  const uploadCampaignAsset = async (file: File) => {
+    if (!selectedCampaign) return
+    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+      setCampaignAssetUploadError('Choose an image, animated GIF, or video file.')
+      return
+    }
+    if (file.size > MAX_CAMPAIGN_ASSET_UPLOAD_BYTES) {
+      setCampaignAssetUploadError('Choose a file smaller than 24MB.')
+      return
+    }
+
+    setUploadingCampaignAsset(true)
+    setCampaignAssetUploadError(null)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error('Could not read the selected file.'))
+        reader.readAsDataURL(file)
+      })
+      const title = file.name.replace(/\.[^.]+$/, '').trim().slice(0, 180) || 'Campaign asset'
+      const upload = await vantageApi.uploadMedia({
+        path: `uploads/campaigns/${selectedCampaign.id}/${Date.now()}-${file.name.replace(/[^a-z0-9._-]/gi, '-')}`,
+        data_url: dataUrl,
+        title: title.slice(0, 160),
+      })
+      const assetType = file.type === 'image/gif' || /\.gif$/i.test(file.name)
+        ? 'gif'
+        : file.type.startsWith('video/')
+          ? 'video'
+          : 'visual'
+      const attached = await vantageApi.addCampaignAsset(selectedCampaign.id, {
+        title,
+        asset_type: assetType,
+        source_url: upload.public_url,
+        metadata: { original_filename: file.name, size_bytes: file.size, uploaded_from: 'campaign_builder' },
+      })
+      setCampaignAssets((current) => [attached.asset, ...current])
+    } catch (error) {
+      setCampaignAssetUploadError(error instanceof Error ? error.message : 'Asset upload failed.')
+    } finally {
+      setUploadingCampaignAsset(false)
+      if (campaignAssetInputRef.current) campaignAssetInputRef.current.value = ''
     }
   }
 
@@ -1171,9 +1221,26 @@ export default function CampaignBuilderPage() {
         </div>
 
         <Panel title="Creation Studio Assets">
+          <input
+            ref={campaignAssetInputRef}
+            type="file"
+            accept="image/*,video/*"
+            hidden
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              if (file) void uploadCampaignAsset(file)
+            }}
+          />
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <button type="button" className="nx-btn nx-btn--secondary" onClick={() => campaignAssetInputRef.current?.click()} disabled={uploadingCampaignAsset}>
+              {uploadingCampaignAsset ? 'UPLOADING…' : 'UPLOAD ASSET'}
+            </button>
+            <span className="nx-mono" style={{ fontSize: 10, color: 'var(--nx-text-4)' }}>Images, GIFs, or videos · up to 24MB</span>
+          </div>
+          {campaignAssetUploadError && <p role="alert" className="nx-mono" style={{ margin: '0 0 12px', fontSize: 10, color: 'var(--nx-red)' }}>{campaignAssetUploadError}</p>}
           {campaignAssets.length === 0 ? (
             <p className="nx-mono" style={{ margin: 0, fontSize: 11, color: 'var(--nx-text-4)' }}>
-              No assets attached yet. Use Creation Studio’s guided workflow to add visuals, GIFs, videos, and soundtrack projects.
+              No assets attached yet. Upload one here or use Creation Studio’s guided workflow to add visuals, GIFs, videos, and soundtrack projects.
             </p>
           ) : (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
