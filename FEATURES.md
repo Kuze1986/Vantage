@@ -1611,6 +1611,9 @@ Signal Reactor chrome (BioLoop Nexus Design `vantage-campaigns.jsx` language):
   - **Music Studio transport** — the timeline Play control audibly plays placed, unmuted clips at their
     timeline positions using their trim and volume settings; Pause stops the active transport and the
     playhead resets after the project duration.
+  - **Timeline asset selection** — each campaign day can select an uploaded Campaign Builder asset.
+    Launch carries its image, GIF, video, or sound URL into the generated content piece and skips
+    DemoForge generation when a ready uploaded visual is selected.
   - **Timeline panel** — per-day editors, generate content, AI timeline
   - **Edit campaign** — pillars, channel mix, brand/template defaults
 

@@ -140,6 +140,7 @@ const contentIdeaSchema = z.object({
   visual_type: z.enum(VISUAL_TYPES).optional(),
   demoforge_template_id: z.string().optional(),
   brand_id: z.string().optional(),
+  campaign_asset_id: z.string().uuid().nullable().optional(),
 });
 
 const timelineDaySchema = z.object({
@@ -785,6 +786,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
     visual_type?: string;
     demoforge_template_id?: string;
     brand_id?: string;
+    campaign_asset_id?: string | null;
     demoforgeScript?: string;
   };
 
@@ -809,6 +811,12 @@ campaignRoutes.post('/:id/launch', async (c) => {
   const productProfile = await loadProductProfile(workspaceId);
   const demoBaseUrl = productProfile.product_base_url || undefined;
   const allowedChannels = new Set<string>(CAMPAIGN_CHANNELS);
+  const { data: campaignAssets } = await sb
+    .from('campaign_assets')
+    .select('id,title,asset_type,source_url,metadata')
+    .eq('campaign_id', campaignId)
+    .eq('workspace_id', workspaceId);
+  const assetsById = new Map((campaignAssets ?? []).map((asset) => [asset.id as string, asset]));
 
   // Campaign description is otherwise stranded at timeline-generation time: the copy
   // generator (kuze) only ever sees topic_text + brand_voice, so campaign-level intent
@@ -866,6 +874,9 @@ campaignRoutes.post('/:id/launch', async (c) => {
       : day.content_type === 'engagement'
         ? 'none'
         : 'demo_video';
+    const campaignAsset = typeof idea.campaign_asset_id === 'string'
+      ? assetsById.get(idea.campaign_asset_id)
+      : undefined;
     const brandId = resolveBrandId({
       ideaBrandId: idea.brand_id,
       campaignDefaultBrandId: campaignDefaultBrand,
@@ -915,6 +926,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
               demoforge_template_id: templateId,
               brand_id: brandId,
               channel,
+              campaign_asset_id: campaignAsset?.id ?? null,
             },
           })
           .select('id')
@@ -990,7 +1002,14 @@ campaignRoutes.post('/:id/launch', async (c) => {
           brand_id: brandId,
           visual_type: visualType,
           demoforge_template_id: templateId,
+          campaign_asset_id: campaignAsset?.id ?? null,
+          campaign_asset_title: campaignAsset?.title ?? null,
         };
+        if (campaignAsset?.source_url) {
+          if (campaignAsset.asset_type === 'video') payload.video_url = campaignAsset.source_url;
+          else if (campaignAsset.asset_type === 'music_project') payload.audio_url = campaignAsset.source_url;
+          else payload.image_url = campaignAsset.source_url;
+        }
         if (visualType === 'social_graphic') {
           payload.needs_social_kit = true;
         }
@@ -1000,7 +1019,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
           payload.thumbnail_preference = 'last';
         }
 
-        let mediaStatus: 'none' | 'pending' | 'failed' = visualType === 'none' ? 'none' : 'pending';
+        let mediaStatus: 'none' | 'pending' | 'failed' = campaignAsset?.source_url || visualType === 'none' ? 'none' : 'pending';
 
         // Stagger by day + channel position so a multi-channel day walks the channel's
         // configured hours instead of firing every piece at the same instant.
@@ -1060,7 +1079,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
         let demoforgeJobId: string | undefined;
 
         // Enqueue DemoForge for video / product stills (async — does not block launch).
-        if (auditPassed && (visualType === 'demo_video' || visualType === 'product_still')) {
+        if (!campaignAsset?.source_url && auditPassed && (visualType === 'demo_video' || visualType === 'product_still')) {
           try {
             const dfPayload = buildDemoForgePayload(templateId, demoBaseUrl, {
               // Stills stay silent/clean; videos keep captions + grade.

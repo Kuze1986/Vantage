@@ -1340,7 +1340,7 @@ export default function CampaignBuilderPage() {
                     }
                   >
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.5rem' }}>
                         <div>
                           <label style={labelStyle}>Primary channel</label>
                           <select
@@ -1473,6 +1473,17 @@ export default function CampaignBuilderPage() {
                             {BRAND_OPTIONS.map((b) => (
                               <option key={b} value={b}>{b}</option>
                             ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={labelStyle}>Uploaded asset</label>
+                          <select
+                            style={inputStyle}
+                            value={idea.campaign_asset_id ?? ''}
+                            onChange={(e) => updateDayLocal(day.day_number, { content_ideas: [{ ...idea, campaign_asset_id: e.target.value || undefined }] })}
+                          >
+                            <option value="">Generate / none</option>
+                            {campaignAssets.filter((asset) => asset.source_url).map((asset) => <option key={asset.id} value={asset.id}>{asset.metadata?.audio_upload ? 'Sound · ' : ''}{asset.title}</option>)}
                           </select>
                         </div>
                       </div>
