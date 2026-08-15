@@ -1603,7 +1603,8 @@ Signal Reactor chrome (BioLoop Nexus Design `vantage-campaigns.jsx` language):
   - **Shift packs / evergreen / calendar** — add pack days, refill evergreen, open
     `/calendar?campaign_id=`, pending-media count
   - **Creation Studio handoff** — guided-project campaign attachment reports API errors inside
-    the dialog and closes only after a successful attachment
+    the dialog and closes only after a successful attachment. Detailed briefs are retained in
+    asset metadata while the display title is safely limited to the API's 180-character maximum.
   - **Timeline panel** — per-day editors, generate content, AI timeline
   - **Edit campaign** — pillars, channel mix, brand/template defaults
 

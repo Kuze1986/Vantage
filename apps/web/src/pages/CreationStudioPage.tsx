@@ -64,7 +64,10 @@ export function CreationStudioPage() {
     setMessage('')
     try {
       const assetType = guidedFormat === 'video' ? 'video' : guidedFormat
-      await vantageApi.addCampaignAsset(campaignId, { title: brief || 'Creation Studio asset', asset_type: assetType, source_ref: projectId, metadata: { channel, brief, music_project_id: projectId } })
+      // campaign_assets titles are display labels with a 180-character API limit.
+      // Keep the full brief in metadata, but make the handoff work for detailed briefs.
+      const assetTitle = (brief.trim() || 'Creation Studio asset').slice(0, 180)
+      await vantageApi.addCampaignAsset(campaignId, { title: assetTitle, asset_type: assetType, source_ref: projectId, metadata: { channel, brief, music_project_id: projectId } })
       setMessage('Added to campaign')
       setGuideOpen(false)
     } catch (error) {
