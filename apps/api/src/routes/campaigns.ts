@@ -817,6 +817,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
     .eq('campaign_id', campaignId)
     .eq('workspace_id', workspaceId);
   const assetsById = new Map((campaignAssets ?? []).map((asset) => [asset.id as string, asset]));
+  const soundtrackAsset = (campaignAssets ?? []).find((asset) => asset.asset_type === 'music_project' && typeof asset.source_url === 'string');
 
   // Campaign description is otherwise stranded at timeline-generation time: the copy
   // generator (kuze) only ever sees topic_text + brand_voice, so campaign-level intent
@@ -1009,6 +1010,23 @@ campaignRoutes.post('/:id/launch', async (c) => {
           if (campaignAsset.asset_type === 'video') payload.video_url = campaignAsset.source_url;
           else if (campaignAsset.asset_type === 'music_project') payload.audio_url = campaignAsset.source_url;
           else payload.image_url = campaignAsset.source_url;
+        }
+        // A selected uploaded video uses the campaign's uploaded soundtrack when one is
+        // available. DemoForge renders the pair into a publishable MP4 rather than
+        // handing social adapters a silent video plus an unusable standalone audio URL.
+        if (campaignAsset?.asset_type === 'video' && campaignAsset.source_url && soundtrackAsset?.source_url) {
+          const base = process.env.DEMOFORGE_URL?.trim();
+          if (base) {
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+            const secret = process.env.DEMOFORGE_SECRET?.trim(); if (secret) headers['x-demoforge-secret'] = secret;
+            const mux = await fetch(`${base.replace(/\/$/, '')}/mux`, { method: 'POST', headers, body: JSON.stringify({ workspace_id: workspaceId, video_url: campaignAsset.source_url, audio_url: soundtrackAsset.source_url }) });
+            if (!mux.ok) throw new Error(`Soundtrack render failed: ${await mux.text()}`);
+            const rendered = await mux.json() as { video_url?: string };
+            if (!rendered.video_url) throw new Error('Soundtrack render did not return a video URL');
+            payload.video_url = rendered.video_url;
+            payload.audio_url = soundtrackAsset.source_url;
+            payload.soundtrack_asset_id = soundtrackAsset.id;
+          }
         }
         if (visualType === 'social_graphic') {
           payload.needs_social_kit = true;

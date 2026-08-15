@@ -1614,6 +1614,8 @@ Signal Reactor chrome (BioLoop Nexus Design `vantage-campaigns.jsx` language):
   - **Timeline asset selection** — each campaign day can select an uploaded Campaign Builder asset.
     Launch carries its image, GIF, video, or sound URL into the generated content piece and skips
     DemoForge generation when a ready uploaded visual is selected.
+    When the selected asset is a video and the campaign has an uploaded soundtrack, DemoForge muxes
+    the pair into a publishable MP4 before the piece is queued.
   - **Timeline panel** — per-day editors, generate content, AI timeline
   - **Edit campaign** — pillars, channel mix, brand/template defaults
 

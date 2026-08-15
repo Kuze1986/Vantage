@@ -16,6 +16,10 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
+import ffmpeg from "fluent-ffmpeg";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { enqueue } from "./jobs/queue.js";
 import type { DemoJob, ScriptStep } from "./jobs/queue.js";
 
@@ -43,6 +47,33 @@ function getSupabase() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
   );
 }
+
+const muxSchema = z.object({ workspace_id: z.string().uuid(), video_url: z.string().url(), audio_url: z.string().url() });
+
+// Combine a campaign's ready-made video and soundtrack into a standard MP4 before publishing.
+app.post("/mux", async (c) => {
+  requireSecret(c);
+  const parsed = muxSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+  const { workspace_id, video_url, audio_url } = parsed.data;
+  const storageHost = new URL(process.env.SUPABASE_URL!).hostname;
+  if (new URL(video_url).hostname !== storageHost || new URL(audio_url).hostname !== storageHost) {
+    throw new HTTPException(400, { message: "Video and soundtrack must be workspace media URLs" });
+  }
+  const workDir = await mkdtemp(join(tmpdir(), "demoforge-mux-"));
+  try {
+    const [videoRes, audioRes] = await Promise.all([fetch(video_url), fetch(audio_url)]);
+    if (!videoRes.ok || !audioRes.ok) throw new Error("Could not download selected video or soundtrack");
+    const videoPath = join(workDir, "source.mp4"); const audioPath = join(workDir, "soundtrack"); const outputPath = join(workDir, "muxed.mp4");
+    await Promise.all([writeFile(videoPath, Buffer.from(await videoRes.arrayBuffer())), writeFile(audioPath, Buffer.from(await audioRes.arrayBuffer()))]);
+    await new Promise<void>((resolve, reject) => ffmpeg(videoPath).input(audioPath).outputOptions(["-map 0:v:0", "-map 1:a:0", "-c:v copy", "-c:a aac", "-shortest", "-movflags +faststart"]).output(outputPath).on("end", () => resolve()).on("error", reject).run());
+    const key = `demoforge/muxed/${workspace_id}/${randomUUID()}.mp4`;
+    const sb = getSupabase(); const { error } = await sb.storage.from("vantage-media").upload(key, await readFile(outputPath), { contentType: "video/mp4", upsert: true });
+    if (error) throw new Error(`Storage upload failed: ${error.message}`);
+    const { data } = sb.storage.from("vantage-media").getPublicUrl(key);
+    return c.json({ video_url: data.publicUrl });
+  } finally { await rm(workDir, { recursive: true, force: true }); }
+});
 
 // ── Job schema ────────────────────────────────────────────────────────────────
 const scriptStepSchema = z.object({
