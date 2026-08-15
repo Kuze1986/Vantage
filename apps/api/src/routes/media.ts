@@ -87,9 +87,8 @@ mediaRoutes.post("/upload", async (c) => {
   if (contentType.startsWith("image/") || contentType.startsWith("video/")) {
     const kind = contentType.startsWith("video/") ? "video" : "image";
     const title = parsed.data.title ?? storagePath.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "Uploaded media";
-    const { error: assetError } = await sb.schema("vantage").from("media_assets").upsert(
+    const { error: assetError } = await sb.from("media_assets").insert(
       { workspace_id: ws, storage_path: storagePath, title, kind },
-      { onConflict: "workspace_id,storage_path" },
     );
     if (assetError) throw new HTTPException(500, { message: `Media catalog update failed: ${assetError.message}` });
   }
@@ -125,7 +124,7 @@ mediaRoutes.get("/gallery", async (c) => {
       .select("id, name, type, preview_url, storage_path, created_at, workspace_id")
       .or(`workspace_id.eq.${ws},workspace_id.is.null`)
       .order("created_at", { ascending: false }).limit(scanLimit),
-    sb.schema("vantage").from("media_assets")
+    sb.from("media_assets")
       .select("id, title, kind, storage_path, created_at")
       .eq("workspace_id", ws).order("created_at", { ascending: false }).limit(scanLimit),
   ]);
