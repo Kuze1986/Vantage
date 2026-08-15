@@ -380,8 +380,8 @@ export default function CampaignBuilderPage() {
 
   const uploadCampaignAsset = async (file: File) => {
     if (!selectedCampaign) return
-    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
-      setCampaignAssetUploadError('Choose an image, animated GIF, or video file.')
+    if (!file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+      setCampaignAssetUploadError('Choose an image, animated GIF, video, or audio file.')
       return
     }
     if (file.size > MAX_CAMPAIGN_ASSET_UPLOAD_BYTES) {
@@ -408,12 +408,14 @@ export default function CampaignBuilderPage() {
         ? 'gif'
         : file.type.startsWith('video/')
           ? 'video'
-          : 'visual'
+          : file.type.startsWith('audio/')
+            ? 'music_project'
+            : 'visual'
       const attached = await vantageApi.addCampaignAsset(selectedCampaign.id, {
         title,
         asset_type: assetType,
         source_url: upload.public_url,
-        metadata: { original_filename: file.name, size_bytes: file.size, uploaded_from: 'campaign_builder' },
+        metadata: { original_filename: file.name, size_bytes: file.size, uploaded_from: 'campaign_builder', audio_upload: file.type.startsWith('audio/') },
       })
       setCampaignAssets((current) => [attached.asset, ...current])
     } catch (error) {
@@ -1224,7 +1226,7 @@ export default function CampaignBuilderPage() {
           <input
             ref={campaignAssetInputRef}
             type="file"
-            accept="image/*,video/*"
+            accept="image/*,video/*,audio/*"
             hidden
             onChange={(event) => {
               const file = event.target.files?.[0]
@@ -1235,7 +1237,7 @@ export default function CampaignBuilderPage() {
             <button type="button" className="nx-btn nx-btn--secondary" onClick={() => campaignAssetInputRef.current?.click()} disabled={uploadingCampaignAsset}>
               {uploadingCampaignAsset ? 'UPLOADING…' : 'UPLOAD ASSET'}
             </button>
-            <span className="nx-mono" style={{ fontSize: 10, color: 'var(--nx-text-4)' }}>Images, GIFs, or videos · up to 24MB</span>
+            <span className="nx-mono" style={{ fontSize: 10, color: 'var(--nx-text-4)' }}>Images, GIFs, videos, or audio · up to 24MB</span>
           </div>
           {campaignAssetUploadError && <p role="alert" className="nx-mono" style={{ margin: '0 0 12px', fontSize: 10, color: 'var(--nx-red)' }}>{campaignAssetUploadError}</p>}
           {campaignAssets.length === 0 ? (
@@ -1246,8 +1248,9 @@ export default function CampaignBuilderPage() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {campaignAssets.map((asset) => (
                 <div key={asset.id} style={{ minWidth: 160, padding: 10, border: '1px solid var(--nx-border)', borderRadius: 4 }}>
-                  <div className="nx-label" style={{ fontSize: 9 }}>{String(asset.asset_type).replace('_', ' ')}</div>
+                  <div className="nx-label" style={{ fontSize: 9 }}>{asset.metadata?.audio_upload ? 'sound' : String(asset.asset_type).replace('_', ' ')}</div>
                   <div style={{ fontSize: 12, marginTop: 5 }}>{asset.title}</div>
+                  {asset.metadata?.audio_upload && asset.source_url && <audio controls preload="metadata" src={asset.source_url} style={{ width: '100%', height: 28, marginTop: 8 }} />}
                   {asset.metadata?.channel && <div className="nx-mono" style={{ fontSize: 9, color: 'var(--nx-text-4)', marginTop: 5 }}>{String(asset.metadata.channel).toUpperCase()}</div>}
                 </div>
               ))}

@@ -1605,8 +1605,12 @@ Signal Reactor chrome (BioLoop Nexus Design `vantage-campaigns.jsx` language):
   - **Creation Studio handoff** — guided-project campaign attachment reports API errors inside
     the dialog and closes only after a successful attachment. Detailed briefs are retained in
     asset metadata while the display title is safely limited to the API's 180-character maximum.
-    The Campaign Builder asset panel also accepts direct image, GIF, and video uploads (up to 24MB),
-    storing them in workspace media and attaching them to the open campaign in one action.
+    The Campaign Builder asset panel also accepts direct image, GIF, video, and audio uploads (up to 24MB),
+    storing them in workspace media and attaching them to the open campaign in one action; uploaded sound
+    assets include an inline playback control.
+  - **Music Studio transport** — the timeline Play control audibly plays placed, unmuted clips at their
+    timeline positions using their trim and volume settings; Pause stops the active transport and the
+    playhead resets after the project duration.
   - **Timeline panel** — per-day editors, generate content, AI timeline
   - **Edit campaign** — pillars, channel mix, brand/template defaults
 
