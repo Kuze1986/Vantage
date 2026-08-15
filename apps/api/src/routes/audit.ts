@@ -30,7 +30,10 @@ auditRoutes.post("/", async (c) => {
     .eq("workspace_id", ws)
     .eq("id", content_piece_id).single();
   if (pErr || !piece) throw new HTTPException(404, { message: "Content piece not found" });
-  if (piece.status !== "auditing") {
+  // A deliberate operator re-audit is valid for a rejected, non-published
+  // draft (for example after an auditor/provider outage is repaired). The
+  // audit itself remains authoritative; this does not approve or queue it.
+  if (piece.status !== "auditing" && piece.status !== "rejected") {
     throw new HTTPException(400, { message: `Invalid status for audit: ${piece.status}` });
   }
 

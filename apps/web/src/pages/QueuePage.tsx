@@ -455,6 +455,8 @@ export function QueuePage() {
   const [packBusy, setPackBusy]         = React.useState<string | null>(null)
   const [selected, setSelected]         = React.useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy]         = React.useState(false)
+  const [tiktokVideoTarget, setTikTokVideoTarget] = React.useState<Piece | null>(null)
+  const tiktokVideoInputRef = React.useRef<HTMLInputElement>(null)
 
   const load = React.useCallback(async () => {
     setErr(null)
@@ -480,6 +482,47 @@ export function QueuePage() {
       await load()
     } catch (e) {
       setErr(String((e as Error).message))
+    }
+  }
+
+  const attachTikTokVideo = async (file: File) => {
+    const piece = tiktokVideoTarget
+    setTikTokVideoTarget(null)
+    if (!piece) return
+    if (!file.type.startsWith('video/')) {
+      setErr('Choose a video file for a TikTok post.')
+      return
+    }
+    if (file.size > 24 * 1024 * 1024) {
+      setErr('Choose a video smaller than 24MB.')
+      return
+    }
+    setBusy(piece.id)
+    setErr(null)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error('Could not read the selected video.'))
+        reader.readAsDataURL(file)
+      })
+      const safeName = file.name.replace(/[^a-z0-9._-]/gi, '-')
+      const upload = await vantageApi.uploadMedia({
+        path: `uploads/queue/tiktok/${piece.id}/${Date.now()}-${safeName}`,
+        data_url: dataUrl,
+        title: file.name.replace(/\.[^.]+$/, '').slice(0, 160) || 'TikTok video',
+      })
+      await vantageApi.patchQueuePiece(piece.id, {
+        video_url: upload.public_url,
+        media_status: 'ready',
+        content_payload_patch: { video_url: upload.public_url, media_error: null },
+      })
+      setMsg('TikTok video attached and marked media-ready.')
+      await load()
+    } catch (error) {
+      setErr(`Could not attach TikTok video: ${error instanceof Error ? error.message : 'Request failed'}`)
+    } finally {
+      setBusy(null)
     }
   }
 
@@ -783,7 +826,21 @@ export function QueuePage() {
               : busy === p.id ? '…' : '↺ DemoForge'}
           </button>
         )}
-        {p.status === 'auditing' && (
+        {p.channel_slug === 'tiktok' && (
+          <button
+            type="button"
+            className="nx-btn nx-btn--secondary nx-btn--sm"
+            disabled={busy === p.id}
+            onClick={() => {
+              setTikTokVideoTarget(p)
+              requestAnimationFrame(() => tiktokVideoInputRef.current?.click())
+            }}
+            title="Upload and attach an MP4 or other video file to this TikTok post"
+          >
+            {busy === p.id ? '…' : 'Attach video'}
+          </button>
+        )}
+        {(p.status === 'auditing' || p.status === 'rejected') && (
           <button
             type="button"
             className="nx-btn nx-btn--secondary nx-btn--sm"
@@ -793,7 +850,7 @@ export function QueuePage() {
               void action(() => vantageApi.audit(p.id), 'Audit complete').finally(() => setBusy(null))
             }}
           >
-            {busy === p.id ? '…' : 'Audit'}
+            {busy === p.id ? '…' : p.status === 'rejected' ? 'Re-audit' : 'Audit'}
           </button>
         )}
         {p.status === 'approved' && (
@@ -989,6 +1046,17 @@ export function QueuePage() {
 
   return (
     <>
+      <input
+        type="file"
+        accept="video/*"
+        hidden
+        ref={tiktokVideoInputRef}
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.currentTarget.value = ''
+          if (file) void attachTikTokVideo(file)
+        }}
+      />
       {/* Full-size media viewer — shared by thumbnails, stills, carousels and video */}
       {lightbox && (
         <MediaLightbox

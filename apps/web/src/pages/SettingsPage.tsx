@@ -4,10 +4,24 @@ import { Panel, Badge, Button } from '../ds'
 import { BrandKitsPanel } from './BrandKitsPanel'
 import { BillingPanel } from './BillingPanel'
 
-const ALL_VERTICALS = [
-  'pharmacy-tech', 'healthcare', 'biotech', 'fintech', 'edtech',
-  'legaltech', 'proptech', 'insurtech', 'ai', 'saas', 'marketing', 'hr-tech',
-]
+// Mirrors The Shift's career catalog (`RxBlitz/src/data/tracks.ts`). These ids
+// are also the values stored on Shift question categories, so selection here
+// directly controls which career packs source content from.
+const SHIFT_CAREER_VERTICALS = [
+  { id: 'pharmacy-tech', label: 'Pharmacy Tech' },
+  { id: 'cdl', label: 'CDL' },
+  { id: 'cna', label: 'CNA' },
+  { id: 'dental-assistant', label: 'Dental Assistant' },
+  { id: 'emt', label: 'EMT' },
+  { id: 'hvac', label: 'HVAC' },
+  { id: 'medical-assistant', label: 'Medical Assistant' },
+  { id: 'medical-billing', label: 'Medical Billing' },
+  { id: 'ube', label: 'UBE / Bar Exam' },
+  { id: 'electrician', label: 'Electrician' },
+  { id: 'architecture', label: 'Architect' },
+  { id: 'phlebotomy', label: 'Phlebotomy' },
+  { id: 'cybersecurity', label: 'Cybersecurity' },
+] as const
 
 const ENV_VARS = [
   { key: 'VITE_VANTAGE_API_URL',  label: 'API Base URL',       hint: 'Set at build time' },
@@ -328,14 +342,14 @@ export function SettingsPage() {
                   </span>
                 </label>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {ALL_VERTICALS.map((v) => {
-                    const active = draft.active_verticals.length === 0 || draft.active_verticals.includes(v)
-                    const selected = draft.active_verticals.includes(v)
+                  {SHIFT_CAREER_VERTICALS.map((vertical) => {
+                    const active = draft.active_verticals.length === 0 || draft.active_verticals.includes(vertical.id)
+                    const selected = draft.active_verticals.includes(vertical.id)
                     return (
                       <button
-                        key={v}
+                        key={vertical.id}
                         type="button"
-                        onClick={() => toggleVertical(v)}
+                        onClick={() => toggleVertical(vertical.id)}
                         style={{
                           fontFamily:  'var(--nx-mono)',
                           fontSize:    10,
@@ -348,7 +362,7 @@ export function SettingsPage() {
                           opacity:     draft.active_verticals.length > 0 && !selected ? 0.5 : 1,
                         }}
                       >
-                        {v}
+                        {vertical.label}
                       </button>
                     )
                   })}
