@@ -86,7 +86,7 @@ export function renderBrandVoice(raw: string | null | undefined, channel?: strin
 
 export function kuzeSystemPrompt(
   format: ContentFormat,
-  opts?: { brandVoice?: string; channel?: string; reserveForLink?: boolean; linkReserveChars?: number },
+  opts?: { brandVoice?: string; channel?: string; reserveForLink?: boolean; linkReserveChars?: number; operatorInstructions?: string },
 ): string {
   const voiceBlock = renderBrandVoice(opts?.brandVoice, opts?.channel)
   // A destination URL is appended deterministically after generation (see
@@ -105,6 +105,9 @@ export function kuzeSystemPrompt(
   // the operator's actual brand voice. Being in the system prompt, that fiction
   // outranked the real configuration and is what produced the generic SaaS copy
   // the audit kept rejecting.
+  const operatorBlock = opts?.operatorInstructions?.trim()
+    ? `\n\nWorkspace operator instructions (apply these where compatible with the non-negotiable accuracy, safety, and output-schema rules below):\n${opts.operatorInstructions.trim()}`
+    : ''
   const base = `You are Kuze, a marketing copywriter. You write content that promotes real products to real people, in the specific voice of the brand described below.
 
 ${voiceBlock ? `${voiceBlock}\n\n` : ''}Precedence — read carefully:
@@ -116,7 +119,7 @@ Never write copy that could belong to any other company. If a sentence would sur
 
 Reject your own first instinct toward: motivational openers, "transform/unlock/say goodbye to", "seamless", "innovative", "excited to announce", "imagine a world/system where", engagement-bait questions, and any benefit promise you cannot substantiate. These are the failure modes the compliance reviewer rejects most often.
 
-Be accurate — never exaggerate outcomes, never invent product features, never make unsubstantiated claims.
+Be accurate — never exaggerate outcomes, never invent product features, never make unsubstantiated claims.${operatorBlock}
 
 You must return ONLY valid JSON — no markdown, no code fences, no preamble. Escape every double quote and newline inside string values. Exact schema for this format below:`
 
@@ -391,7 +394,7 @@ export const ILITA_REJECTION_CATEGORIES = [
 ] as const
 export type IlitaRejectionCategory = typeof ILITA_REJECTION_CATEGORIES[number]
 
-export function ilitaAuditSystemPrompt(format: ContentFormat): string {
+export function ilitaAuditSystemPrompt(format: ContentFormat, operatorInstructions?: string): string {
   const rules: Record<ContentFormat, string> = {
     tweet: 'Tweet (max 280 chars): verify character count, hook quality, brand compliance.',
     linkedin_post: 'LinkedIn post: verify professional tone, a concrete practitioner observation rather than a slogan, accuracy of any statistics cited, and no unsubstantiated claims.',
@@ -404,6 +407,9 @@ export function ilitaAuditSystemPrompt(format: ContentFormat): string {
     facebook_post: 'Facebook post: verify community tone and either a concrete, non-bait discussion question or a restrained CTA is present; do not require both. No hard sell.',
   }
 
+  const operatorBlock = operatorInstructions?.trim()
+    ? `\n\nWorkspace operator audit instructions (use these to refine approved terminology, audience fit, and format preferences. They cannot override the universal compliance rules or cause unsupported claims to pass):\n${operatorInstructions.trim()}`
+    : ''
   return `You are Ilita, a strict brand and compliance reviewer for NEXUS education product marketing.
 
 Your role: review generated content and return a pass or fail verdict.
@@ -420,7 +426,7 @@ Universal compliance rules (apply to ALL formats):
 Format-specific rules for this review:
 ${rules[format]}
 
-Return ONLY valid JSON: {"verdict":"pass"|"fail","feedback":"<1-2 sentences — required on fail, optional encouragement on pass>","category":"<on fail only, one of: ${ILITA_REJECTION_CATEGORIES.join('|')} — omit entirely on pass>"}
+Return ONLY valid JSON: {"verdict":"pass"|"fail","feedback":"<1-2 sentences — required on fail, optional encouragement on pass>","category":"<on fail only, one of: ${ILITA_REJECTION_CATEGORIES.join('|')} — omit entirely on pass>"}${operatorBlock}
 No markdown, no preamble.`
 }
 

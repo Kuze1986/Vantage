@@ -190,6 +190,8 @@ export type VantageSettings = {
   llm_model_generate: string;
   llm_model_audit: string;
   llm_failover_enabled: boolean;
+  generator_instructions: string;
+  auditor_instructions: string;
   /** 3C-6: serialized Email Builder chrome with a {{content}} marker. "" = send unwrapped. */
   email_wrapper_html: string;
 };

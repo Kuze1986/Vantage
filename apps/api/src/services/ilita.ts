@@ -2,6 +2,7 @@ import { ilitaAuditSystemPrompt, ilitaAuditUserPrompt, ILITA_REJECTION_CATEGORIE
 import type { ContentFormat, IlitaRejectionCategory } from "@vantage/prompts";
 import { resolveProvider } from "../lib/llm.js";
 import { extractJsonObject } from "../lib/llm-json.js";
+import { loadSettings } from "../lib/settings.js";
 
 /** Shared tolerant parser — Ilita carried a byte-identical copy of the fragile one. */
 const extractJson = (text: string): Record<string, unknown> => extractJsonObject(text, "Ilita");
@@ -22,14 +23,17 @@ export async function auditContent(params: {
   brand_voice:  string;
   workspace_id?: string;
 }): Promise<AuditResult> {
-  const provider = await resolveProvider("audit", params.workspace_id, "ilita.auditContent");
+  const [provider, settings] = await Promise.all([
+    resolveProvider("audit", params.workspace_id, "ilita.auditContent"),
+    params.workspace_id ? loadSettings(params.workspace_id) : Promise.resolve(null),
+  ]);
   const text = (await provider.generateCompletion(
     ilitaAuditUserPrompt({
       content:     params.content,
       format:      params.format,
       brand_voice: params.brand_voice,
     }),
-    { system_prompt: ilitaAuditSystemPrompt(params.format), max_tokens: 400 },
+    { system_prompt: ilitaAuditSystemPrompt(params.format, settings?.auditor_instructions), max_tokens: 400 },
   )).trim();
   if (!text) throw new Error("Ilita: empty response");
   const parsed  = extractJson(text);

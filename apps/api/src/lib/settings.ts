@@ -22,6 +22,11 @@ export interface PipelineSettings {
   llm_model_audit:       string;
   // When false, a task uses only its head slot — no failover to other providers.
   llm_failover_enabled:  boolean;
+  // Workspace-authored guidance layered onto the respective prompt. These may
+  // refine terminology, audience, and format preferences but not disable the
+  // baseline compliance rules.
+  generator_instructions: string;
+  auditor_instructions:   string;
   // 3C-6: branded newsletter chrome. Serialized HTML from the Email Builder,
   // containing the {{content}} marker where the generated body is spliced in.
   // "" = send Kuze's raw HTML, the pre-wrapper behaviour. Stored here rather
@@ -42,6 +47,8 @@ const DEFAULTS: PipelineSettings = {
   llm_model_generate:    "",
   llm_model_audit:       "",
   llm_failover_enabled:  true,
+  generator_instructions: "",
+  auditor_instructions:   "",
   email_wrapper_html:    "",
 };
 
@@ -66,6 +73,8 @@ export async function loadSettings(workspaceId: string): Promise<PipelineSetting
       llm_model_generate:     typeof map.llm_model_generate     === "string"  ? map.llm_model_generate     : DEFAULTS.llm_model_generate,
       llm_model_audit:        typeof map.llm_model_audit        === "string"  ? map.llm_model_audit        : DEFAULTS.llm_model_audit,
       llm_failover_enabled:   typeof map.llm_failover_enabled   === "boolean" ? map.llm_failover_enabled   : DEFAULTS.llm_failover_enabled,
+      generator_instructions: typeof map.generator_instructions === "string"  ? map.generator_instructions : DEFAULTS.generator_instructions,
+      auditor_instructions:   typeof map.auditor_instructions   === "string"  ? map.auditor_instructions   : DEFAULTS.auditor_instructions,
       email_wrapper_html:     typeof map.email_wrapper_html     === "string"  ? map.email_wrapper_html     : DEFAULTS.email_wrapper_html,
     };
   } catch {

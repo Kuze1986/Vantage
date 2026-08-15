@@ -93,6 +93,8 @@ const patchSchema = z.object({
   llm_model_generate:    modelChoice.optional(),
   llm_model_audit:       modelChoice.optional(),
   llm_failover_enabled:  z.boolean().optional(),
+  generator_instructions: z.string().max(6000).optional(),
+  auditor_instructions:   z.string().max(6000).optional(),
 });
 
 // PATCH /v1/settings — update one or more settings

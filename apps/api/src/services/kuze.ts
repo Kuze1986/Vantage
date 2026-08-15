@@ -3,6 +3,7 @@ import type { ChannelSlug, ContentFormat, ViralityPatternExtra } from "@vantage/
 import { getSupabaseAdmin } from "../lib/supabase.js";
 import { tagUrls } from "../lib/utm.js";
 import { resolveDestination, appendDestination } from "../lib/destination.js";
+import { loadSettings } from "../lib/settings.js";
 import { resolveProvider } from "../lib/llm.js";
 import { extractJsonArray, extractJsonObject, LlmJsonError } from "../lib/llm-json.js";
 
@@ -135,12 +136,13 @@ export interface GenerateContentOutput {
 
 export async function generateContent(input: GenerateContentInput): Promise<GenerateContentOutput> {
   const format = channelFormatMap[input.channel] as ContentFormat;
-  const [weights, avoidWeights, viralityPatterns, rejectionCategories, destination] = await Promise.all([
+  const [weights, avoidWeights, viralityPatterns, rejectionCategories, destination, settings] = await Promise.all([
     loadWeights(input.workspace_id, input.channel),
     loadUnderperformingWeights(input.workspace_id, input.channel),
     loadViralityPatterns(input.workspace_id, input.channel),
     loadRejectionCategories(input.workspace_id, input.channel),
     resolveDestination(input.workspace_id, input.channel, input.campaign_id),
+    loadSettings(input.workspace_id),
   ]);
   const reserveForLink = destination.policy === "inline" && !!destination.url;
   // UTM decoration happens after a content piece exists. Reserve for both the
@@ -174,6 +176,7 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
       channel: input.channel,
       reserveForLink,
       linkReserveChars,
+      operatorInstructions: settings.generator_instructions,
     }),
     max_tokens: 1400,
   };

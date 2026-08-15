@@ -496,6 +496,47 @@ export function SettingsPage() {
           )}
         </Panel>
 
+        <Panel title="AI Behavior Instructions" titleAccent="amber">
+          {!draft ? (
+            <p className="vg-empty">Loading…</p>
+          ) : (
+            <div style={{ display: 'grid', gap: 16 }}>
+              <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', margin: 0, lineHeight: 1.6 }}>
+                Fine-tune how Kuze writes and how Ilita reviews for this workspace. Use these for approved terminology,
+                audience context, and format preferences. Core accuracy and compliance safeguards remain active.
+              </p>
+              <div>
+                <label className="vg-label" style={{ display: 'block', marginBottom: 6 }}>Kuze — generator instructions</label>
+                <textarea
+                  className="vg-input"
+                  value={draft.generator_instructions}
+                  maxLength={6000}
+                  rows={7}
+                  placeholder="Example: Use the approved Shift feature names Queue, Minefield, Matrix, and Drop. Prefer specific operator scenarios over promotional language."
+                  onChange={(e) => patch('generator_instructions', e.target.value)}
+                  style={{ width: '100%', resize: 'vertical', lineHeight: 1.5 }}
+                />
+              </div>
+              <div>
+                <label className="vg-label" style={{ display: 'block', marginBottom: 6 }}>Ilita — auditor instructions</label>
+                <textarea
+                  className="vg-input"
+                  value={draft.auditor_instructions}
+                  maxLength={6000}
+                  rows={7}
+                  placeholder="Example: Treat Queue, Minefield, Matrix, and Drop as approved Shift terminology. Require specific claims to remain grounded in the campaign brief."
+                  onChange={(e) => patch('auditor_instructions', e.target.value)}
+                  style={{ width: '100%', resize: 'vertical', lineHeight: 1.5 }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <Button label={saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save AI instructions'} variant="secondary" size="sm" onClick={() => void handleSave()} disabled={saving || !isDirty} />
+                {isDirty && !saving && <span style={{ fontFamily: 'var(--nx-mono)', fontSize: 9, color: 'var(--nx-amber)' }}>Unsaved changes</span>}
+              </div>
+            </div>
+          )}
+        </Panel>
+
         {/* ── Environment ────────────────────────────────────────────────── */}
         <Panel title="Environment" titleAccent="amber">
           <div style={{ display: 'grid', gap: 10 }}>
