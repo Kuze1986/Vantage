@@ -19,31 +19,35 @@ import {
 
 export const mediaRoutes = new Hono();
 
-const ALLOWED_PREFIXES = ["og/", "quotes/", "thumbnails/", "creative/", "music/"] as const;
+const ALLOWED_PREFIXES = ["og/", "quotes/", "thumbnails/", "creative/", "music/", "uploads/"] as const;
 
 const uploadSchema = z.object({
   path: z.string().min(3).max(240),
   data_url: z.string().min(1),
+  title: z.string().min(1).max(160).optional(),
 });
 
 function parseDataUrl(dataUrl: string): { buffer: Buffer; contentType: string; ext: string } {
   const m = /^data:([^;]+);base64,(.+)$/i.exec(dataUrl.trim());
   if (!m) throw new HTTPException(400, { message: "data_url must be a base64 data URL" });
   const contentType = m[1]!.toLowerCase();
-  if (!contentType.startsWith("image/") && !contentType.startsWith("audio/")) {
-    throw new HTTPException(400, { message: "Upload must be an image or audio data URL" });
+  if (!contentType.startsWith("image/") && !contentType.startsWith("audio/") && !contentType.startsWith("video/")) {
+    throw new HTTPException(400, { message: "Upload must be an image, video, or audio data URL" });
   }
   const ext =
     contentType.includes("mpeg") || contentType.includes("mp3") ? "mp3"
     : contentType.includes("wav") ? "wav"
     : contentType.includes("ogg") ? "ogg"
+    : contentType.includes("mp4") ? "mp4"
+    : contentType.includes("webm") ? "webm"
+    : contentType.includes("quicktime") ? "mov"
     : contentType.includes("png") ? "png"
     : contentType.includes("webp") ? "webp"
     : contentType.includes("gif") ? "gif"
     : "jpg";
   const buffer = Buffer.from(m[2]!, "base64");
-  if (buffer.length > 8 * 1024 * 1024) {
-    throw new HTTPException(400, { message: "Image must be 8MB or smaller" });
+  if (buffer.length > 32 * 1024 * 1024) {
+    throw new HTTPException(400, { message: "Media must be 32MB or smaller" });
   }
   return { buffer, contentType, ext };
 }
@@ -56,7 +60,7 @@ function sanitizePath(raw: string, ext: string, workspaceId: string): string {
     });
   }
   const withExt =
-    /\.(png|jpg|jpeg|webp|gif|mp3|wav|ogg)$/i.test(cleaned)
+    /\.(png|jpg|jpeg|webp|gif|mp3|wav|ogg|mp4|webm|mov)$/i.test(cleaned)
       ? cleaned
       : `${cleaned}.${ext}`;
   // Namespace under workspace so objects stay tenant-scoped.
@@ -80,6 +84,15 @@ mediaRoutes.post("/upload", async (c) => {
   if (error) throw new HTTPException(500, { message: `Storage upload failed: ${error.message}` });
 
   const { data } = sb.storage.from("vantage-media").getPublicUrl(storagePath);
+  if (contentType.startsWith("image/") || contentType.startsWith("video/")) {
+    const kind = contentType.startsWith("video/") ? "video" : "image";
+    const title = parsed.data.title ?? storagePath.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "Uploaded media";
+    const { error: assetError } = await sb.schema("vantage").from("media_assets").upsert(
+      { workspace_id: ws, storage_path: storagePath, title, kind },
+      { onConflict: "workspace_id,storage_path" },
+    );
+    if (assetError) throw new HTTPException(500, { message: `Media catalog update failed: ${assetError.message}` });
+  }
   return c.json({ public_url: data.publicUrl, storage_path: storagePath });
 });
 
@@ -89,31 +102,35 @@ mediaRoutes.get("/gallery", async (c) => {
   const ws = c.get("workspaceId");
   const sb = getSupabaseAdmin();
 
-  const limit  = Math.min(Math.max(Number(c.req.query("limit") ?? 60) || 60, 1), 200);
+  const limit  = Math.min(Math.max(Number(c.req.query("limit") ?? 24) || 24, 1), 100);
   const offset = Math.max(Number(c.req.query("offset") ?? 0) || 0, 0);
   const source = c.req.query("source") ?? null;
   const kind   = c.req.query("kind") ?? null;
 
   // Every query is workspace-filtered — that, not the Storage path layout, is
   // what makes the gallery tenant-safe. See lib/media-gallery.ts.
-  const [pieces, jobs, kits, clips] = await Promise.all([
+  const scanLimit = Math.min(GALLERY_SCAN_LIMIT, Math.max(100, offset + limit));
+  const [pieces, jobs, kits, clips, uploads] = await Promise.all([
     sb.from("content_pieces")
       .select("id, channel_slug, image_url, video_url, content_payload, created_at")
-      .eq("workspace_id", ws).order("created_at", { ascending: false }).limit(GALLERY_SCAN_LIMIT),
+      .eq("workspace_id", ws).order("created_at", { ascending: false }).limit(scanLimit),
     sb.from("demoforge_jobs")
       .select("id, content_piece_id, target_format, output_url, thumbnail_url, extracted_frames, created_at")
-      .eq("workspace_id", ws).order("created_at", { ascending: false }).limit(GALLERY_SCAN_LIMIT),
+      .eq("workspace_id", ws).order("created_at", { ascending: false }).limit(scanLimit),
     sb.from("brand_kits")
       .select("id, name, logo_url, created_at")
-      .eq("workspace_id", ws).order("created_at", { ascending: false }).limit(GALLERY_SCAN_LIMIT),
+      .eq("workspace_id", ws).order("created_at", { ascending: false }).limit(scanLimit),
     // Clips with a null workspace_id are the shared global library.
     sb.from("intro_outro_clips")
       .select("id, name, type, preview_url, storage_path, created_at, workspace_id")
       .or(`workspace_id.eq.${ws},workspace_id.is.null`)
-      .order("created_at", { ascending: false }).limit(GALLERY_SCAN_LIMIT),
+      .order("created_at", { ascending: false }).limit(scanLimit),
+    sb.schema("vantage").from("media_assets")
+      .select("id, title, kind, storage_path, created_at")
+      .eq("workspace_id", ws).order("created_at", { ascending: false }).limit(scanLimit),
   ]);
 
-  const firstErr = pieces.error ?? jobs.error ?? kits.error ?? clips.error;
+  const firstErr = pieces.error ?? jobs.error ?? kits.error ?? clips.error ?? uploads.error;
   if (firstErr) throw new HTTPException(500, { message: firstErr.message });
 
   const publicUrlFor = (path: string) =>
@@ -124,6 +141,17 @@ mediaRoutes.get("/gallery", async (c) => {
     ...(jobs.data   ?? []).flatMap((j) => itemsFromJob(j as never)),
     ...(kits.data   ?? []).flatMap((k) => itemsFromBrandKit(k as never)),
     ...(clips.data  ?? []).flatMap((cl) => itemsFromClip(cl as never, publicUrlFor)),
+    ...(uploads.data ?? []).map((asset) => ({
+      id: `upload:${asset.id}`,
+      kind: asset.kind as "image" | "video",
+      url: publicUrlFor(asset.storage_path),
+      thumbnail_url: null,
+      label: asset.title,
+      source: "upload" as const,
+      piece_id: null,
+      job_id: null,
+      created_at: asset.created_at,
+    })),
   ];
 
   return c.json({ ...assembleGallery(all, { source, kind, limit, offset }), scan_limit: GALLERY_SCAN_LIMIT });

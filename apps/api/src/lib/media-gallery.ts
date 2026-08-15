@@ -18,7 +18,7 @@ import { parseCarouselUrls } from "./carousel.js";
 export type MediaKind = "image" | "video";
 
 /** Where the asset came from — drives the filter chips and the row action. */
-export type MediaSource = "piece" | "demoforge" | "brand_kit" | "clip";
+export type MediaSource = "piece" | "demoforge" | "brand_kit" | "clip" | "upload";
 
 export type MediaItem = {
   /** Stable within a response; composed from source + owner + role so it survives refetches. */

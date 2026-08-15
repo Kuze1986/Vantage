@@ -105,7 +105,7 @@ export type MediaGalleryItem = {
   url: string;
   thumbnail_url: string | null;
   label: string;
-  source: 'piece' | 'demoforge' | 'brand_kit' | 'clip';
+  source: 'piece' | 'demoforge' | 'brand_kit' | 'clip' | 'upload';
   piece_id: string | null;
   job_id: string | null;
   created_at: string | null;
@@ -545,6 +545,12 @@ export const vantageApi = {
       tracks: { id: string; title: string; artist: string | null; mood: string; use_case: string; duration_secs: number | null; bpm: number | null; storage_path: string; public_url: string }[]
     }>;
   },
+
+  uploadMedia: (payload: { path: string; data_url: string; title: string }) =>
+    vantageFetch('/v1/media/upload', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }) as Promise<{ public_url: string; storage_path: string }>,
   uploadMusicTrack: (body: { title: string; data_url: string }) => vantageFetch('/v1/music/upload', { method: 'POST', body: JSON.stringify(body) }) as Promise<{ track: any }>,
   listMusicProjects: () => vantageFetch('/v1/music/projects') as Promise<{ projects: any[] }>,
   createMusicProject: (body: any) => vantageFetch('/v1/music/projects', { method: 'POST', body: JSON.stringify(body) }) as Promise<{ project: any }>,

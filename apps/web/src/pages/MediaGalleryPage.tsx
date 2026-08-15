@@ -14,7 +14,8 @@ import { Panel, Badge, MediaLightbox } from '../ds'
 import type { LightboxItem, BadgeVariant } from '../ds'
 import { uploadDataUrl } from '../lib/storage'
 
-const PAGE_SIZE = 60
+const PAGE_SIZE = 24
+const MAX_UPLOAD_BYTES = 24 * 1024 * 1024
 
 const SOURCE_FILTERS: Array<{ value: string; label: string }> = [
   { value: '',           label: 'All' },
@@ -22,6 +23,7 @@ const SOURCE_FILTERS: Array<{ value: string; label: string }> = [
   { value: 'demoforge',  label: 'DemoForge' },
   { value: 'brand_kit',  label: 'Brand kits' },
   { value: 'clip',       label: 'Clips' },
+  { value: 'upload',     label: 'Uploads' },
 ]
 
 const KIND_FILTERS: Array<{ value: string; label: string }> = [
@@ -31,7 +33,7 @@ const KIND_FILTERS: Array<{ value: string; label: string }> = [
 ]
 
 const SOURCE_VARIANT: Record<MediaGalleryItem['source'], BadgeVariant> = {
-  piece: 'active', demoforge: 'new', brand_kit: 'core', clip: 'default',
+  piece: 'active', demoforge: 'new', brand_kit: 'core', clip: 'default', upload: 'soon',
 }
 
 function Chip({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
@@ -115,6 +117,9 @@ export default function MediaGalleryPage() {
   const [delay, setDelay] = React.useState(500)
   const [creating, setCreating] = React.useState(false)
   const [createError, setCreateError] = React.useState<string | null>(null)
+  const [uploading, setUploading] = React.useState(false)
+  const [uploadError, setUploadError] = React.useState<string | null>(null)
+  const uploadInputRef = React.useRef<HTMLInputElement | null>(null)
 
   const frameItems = items.filter((item) => item.kind === 'image' || item.thumbnail_url)
   const toggleFrame = (url: string) => setSelected((current) => current.includes(url) ? current.filter((value) => value !== url) : [...current, url])
@@ -147,6 +152,37 @@ export default function MediaGalleryPage() {
       const res = await vantageApi.mediaGallery({ limit: PAGE_SIZE }); setItems(res.items); setTotal(res.total); setNext(res.next_offset)
     } catch (error) { setCreateError(error instanceof Error ? error.message : 'GIF creation failed') }
     finally { setCreating(false) }
+  }
+
+  const uploadMedia = async (file: File) => {
+    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+      setUploadError('Choose an image or video file.')
+      return
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadError('Choose a file smaller than 24MB.')
+      return
+    }
+    setUploading(true); setUploadError(null)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result))
+        reader.onerror = () => reject(new Error('Could not read the selected file.'))
+        reader.readAsDataURL(file)
+      })
+      await vantageApi.uploadMedia({
+        path: `uploads/${Date.now()}-${file.name.replace(/[^a-z0-9._-]/gi, '-')}`,
+        data_url: dataUrl,
+        title: file.name.replace(/\.[^.]+$/, ''),
+      })
+      setSource('upload'); setKind('')
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'Upload failed.')
+    } finally {
+      setUploading(false)
+      if (uploadInputRef.current) uploadInputRef.current.value = ''
+    }
   }
 
   // Refetch from scratch whenever a filter changes.
@@ -200,6 +236,8 @@ export default function MediaGalleryPage() {
           <p className="vg-page-sub">Every image and video this workspace has produced</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input ref={uploadInputRef} type="file" accept="image/*,video/*" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadMedia(file) }} />
+          <button type="button" className="nx-btn nx-btn--secondary" onClick={() => uploadInputRef.current?.click()} disabled={uploading}>{uploading ? 'UPLOADING…' : 'UPLOAD MEDIA'}</button>
           <button type="button" className="nx-btn nx-btn--primary" onClick={() => setComposerOpen(true)}>CREATE GIF</button>
           <Badge label={`${total} asset${total === 1 ? '' : 's'}`} variant={total ? 'active' : 'soon'} />
         </div>
@@ -211,6 +249,10 @@ export default function MediaGalleryPage() {
           border: '1px solid var(--nx-red)', borderRadius: 4,
           padding: '8px 12px', marginBottom: 12,
         }}>{err}</div>
+      )}
+
+      {uploadError && (
+        <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-red)', border: '1px solid var(--nx-red)', borderRadius: 4, padding: '8px 12px', marginBottom: 12 }}>{uploadError}</div>
       )}
 
       <Panel title="Library" titleAccent="cyan">
@@ -226,6 +268,8 @@ export default function MediaGalleryPage() {
             ))}
           </div>
         </div>
+
+        {!loading && <div style={{ fontFamily: 'var(--nx-mono)', fontSize: 10, color: 'var(--nx-text-4)', marginBottom: 14 }}>Showing {items.length} of {total} assets. Load more only when you need it.</div>}
 
         {loading ? (
           <p style={{ fontFamily: 'var(--nx-mono)', fontSize: 11, color: 'var(--nx-text-4)' }}>Loading…</p>
