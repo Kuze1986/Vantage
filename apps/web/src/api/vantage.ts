@@ -762,7 +762,7 @@ export const vantageApi = {
   getCampaign: (id: string) =>
     vantageFetch(`/v1/campaigns/${id}`) as Promise<any>,
   listCampaignAssets: (id: string) => vantageFetch(`/v1/campaigns/${id}/assets`) as Promise<{ assets: any[] }>,
-  addCampaignAsset: (id: string, body: { title: string; asset_type: 'visual' | 'gif' | 'video' | 'music_project'; source_url?: string | null; source_ref?: string | null; metadata?: Record<string, unknown> }) =>
+  addCampaignAsset: (id: string, body: { title: string; asset_type: 'visual' | 'gif' | 'video' | 'music_project'; source_url: string; source_ref?: string | null; metadata?: Record<string, unknown>; media_kind?: 'image' | 'gif' | 'video' | 'audio'; preview_url?: string | null; origin_surface?: 'campaign_builder' | 'social_kit' | 'media_gallery' | 'demoforge' | 'music_studio'; origin_project_id?: string | null }) =>
     vantageFetch(`/v1/campaigns/${id}/assets`, { method: 'POST', body: JSON.stringify(body) }) as Promise<{ asset: any }>,
 
   createCampaign: (body: any) =>
@@ -779,6 +779,8 @@ export const vantageApi = {
 
   generateCampaignTimeline: (campaignId: string) =>
     vantageFetch(`/v1/campaigns/${campaignId}/timeline/generate`, { method: "POST" }) as Promise<{ timeline: any[] }>,
+  getCampaignPreflight: (campaignId: string) =>
+    vantageFetch(`/v1/campaigns/${campaignId}/preflight`) as Promise<{ valid: boolean; errors: string[]; volume: { days: number; posts_per_day: number; total_pieces: number }; expected_media_jobs: number }> ,
 
   addCampaignTimelineDays: (campaignId: string, days: any | any[]) =>
     vantageFetch(`/v1/campaigns/${campaignId}/timeline`, { method: "POST", body: JSON.stringify(days) }) as Promise<{ timeline_entries: any[] }>,

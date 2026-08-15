@@ -16,6 +16,7 @@ interface Campaign {
   default_brand_id?: string | null
   default_demoforge_template_id?: string | null
   destination_url?: string | null
+  fact_sheet?: Record<string, unknown>
   created_at: string
   updated_at: string
 }
@@ -149,6 +150,7 @@ export default function CampaignBuilderPage() {
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [timeline, setTimeline] = useState<TimelineDay[]>([])
   const [campaignAssets, setCampaignAssets] = useState<any[]>([])
+  const [preflight, setPreflight] = useState<{ valid: boolean; errors: string[]; volume: { days: number; posts_per_day: number; total_pieces: number }; expected_media_jobs: number } | null>(null)
   const [uploadingCampaignAsset, setUploadingCampaignAsset] = useState(false)
   const [campaignAssetUploadError, setCampaignAssetUploadError] = useState<string | null>(null)
   const [kpiMetrics, setKpiMetrics] = useState<KPIMetrics[]>([])
@@ -164,6 +166,7 @@ export default function CampaignBuilderPage() {
     default_brand_id: string
     default_demoforge_template_id: string
     destination_url: string
+    fact_sheet: string
   }>({
     name: '',
     description: '',
@@ -172,6 +175,7 @@ export default function CampaignBuilderPage() {
     default_brand_id: 'shift',
     default_demoforge_template_id: '',
     destination_url: '',
+    fact_sheet: '',
   })
   const [launchInfo, setLaunchInfo] = useState<string | null>(null)
   const [templates, setTemplates] = useState<DemoForgeTemplateMeta[]>([])
@@ -230,16 +234,18 @@ export default function CampaignBuilderPage() {
 
   const fetchCampaignDetails = async (campaignId: string) => {
     try {
-      const [campaignData, timelineData, kpiData, assetData] = await Promise.all([
+      const [campaignData, timelineData, kpiData, assetData, preflightData] = await Promise.all([
         vantageApi.getCampaign(campaignId),
         vantageApi.getCampaignTimeline(campaignId),
         vantageApi.getCampaignKPI(campaignId),
         vantageApi.listCampaignAssets(campaignId),
+        vantageApi.getCampaignPreflight(campaignId),
       ])
       setSelectedCampaign(campaignData)
       setTimeline(timelineData.timeline || [])
       setKpiMetrics(kpiData.kpi_tracking || [])
       setCampaignAssets(assetData.assets || [])
+      setPreflight(preflightData)
     } catch (err) {
       console.error('Failed to fetch campaign details:', err)
     }
@@ -310,6 +316,12 @@ export default function CampaignBuilderPage() {
     if (timeline.length && !confirm('Regenerate the timeline? This replaces the current plan.')) return
     setBusy('generate')
     try {
+      const preflight = await vantageApi.getCampaignPreflight(selectedCampaign.id)
+      if (!preflight.valid) {
+        alert(`Campaign preflight blocked generation:\n${preflight.errors.join('\n')}`)
+        return
+      }
+      if (!confirm(`Preflight: ${preflight.volume.posts_per_day} posts/day × ${preflight.volume.days} days = ${preflight.volume.total_pieces} generated drafts. Continue?`)) return
       const res = await vantageApi.generateCampaignTimeline(selectedCampaign.id)
       setTimeline(res.timeline || [])
     } catch (err) {
@@ -610,6 +622,9 @@ export default function CampaignBuilderPage() {
       default_brand_id: selectedCampaign.default_brand_id || 'shift',
       default_demoforge_template_id: selectedCampaign.default_demoforge_template_id || '',
       destination_url: selectedCampaign.destination_url || '',
+      fact_sheet: JSON.stringify(selectedCampaign.fact_sheet || {
+        approved_claims: [], prohibited_claims: [], approved_terms: [], product_name: selectedCampaign.name, primary_cta: '',
+      }, null, 2),
     })
     setEditingCampaign(true)
   }
@@ -624,6 +639,10 @@ export default function CampaignBuilderPage() {
       alert('Destination URL must start with http:// or https://')
       return
     }
+    let fact_sheet: Record<string, unknown> | undefined
+    if (editData.fact_sheet.trim()) {
+      try { fact_sheet = JSON.parse(editData.fact_sheet) } catch { alert('Fact sheet must be valid JSON'); return }
+    }
     setBusy('campaign')
     try {
       const updated = await vantageApi.updateCampaign(selectedCampaign.id, {
@@ -634,6 +653,7 @@ export default function CampaignBuilderPage() {
         default_brand_id: editData.default_brand_id || 'shift',
         default_demoforge_template_id: editData.default_demoforge_template_id || null,
         destination_url: editData.destination_url.trim() || null,
+        ...(fact_sheet ? { fact_sheet, fact_sheet_revision: (selectedCampaign as any).fact_sheet_revision ? Number((selectedCampaign as any).fact_sheet_revision) + 1 : 1 } : {}),
       })
       setSelectedCampaign(updated)
       setEditingCampaign(false)
@@ -1092,6 +1112,14 @@ export default function CampaignBuilderPage() {
         {launchInfo && (
           <Panel title="Reactor Note">{launchInfo}</Panel>
         )}
+        {preflight && (
+          <Panel title={preflight.valid ? 'Campaign Preflight · Ready' : 'Campaign Preflight · Action Required'}>
+            <div className="nx-mono" style={{ fontSize: 11, lineHeight: 1.7, color: preflight.valid ? 'var(--nx-green)' : 'var(--nx-amber)' }}>
+              {preflight.volume.posts_per_day} posts/day × {preflight.volume.days} days = {preflight.volume.total_pieces} drafts · {preflight.expected_media_jobs} expected media jobs
+              {!preflight.valid && <><br />{preflight.errors.join(' ')}</>}
+            </div>
+          </Panel>
+        )}
 
         {editingCampaign ? (
           <Panel title="Edit Campaign">
@@ -1111,6 +1139,16 @@ export default function CampaignBuilderPage() {
                   value={editData.description}
                   onChange={(e) => setEditData({ ...editData, description: e.target.value })}
                 />
+              </div>
+              <div>
+                <label style={labelStyle}>Approved Fact Sheet (required before generation)</label>
+                <textarea
+                  style={{ ...inputStyle, minHeight: '180px', fontFamily: 'var(--nx-mono)', fontSize: 11 }}
+                  value={editData.fact_sheet}
+                  onChange={(e) => setEditData({ ...editData, fact_sheet: e.target.value })}
+                  placeholder={'{"approved_claims":["…"],"prohibited_claims":["…"],"approved_terms":["The Shift"],"product_name":"The Shift","primary_cta":"Start a Queue deploy"}'}
+                />
+                <p style={{ fontSize: '0.75rem', color: 'var(--vg-text-dim, #888)', marginTop: '0.25rem' }}>Only claims and terminology in this confirmed sheet may be used by the campaign generator.</p>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
@@ -1251,6 +1289,7 @@ export default function CampaignBuilderPage() {
                   <div className="nx-label" style={{ fontSize: 9 }}>{asset.metadata?.audio_upload ? 'sound' : String(asset.asset_type).replace('_', ' ')}</div>
                   <div style={{ fontSize: 12, marginTop: 5 }}>{asset.title}</div>
                   {asset.metadata?.audio_upload && asset.source_url && <audio controls preload="metadata" src={asset.source_url} style={{ width: '100%', height: 28, marginTop: 8 }} />}
+                  {!asset.metadata?.audio_upload && asset.source_url && (asset.asset_type === 'video' ? <video controls preload="metadata" src={asset.source_url} style={{ width: '100%', maxHeight: 100, marginTop: 8 }} /> : <img src={asset.source_url} alt={asset.title} style={{ width: '100%', maxHeight: 100, marginTop: 8, objectFit: 'cover' }} />)}
                   {asset.metadata?.channel && <div className="nx-mono" style={{ fontSize: 9, color: 'var(--nx-text-4)', marginTop: 5 }}>{String(asset.metadata.channel).toUpperCase()}</div>}
                 </div>
               ))}
@@ -1476,14 +1515,26 @@ export default function CampaignBuilderPage() {
                           </select>
                         </div>
                         <div>
-                          <label style={labelStyle}>Uploaded asset</label>
+                          <label style={labelStyle}>Primary visual asset</label>
                           <select
                             style={inputStyle}
-                            value={idea.campaign_asset_id ?? ''}
-                            onChange={(e) => updateDayLocal(day.day_number, { content_ideas: [{ ...idea, campaign_asset_id: e.target.value || undefined }] })}
+                            value={idea.visual_asset_id ?? idea.campaign_asset_id ?? ''}
+                            onChange={(e) => updateDayLocal(day.day_number, { content_ideas: [{ ...idea, visual_asset_id: e.target.value || undefined, campaign_asset_id: undefined }] })}
                           >
                             <option value="">Generate / none</option>
-                            {campaignAssets.filter((asset) => asset.source_url).map((asset) => <option key={asset.id} value={asset.id}>{asset.metadata?.audio_upload ? 'Sound · ' : ''}{asset.title}</option>)}
+                            {campaignAssets.filter((asset) => asset.source_url && asset.asset_type !== 'music_project').map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={labelStyle}>Optional soundtrack</label>
+                          <select
+                            style={inputStyle}
+                            value={idea.soundtrack_asset_id ?? ''}
+                            onChange={(e) => updateDayLocal(day.day_number, { content_ideas: [{ ...idea, soundtrack_asset_id: e.target.value || undefined }] })}
+                            disabled={idea.visual_type !== 'demo_video'}
+                          >
+                            <option value="">No soundtrack / campaign default</option>
+                            {campaignAssets.filter((asset) => asset.source_url && asset.asset_type === 'music_project').map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}
                           </select>
                         </div>
                       </div>

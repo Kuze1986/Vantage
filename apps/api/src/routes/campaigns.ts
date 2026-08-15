@@ -42,6 +42,7 @@ import { syncCampaignKpis } from '../lib/campaign-kpi.js';
 import { tagUrls } from '../lib/utm.js';
 import { pickPostingHour, scheduledAtOnDate, type PostingHoursConfig } from '../lib/posting-hours.js';
 import { timelineDayCount, MAX_TIMELINE_DAYS } from '../lib/campaigns.js';
+import { campaignVolume, similarityScore, validateFactSheet, validateFinalPayload } from '../lib/campaign-quality.js';
 
 export const campaignRoutes = new Hono();
 
@@ -124,6 +125,10 @@ const createCampaignSchema = z.object({
   // campaign launches — what lets one Vantage instance promote a different
   // sibling product per campaign. See apps/api/src/lib/destination.ts.
   destination_url: z.string().url().max(2048).nullable().optional(),
+  // A draft may be saved without facts; timeline/content generation is blocked
+  // until the operator confirms this sheet through the preflight gate.
+  fact_sheet: z.object({ approved_claims: z.array(z.string().min(1)).min(1), prohibited_claims: z.array(z.string()), approved_terms: z.array(z.string().min(1)).min(1), product_name: z.string().min(1), primary_cta: z.string().min(1) }).optional(),
+  fact_sheet_revision: z.number().int().positive().optional(),
 });
 
 const updateCampaignSchema = createCampaignSchema.partial().omit({
@@ -141,6 +146,8 @@ const contentIdeaSchema = z.object({
   demoforge_template_id: z.string().optional(),
   brand_id: z.string().optional(),
   campaign_asset_id: z.string().uuid().nullable().optional(),
+  visual_asset_id: z.string().uuid().nullable().optional(),
+  soundtrack_asset_id: z.string().uuid().nullable().optional(),
 });
 
 const timelineDaySchema = z.object({
@@ -258,12 +265,30 @@ campaignRoutes.get('/:id', async (c) => {
   return c.json(data);
 });
 
+campaignRoutes.get('/:id/preflight', async (c) => {
+  const workspaceId = c.req.header('x-workspace-id');
+  if (!workspaceId) throw new HTTPException(400, { message: 'x-workspace-id header is required' });
+  const { data: campaign, error } = await getSupabaseAdmin().from('campaigns').select('*').eq('id', c.req.param('id')).eq('workspace_id', workspaceId).single();
+  if (error || !campaign) throw new HTTPException(404, { message: 'Campaign not found' });
+  const cadence = campaign.cadence_config ?? {};
+  const days = timelineDayCount(Number(cadence.weeks ?? 1), Number(cadence.periodsPerWeek ?? 1));
+  const volume = campaignVolume((campaign.channel_mix ?? {}) as Record<string, { daily?: number }>, days);
+  const fact = validateFactSheet(campaign.fact_sheet);
+  const errors = [...fact.errors];
+  if (volume.total_pieces > 500) errors.push(`Campaign volume ${volume.total_pieces} exceeds the 500-piece safety cap.`);
+  return c.json({ valid: errors.length === 0, errors, volume, fact_sheet_revision: campaign.fact_sheet_revision ?? 0, expected_media_jobs: volume.total_pieces });
+});
+
 const campaignAssetSchema = z.object({
   title: z.string().min(1).max(180),
   asset_type: z.enum(['visual', 'gif', 'video', 'music_project']),
-  source_url: z.string().url().nullable().optional(),
+  source_url: z.string().url(),
   source_ref: z.string().nullable().optional(),
   metadata: z.record(z.unknown()).default({}),
+  media_kind: z.enum(['image', 'gif', 'video', 'audio']).optional(),
+  preview_url: z.string().url().nullable().optional(),
+  origin_surface: z.enum(['campaign_builder', 'social_kit', 'media_gallery', 'demoforge', 'music_studio']).optional(),
+  origin_project_id: z.string().nullable().optional(),
 });
 
 campaignRoutes.get('/:id/assets', async (c) => {
@@ -280,10 +305,13 @@ campaignRoutes.post('/:id/assets', async (c) => {
   if (!workspaceId) throw new HTTPException(400, { message: 'x-workspace-id header is required' });
   const parsed = campaignAssetSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.message });
+  const media_kind = parsed.data.media_kind ?? (parsed.data.asset_type === 'music_project' ? 'audio' : parsed.data.asset_type === 'video' ? 'video' : parsed.data.asset_type === 'gif' ? 'gif' : 'image');
+  const compatible = (parsed.data.asset_type === 'music_project' && media_kind === 'audio') || (parsed.data.asset_type === 'video' && media_kind === 'video') || (parsed.data.asset_type === 'gif' && media_kind === 'gif') || (parsed.data.asset_type === 'visual' && ['image', 'gif'].includes(media_kind));
+  if (!compatible) throw new HTTPException(400, { message: `Asset type ${parsed.data.asset_type} is incompatible with media kind ${media_kind}` });
   const sb = getSupabaseAdmin();
   const { data: campaign } = await sb.from('campaigns').select('id').eq('id', c.req.param('id')).eq('workspace_id', workspaceId).single();
   if (!campaign) throw new HTTPException(404, { message: 'Campaign not found' });
-  const { data, error } = await sb.from('campaign_assets').insert({ ...parsed.data, campaign_id: campaign.id, workspace_id: workspaceId }).select().single();
+  const { data, error } = await sb.from('campaign_assets').insert({ ...parsed.data, media_kind, attachment_status: 'ready', campaign_id: campaign.id, workspace_id: workspaceId }).select().single();
   if (error) throw new HTTPException(500, { message: error.message });
   return c.json({ asset: data }, 201);
 });
@@ -744,6 +772,11 @@ campaignRoutes.post('/:id/launch', async (c) => {
     throw new HTTPException(404, { message: 'Campaign not found' });
   }
 
+  const launchFactGate = validateFactSheet(campaign.fact_sheet);
+  if (!launchFactGate.valid) {
+    throw new HTTPException(400, { message: `Campaign fact sheet must be confirmed before generation: ${launchFactGate.errors.join(' ')}` });
+  }
+
   // Optional { day_numbers: [...] } restricts generation to specific days.
   // retry_rejected permits a deliberate revision of failed day/channel slots;
   // the original pieces remain in the timeline as an audit trail.
@@ -787,6 +820,8 @@ campaignRoutes.post('/:id/launch', async (c) => {
     demoforge_template_id?: string;
     brand_id?: string;
     campaign_asset_id?: string | null;
+    visual_asset_id?: string | null;
+    soundtrack_asset_id?: string | null;
     demoforgeScript?: string;
   };
 
@@ -818,15 +853,21 @@ campaignRoutes.post('/:id/launch', async (c) => {
     .eq('workspace_id', workspaceId);
   const assetsById = new Map((campaignAssets ?? []).map((asset) => [asset.id as string, asset]));
   const soundtrackAsset = (campaignAssets ?? []).find((asset) => asset.asset_type === 'music_project' && typeof asset.source_url === 'string');
+  const { data: recentPieces } = await sb.from('content_pieces').select('content_payload').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(40);
+  const recentBodies = (recentPieces ?? []).map((piece) => String((piece.content_payload as Record<string, unknown> | null)?.body ?? '')).filter(Boolean);
 
   // Campaign description is otherwise stranded at timeline-generation time: the copy
   // generator (kuze) only ever sees topic_text + brand_voice, so campaign-level intent
   // never reaches pack-seeded or hand-written days. Prepend it as framing — labelled so
   // the model writes *within* the goal rather than *about* it.
-  const campaignBrief =
+  const campaignBrief = [
     typeof campaign.description === 'string' && campaign.description.trim()
       ? `Campaign context (write within this goal, do not write about it): ${campaign.description.trim()}`
-      : '';
+      : '',
+    launchFactGate.factSheet
+      ? `Approved campaign facts (use only these claims and terms; never make a prohibited claim):\nProduct: ${launchFactGate.factSheet.product_name}\nApproved claims: ${launchFactGate.factSheet.approved_claims.join(' | ')}\nApproved terms: ${launchFactGate.factSheet.approved_terms.join(', ')}\nProhibited claims: ${launchFactGate.factSheet.prohibited_claims.join(' | ')}\nPrimary CTA: ${launchFactGate.factSheet.primary_cta}`
+      : '',
+  ].filter(Boolean).join('\n\n');
 
   // Send times come from each channel's configured posting_hours — the same config the
   // autopilot cadence uses. Launch previously hardcoded 09:00 UTC for every piece, which
@@ -875,9 +916,14 @@ campaignRoutes.post('/:id/launch', async (c) => {
       : day.content_type === 'engagement'
         ? 'none'
         : 'demo_video';
-    const campaignAsset = typeof idea.campaign_asset_id === 'string'
-      ? assetsById.get(idea.campaign_asset_id)
+    const campaignAsset = typeof (idea.visual_asset_id ?? idea.campaign_asset_id) === 'string'
+      ? assetsById.get((idea.visual_asset_id ?? idea.campaign_asset_id) as string)
       : undefined;
+    const selectedSoundtrack = typeof idea.soundtrack_asset_id === 'string' ? assetsById.get(idea.soundtrack_asset_id) : soundtrackAsset;
+    if (campaignAsset?.asset_type === 'music_project') {
+      failures.push({ day_number: day.day_number, error: 'A soundtrack cannot be used as the primary visual asset.' });
+      continue;
+    }
     const brandId = resolveBrandId({
       ideaBrandId: idea.brand_id,
       campaignDefaultBrandId: campaignDefaultBrand,
@@ -1008,24 +1054,23 @@ campaignRoutes.post('/:id/launch', async (c) => {
         };
         if (campaignAsset?.source_url) {
           if (campaignAsset.asset_type === 'video') payload.video_url = campaignAsset.source_url;
-          else if (campaignAsset.asset_type === 'music_project') payload.audio_url = campaignAsset.source_url;
           else payload.image_url = campaignAsset.source_url;
         }
         // A selected uploaded video uses the campaign's uploaded soundtrack when one is
         // available. DemoForge renders the pair into a publishable MP4 rather than
         // handing social adapters a silent video plus an unusable standalone audio URL.
-        if (campaignAsset?.asset_type === 'video' && campaignAsset.source_url && soundtrackAsset?.source_url) {
+        if (campaignAsset?.asset_type === 'video' && campaignAsset.source_url && selectedSoundtrack?.source_url) {
           const base = process.env.DEMOFORGE_URL?.trim();
           if (base) {
             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
             const secret = process.env.DEMOFORGE_SECRET?.trim(); if (secret) headers['x-demoforge-secret'] = secret;
-            const mux = await fetch(`${base.replace(/\/$/, '')}/mux`, { method: 'POST', headers, body: JSON.stringify({ workspace_id: workspaceId, video_url: campaignAsset.source_url, audio_url: soundtrackAsset.source_url }) });
+            const mux = await fetch(`${base.replace(/\/$/, '')}/mux`, { method: 'POST', headers, body: JSON.stringify({ workspace_id: workspaceId, video_url: campaignAsset.source_url, audio_url: selectedSoundtrack.source_url }) });
             if (!mux.ok) throw new Error(`Soundtrack render failed: ${await mux.text()}`);
             const rendered = await mux.json() as { video_url?: string };
             if (!rendered.video_url) throw new Error('Soundtrack render did not return a video URL');
             payload.video_url = rendered.video_url;
-            payload.audio_url = soundtrackAsset.source_url;
-            payload.soundtrack_asset_id = soundtrackAsset.id;
+            payload.audio_url = selectedSoundtrack.source_url;
+            payload.soundtrack_asset_id = selectedSoundtrack.id;
           }
         }
         if (visualType === 'social_graphic') {
@@ -1050,7 +1095,11 @@ campaignRoutes.post('/:id/launch', async (c) => {
           ?? new Date().toISOString();
         // Audit fail → rejected (not queued). Pass + media ready → queued (autopilot).
         // Pass + media pending → approved until DemoForge / Social Kit write-back.
-        const pieceStatus = !auditPassed
+        const similarity = similarityScore(String(payload.body ?? ''), recentBodies);
+        const finalValidation = validateFinalPayload(channel, payload);
+        if (similarity >= 0.72) finalValidation.errors.push('Draft is too similar to recent campaign content.');
+        finalValidation.valid = finalValidation.errors.length === 0;
+        const pieceStatus = !auditPassed || !finalValidation.valid
           ? 'rejected'
           : launchStatusForMedia(mediaStatus);
 
@@ -1066,6 +1115,11 @@ campaignRoutes.post('/:id/launch', async (c) => {
             audit_notes: auditNotes,
             audit_category: auditCategory,
             audit_iterations: auditIterations,
+            fact_sheet_revision: campaign.fact_sheet_revision ?? 0,
+            final_character_count: finalValidation.character_count,
+            similarity_score: similarity,
+            validation_result: { valid: finalValidation.valid, errors: finalValidation.errors },
+            audit_payload_hash: finalValidation.payload_hash,
             scheduled_for: auditPassed ? scheduledFor : null,
             media_status: mediaStatus,
           })
@@ -1092,6 +1146,18 @@ campaignRoutes.post('/:id/launch', async (c) => {
             .from('content_pieces')
             .update({ content_payload: payload, updated_at: new Date().toISOString() })
             .eq('id', piece.id);
+        }
+
+        // UTM expansion can push a post over a platform limit. Validate the exact
+        // stored payload and immediately hold it rather than letting the queue see it.
+        const taggedValidation = validateFinalPayload(channel, payload);
+        if (!taggedValidation.valid) {
+          await sb.from('content_pieces').update({
+            status: 'rejected',
+            scheduled_for: null,
+            final_character_count: taggedValidation.character_count,
+            validation_result: { valid: false, errors: taggedValidation.errors },
+          }).eq('id', piece.id);
         }
 
         let demoforgeJobId: string | undefined;
