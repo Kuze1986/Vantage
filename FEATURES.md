@@ -1512,9 +1512,9 @@ Job submission includes optional `narration_volume`, `music_volume`, and `master
 
 ### 22. Campaign Builder
 
-**Status:** ✅ Shipped · ◐ Partially verified — **2 campaigns, 9 timeline days** created and
-launched. `campaign_kpi_tracking` has 0 rows, so the KPI band has never displayed real
-progress (it depends on engagement, which depends on publishing).
+**Status:** ✅ Shipped · ◐ Partially verified — campaigns launch through generation, audit,
+media, and cadence queueing. The active Shift Launch has a 14-day timeline. `campaign_kpi_tracking`
+still has no rows, so the KPI band has not yet displayed real engagement progress.
 
 **What it does:**
 Strategic campaign planning and execution engine that enables multi-channel, multi-week content campaigns
@@ -1557,6 +1557,12 @@ day channel (primary + secondaries), runs Ilita audit (fail → `rejected`, no q
 - `none` — text only → status `queued` immediately for cadence at `scheduled_for`
 Media-pending pieces stay `approved` until DemoForge / Social Kit write-back, then auto-queue.
 
+**Resumable launch and regeneration:** The Campaign Builder sends one launch request per timeline
+day, keeping individual requests below the reverse-proxy timeout. The API treats an existing
+timeline day/channel piece as complete, so relaunching safely fills only missing slots. **Regenerate
+Rejected** deliberately retries only rejected day/channel slots; it retains the original rejected
+pieces in `published_pieces` as audit history and creates a revised piece alongside them.
+
 **Shift content packs:** curated seeds in `apps/api/src/lib/shift-packs.ts`
 (`GET /v1/campaigns/meta/shift-packs`, `POST /v1/campaigns/:id/add-pack`, plus
 `GET/POST /v1/source/shift-packs`). **Evergreen refill:**
@@ -1580,7 +1586,8 @@ pending-media count, pack picker, refill button.
 - `GET /v1/campaigns/:id/timeline` — fetch timeline with suggested content and published pieces
 - `GET /v1/campaigns/:id/kpi` — daily + cumulative KPI metrics and progress toward goals
 - `POST /v1/campaigns/:id/timeline/generate` — AI timeline with visual_type + template suggestions
-- `POST /v1/campaigns/:id/launch` — generate text + enqueue visuals (A/B for demo_video/product_still)
+- `POST /v1/campaigns/:id/launch` — generate text + enqueue visuals (A/B for demo_video/product_still);
+  accepts `day_numbers` for a resumable slice and `retry_rejected: true` for an explicit rejected-piece retry
 - `GET /v1/campaigns/meta/shift-packs` — list Shift content packs
 - `POST /v1/campaigns/:id/add-pack` — append pack items as timeline days
 - `POST /v1/campaigns/:id/refill-evergreen` — append evergreen Shift topics as days
@@ -1591,10 +1598,12 @@ Signal Reactor chrome (BioLoop Nexus Design `vantage-campaigns.jsx` language):
 - **Create view** — form with campaign name, eight-channel mix toggles (+ daily targets),
   cadence config, and KPI target inputs (defaults enable all social channels)
 - **Details view:**
-  - Status HUD + **Engage Autopilot** launch
+  - Status HUD + **Engage Autopilot** launch and **Regenerate Rejected** retry action
   - **KPI band** — impressions / engagements / rate / follows vs targets
   - **Shift packs / evergreen / calendar** — add pack days, refill evergreen, open
     `/calendar?campaign_id=`, pending-media count
+  - **Creation Studio handoff** — guided-project campaign attachment reports API errors inside
+    the dialog and closes only after a successful attachment
   - **Timeline panel** — per-day editors, generate content, AI timeline
   - **Edit campaign** — pillars, channel mix, brand/template defaults
 
@@ -2842,6 +2851,13 @@ suggestions, so new model ids need no code change) per task, plus a failover tog
 resolved chain. `GET /v1/settings/llm-providers` reports availability and model candidates;
 `GET /v1/settings/llm-resolution` returns the chain each task actually resolves to.
 
+The Settings **AI Behavior Instructions** panel exposes workspace-level `generator_instructions`
+for Kuze and `auditor_instructions` for Ilita. Operators can add approved terminology, audience
+context, and format preferences without a code deployment. These instructions refine the prompts
+but cannot override the base accuracy, safety, platform-limit, or compliance rules. Kuze reserves
+space for destination URLs and attribution parameters before generating hard-capped X, Threads,
+and Bluesky posts; Ilita's platform checks use the same format expectations as Kuze.
+
 The registry's `generateStructured` is intentionally not used by Kuze/Ilita — they keep their
 tuned `@vantage/prompts` schemas and existing JSON extraction via `generateCompletion`.
 
@@ -2998,16 +3014,15 @@ picker and DemoForge image overlays all depend on libraries that are empty and a
 
 ---
 
-*Last updated **2026-08-08**, following a full audit against the source tree and the live
-Supabase project.*
+*Last updated **2026-08-15**, following campaign-launch, format, and AI-behavior updates.*
 
-**Built and running:** source pipeline (7,472 topics), Kuze generation + Ilita audit (23
-pieces), DemoForge (63 jobs / 36 rendered), Campaign Builder (2 campaigns), activity logging
-(4,381 events), the media gallery (~211 assets indexed), nine channels with six holding live
-OAuth tokens, Social Kit + the seven-item Creative Studio, and the full Phase 4
-SaaS-readiness stack — multi-tenancy, tenant-aware
-scheduler, membership/roles, per-tenant credentials, claim-based publish lock, pluggable LLM
-providers across five vendors, and Threads + Bluesky. **341 tests across 38 files, plus CI.**
+**Built and running:** source pipeline, Kuze generation + Ilita audit, DemoForge, Campaign
+Builder with resumable launch and rejected-piece regeneration, activity logging, media gallery,
+nine channels, Social Kit + the seven-item Creative Studio, and the full Phase 4 SaaS-readiness
+stack — multi-tenancy, tenant-aware scheduler, membership/roles, per-tenant credentials,
+claim-based publish lock, pluggable LLM providers across five vendors, editable workspace AI
+instructions, and Threads + Bluesky. The historical counts above are intentionally not treated as
+live telemetry.
 
 **Built but never exercised:** everything downstream of publishing — engagement ingestion,
 BioLoop weight learning, Strategic Intelligence, the Audience Model, and Virality Signals.

@@ -1,0 +1,18 @@
+---
+description: Keep the repository feature inventory accurate when code changes
+alwaysApply: true
+---
+
+# Feature Documentation Maintenance
+
+For every code change, find the repository feature inventory (`FEATURES.md` or
+`feature.md`, case-insensitive) before finalizing the work.
+
+- Update it when the change adds, removes, alters, fixes, or materially changes a user-visible
+  feature, workflow, API contract, configuration option, or operational behavior.
+- Include the current behavior, affected UI/API surface, relevant configuration, and verification
+  status; remove stale counts or claims rather than presenting them as live facts.
+- If no feature inventory exists, create `FEATURES.md` at the repository root and document the
+  changed capability there.
+- Before committing, verify the documentation matches the implementation. Do not defer this step
+  to a follow-up task.
