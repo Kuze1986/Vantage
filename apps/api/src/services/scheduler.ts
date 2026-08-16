@@ -646,6 +646,11 @@ export async function autoGenerateTickForWorkspace(workspaceId: string): Promise
 async function pulseTick(): Promise<void> {
   const sb = getSupabaseAdmin();
   for (const ws of await listAllWorkspaceIds()) {
+    // Scripta intake checks scripta_enabled and BioLoop checks bioloop_enabled;
+    // Pulse had no equivalent, so it ingested unconditionally on every tick.
+    const { pulse_enabled } = await loadSettings(ws);
+    if (!pulse_enabled) continue;
+
     const { data: ch } = await sb
       .from("channels")
       .select("cadence_config")

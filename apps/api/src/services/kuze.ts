@@ -1,10 +1,11 @@
 import { kuzeSystemPrompt, kuzeUserPrompt, channelFormatMap } from "@vantage/prompts";
 import type { ChannelSlug, ContentFormat, ViralityPatternExtra } from "@vantage/prompts";
 import { getSupabaseAdmin } from "../lib/supabase.js";
-import { tagUrls } from "../lib/utm.js";
+import { tagUrls, utmExpansionCost } from "../lib/utm.js";
 import { resolveDestination, appendDestination } from "../lib/destination.js";
 import { loadSettings } from "../lib/settings.js";
 import { resolveProvider } from "../lib/llm.js";
+import { resolveFactSheet } from "../lib/fact-sheet.js";
 import { extractJsonArray, extractJsonObject, LlmJsonError } from "../lib/llm-json.js";
 
 export type { ChannelSlug, ContentFormat };
@@ -136,20 +137,32 @@ export interface GenerateContentOutput {
 
 export async function generateContent(input: GenerateContentInput): Promise<GenerateContentOutput> {
   const format = channelFormatMap[input.channel] as ContentFormat;
-  const [weights, avoidWeights, viralityPatterns, rejectionCategories, destination, settings] = await Promise.all([
+  const [weights, avoidWeights, viralityPatterns, rejectionCategories, destination, settings, factSheet] = await Promise.all([
     loadWeights(input.workspace_id, input.channel),
     loadUnderperformingWeights(input.workspace_id, input.channel),
     loadViralityPatterns(input.workspace_id, input.channel),
     loadRejectionCategories(input.workspace_id, input.channel),
     resolveDestination(input.workspace_id, input.channel, input.campaign_id),
     loadSettings(input.workspace_id),
+    // Resolved here, not by the caller — see lib/fact-sheet.ts for why.
+    resolveFactSheet(input.workspace_id, input.campaign_id),
   ]);
   const reserveForLink = destination.policy === "inline" && !!destination.url;
-  // UTM decoration happens after a content piece exists. Reserve for both the
-  // raw destination and the bounded attribution suffix now, so the finished
-  // post rather than just Kuze's pre-link draft fits platform hard limits.
+  // UTM decoration happens after a content piece exists. Reserve for the raw
+  // destination, the "\n\n" separator, and the exact attribution suffix that
+  // tagUrls will add — measured, not estimated (see utmExpansionCost). The old
+  // flat 130-char allowance undershot every campaign-scoped tag and pushed
+  // finished posts past the hard caps on X, Threads and Bluesky.
+  //
+  // SAFETY_MARGIN covers the model overshooting its instructed budget by a few
+  // characters, which it does often enough to matter when the cap is hard and
+  // the failure mode is a discarded piece.
+  const SAFETY_MARGIN = 24;
   const linkReserveChars = reserveForLink
-    ? destination.url!.length + 2 + 130
+    ? destination.url!.length
+      + 2
+      + utmExpansionCost(destination.url!, input.channel, input.campaign_id ?? undefined)
+      + SAFETY_MARGIN
     : 0;
   const provider = await resolveProvider("generate", input.workspace_id, "kuze.generateContent");
 
@@ -177,6 +190,7 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
       reserveForLink,
       linkReserveChars,
       operatorInstructions: settings.generator_instructions,
+      factSheet,
     }),
     max_tokens: 1400,
   };
@@ -234,9 +248,54 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
   };
   const limit = LENGTH_LIMITS[format];
   if (limit != null) {
-    const body = typeof parsed.body === "string" ? parsed.body : "";
-    if (body.length > limit) {
-      throw new Error(`Kuze ${format} exceeds ${limit} chars${reserveForLink ? " after destination link" : ""} (${body.length})`);
+    // Measure the length the piece will actually publish at, not the pre-tag
+    // draft. UTM tagging happens later (it needs the piece id), so a body that
+    // fits here can still overflow the platform cap once tagged.
+    const utmCost = reserveForLink
+      ? utmExpansionCost(destination.url!, input.channel, input.campaign_id ?? undefined)
+      : 0;
+    const projected = (body: unknown) => (typeof body === "string" ? body.length : 0) + utmCost;
+
+    if (projected(parsed.body) > limit) {
+      // On these three formats the budget left for prose is genuinely small —
+      // a campaign-scoped UTM tail is ~130 characters of a 280-character tweet —
+      // and the model routinely overshoots an abstract "max N chars" instruction
+      // by 30-40 characters. Telling it the concrete overage works where the
+      // up-front budget did not, so retry with that rather than discarding
+      // otherwise-good copy. Same one-shot regenerate-with-feedback shape as the
+      // JSON repair above; still fails loudly if the second attempt also misses.
+      const over = projected(parsed.body) - limit;
+      // Prose budget = platform cap minus everything appended deterministically
+      // after the model writes: the separator, the destination URL, and the UTM
+      // tail. The model never sees any of it, so it has to be stated as a number.
+      const appendedChars = reserveForLink ? destination.url!.length + 2 + utmCost : 0;
+      const allowance = Math.max(40, limit - appendedChars);
+      console.warn(`[kuze] ${input.channel}/${format} over budget by ${over} chars, retrying once.`);
+      const retryText = (await provider.generateCompletion(
+        `${userPrompt}\n\nYour previous ${format} was ${over} characters too long once the ` +
+        `tracking link is added. A link and its tracking parameters consume ${appendedChars} ` +
+        `characters that count against the ${limit}-character platform limit, and they are ` +
+        `appended after you respond so you cannot see them in your own draft. Rewrite the ` +
+        `"body" field so it is at most ${allowance} characters — count them — keeping the same ` +
+        `angle and voice. Do not write a URL yourself.`,
+        genOptions,
+      )).trim();
+      try {
+        // Re-append the destination: the retry is a fresh generation, so it has
+        // not been through appendDestination the way the first draft has.
+        const retried = appendDestination(extractJsonObject(retryText, "Kuze"), destination);
+        if (projected(retried.body) <= limit) parsed = retried;
+      } catch (retryErr) {
+        if (!(retryErr instanceof LlmJsonError)) throw retryErr;
+        // Fall through to the throw below with the original overlong draft.
+      }
+    }
+
+    if (projected(parsed.body) > limit) {
+      throw new Error(
+        `Kuze ${format} exceeds ${limit} chars${reserveForLink ? " after destination link and UTM tagging" : ""} ` +
+        `(${projected(parsed.body)}) after one shortening retry`,
+      );
     }
   }
 

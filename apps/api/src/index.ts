@@ -126,4 +126,13 @@ const port = Number(process.env.PORT ?? 8787);
 console.log(`vantage-api listening on ${port}`);
 serve({ fetch: app.fetch, port });
 
-startCadenceEngine();
+// The cadence engine publishes to live social accounts. Starting the API to
+// exercise a route (campaign launch, a manual generate) therefore also starts
+// autopilot, and on 2026-08-16 that published a stale piece to X mid-debugging.
+// Set DISABLE_CADENCE=1 to run the HTTP API with no ticking publisher,
+// auto-generation, or ingest — the safe mode for local work against prod data.
+if (process.env.DISABLE_CADENCE === "1") {
+  console.warn("[cadence] DISABLED via DISABLE_CADENCE=1 — no publishing, generation, or ingest");
+} else {
+  startCadenceEngine();
+}

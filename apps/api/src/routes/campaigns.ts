@@ -26,6 +26,7 @@ import { getPreferredLLMProvider } from '../lib/llm-providers/index.js';
 import { generateContent } from '../services/kuze.js';
 import { auditContent } from '../services/ilita.js';
 import { renderForAudit } from '../lib/audit-content.js';
+import { inferVertical } from '../lib/vertical-infer.js';
 import type { ChannelSlug } from '@vantage/prompts';
 import {
   buildDemoForgePayload,
@@ -976,14 +977,16 @@ campaignRoutes.post('/:id/launch', async (c) => {
   // generator (kuze) only ever sees topic_text + brand_voice, so campaign-level intent
   // never reaches pack-seeded or hand-written days. Prepend it as framing — labelled so
   // the model writes *within* the goal rather than *about* it.
-  const campaignBrief = [
+  // The fact sheet is no longer inlined here. It now reaches the model through
+  // kuzeSystemPrompt's dedicated block (resolved by lib/fact-sheet.ts from this
+  // campaign_id), where it is stated as ground truth that outranks the brand
+  // voice — rather than sitting mid-stack in the user prompt competing with the
+  // performance-weight and virality sections. Ilita receives it there too, which
+  // it never did from this string. Only campaign-level intent belongs here.
+  const campaignBrief =
     typeof campaign.description === 'string' && campaign.description.trim()
       ? `Campaign context (write within this goal, do not write about it): ${campaign.description.trim()}`
-      : '',
-    launchFactGate.factSheet
-      ? `Approved campaign facts (use only these claims and terms; never make a prohibited claim):\nProduct: ${launchFactGate.factSheet.product_name}\nApproved claims: ${launchFactGate.factSheet.approved_claims.join(' | ')}\nApproved terms: ${launchFactGate.factSheet.approved_terms.join(', ')}\nProhibited claims: ${launchFactGate.factSheet.prohibited_claims.join(' | ')}\nPrimary CTA: ${launchFactGate.factSheet.primary_cta}`
-      : '',
-  ].filter(Boolean).join('\n\n');
+      : '';
 
   // Send times come from each channel's configured posting_hours — the same config the
   // autopilot cadence uses. Launch previously hardcoded 09:00 UTC for every piece, which
@@ -1044,9 +1047,12 @@ campaignRoutes.post('/:id/launch', async (c) => {
       ideaBrandId: idea.brand_id,
       campaignDefaultBrandId: campaignDefaultBrand,
     });
-    const topicText = [campaignBrief, `${idea.title}\n\n${idea.outline ?? ''}`.trim()]
-      .filter(Boolean)
-      .join('\n\n');
+    const ideaText = `${idea.title}\n\n${idea.outline ?? ''}`.trim();
+    const topicText = [campaignBrief, ideaText].filter(Boolean).join('\n\n');
+    // Inferred from the idea alone, never the campaign brief — the brief names
+    // every pack the product supports, so including it would match the first
+    // pattern in the table on every single day of the campaign.
+    const dayVertical = inferVertical(ideaText);
     const published = Array.isArray(day.published_pieces) ? [...day.published_pieces] : [];
     // A browser, proxy, or deploy may interrupt a multi-day launch after some
     // days have committed. The timeline is the durable launch ledger, so never
@@ -1080,7 +1086,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
             workspace_id: workspaceId,
             source_product: 'campaign',
             source_ref: campaignId,
-            vertical: null,
+            vertical: dayVertical,
             topic_text: topicText,
             context_payload: {
               campaign_id: campaignId,
@@ -1100,7 +1106,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
           workspace_id: workspaceId,
           channel,
           topic_text: topicText,
-          vertical: null,
+          vertical: dayVertical,
           brand_voice: brandVoiceStr,
           campaign_id: campaignId,
         });
@@ -1118,6 +1124,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
             format: gen.format,
             brand_voice: brandVoiceStr,
             workspace_id: workspaceId,
+            campaign_id: campaignId,
           });
           auditNotes = `[${audit.verdict}] ${audit.feedback}`.slice(0, 1000);
           auditPassed = audit.verdict === 'pass';
@@ -1134,7 +1141,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
               workspace_id: workspaceId,
               channel,
               topic_text: `${topicText}\n\nIlita feedback (must address): ${audit.feedback}`,
-              vertical: null,
+              vertical: dayVertical,
               brand_voice: brandVoiceStr,
               campaign_id: campaignId,
             });
@@ -1143,6 +1150,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
               format: regen.format,
               brand_voice: brandVoiceStr,
               workspace_id: workspaceId,
+              campaign_id: campaignId,
             });
             // Keep the retry either way: even on a second failure it is the
             // attempt that addressed the feedback, so it is the better draft for
@@ -1267,7 +1275,14 @@ campaignRoutes.post('/:id/launch', async (c) => {
         // UTM expansion can push a post over a platform limit. Validate the exact
         // stored payload and immediately hold it rather than letting the queue see it.
         const taggedValidation = validateFinalPayload(channel, payload);
+        // `effectiveStatus`, not `pieceStatus`, is what this slot actually ended
+        // up as. The ledger below used to record the pre-tag status, so a piece
+        // held here read as "queued" in the timeline while sitting at "rejected"
+        // in content_pieces — and `retry_rejected` therefore skipped exactly the
+        // slots that most needed regenerating.
+        let effectiveStatus = pieceStatus;
         if (!taggedValidation.valid) {
+          effectiveStatus = 'rejected';
           await sb.from('content_pieces').update({
             status: 'rejected',
             scheduled_for: null,
@@ -1341,7 +1356,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
         published.push({
           content_piece_id: piece.id,
           channel,
-          status: pieceStatus,
+          status: effectiveStatus,
           media_status: mediaStatus,
           demoforge_job_id: demoforgeJobId,
         });
@@ -1350,7 +1365,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
           channel,
           day_number: day.day_number,
           media_status: mediaStatus,
-          status: pieceStatus,
+          status: effectiveStatus,
           demoforge_job_id: demoforgeJobId,
         });
       } catch (e) {

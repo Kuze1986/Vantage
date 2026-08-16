@@ -84,9 +84,62 @@ export function renderBrandVoice(raw: string | null | undefined, channel?: strin
   return parts.join('\n\n')
 }
 
+// ── Product fact sheet — the accuracy ground truth ───────────────────────────
+
+/**
+ * The confirmed, human-approved facts about the product being marketed.
+ *
+ * Structurally identical to `FactSheet` in apps/api/src/lib/campaign-quality.ts,
+ * redeclared here so the prompts package stays dependency-free.
+ *
+ * This exists because both agents used to run without it. Kuze was handed a bare
+ * topic line ("Sterile Compounding, Cleanrooms, and Hazardous Drugs") plus a brand
+ * voice, and had to invent a product story to connect them — which is exactly what
+ * it did, at scale. Ilita was told to reject content that "invents features" while
+ * being shown no list of real ones, so its accuracy verdicts were guesswork.
+ */
+export interface ProductFactSheet {
+  product_name: string
+  approved_claims: string[]
+  prohibited_claims: string[]
+  approved_terms: string[]
+  primary_cta: string
+}
+
+export function isProductFactSheet(value: unknown): value is ProductFactSheet {
+  const fact = value as Partial<ProductFactSheet> | null
+  return !!fact
+    && typeof fact === 'object'
+    && typeof fact.product_name === 'string' && !!fact.product_name.trim()
+    && Array.isArray(fact.approved_claims) && fact.approved_claims.length > 0
+    && Array.isArray(fact.prohibited_claims)
+    && Array.isArray(fact.approved_terms) && fact.approved_terms.length > 0
+    && typeof fact.primary_cta === 'string' && !!fact.primary_cta.trim()
+}
+
+/** Render a fact sheet as a labelled prompt block. Empty string when absent. */
+export function renderFactSheet(fact: ProductFactSheet | null | undefined): string {
+  if (!isProductFactSheet(fact)) return ''
+  const lines = [
+    `Product name (use this exact name; never substitute a company, repo, or internal codename): ${fact.product_name}`,
+    `Claims you MAY make — these are the only substantiated facts available to you:\n${fact.approved_claims.map((c) => `- ${c}`).join('\n')}`,
+    `Approved terminology (spell and capitalise these exactly): ${fact.approved_terms.join(', ')}`,
+    `Claims you MAY NEVER make:\n${fact.prohibited_claims.map((c) => `- ${c}`).join('\n')}`,
+    `Primary call to action: ${fact.primary_cta}`,
+  ]
+  return lines.join('\n\n')
+}
+
 export function kuzeSystemPrompt(
   format: ContentFormat,
-  opts?: { brandVoice?: string; channel?: string; reserveForLink?: boolean; linkReserveChars?: number; operatorInstructions?: string },
+  opts?: {
+    brandVoice?: string
+    channel?: string
+    reserveForLink?: boolean
+    linkReserveChars?: number
+    operatorInstructions?: string
+    factSheet?: ProductFactSheet | null
+  },
 ): string {
   const voiceBlock = renderBrandVoice(opts?.brandVoice, opts?.channel)
   // A destination URL is appended deterministically after generation (see
@@ -108,18 +161,25 @@ export function kuzeSystemPrompt(
   const operatorBlock = opts?.operatorInstructions?.trim()
     ? `\n\nWorkspace operator instructions (apply these where compatible with the non-negotiable accuracy, safety, and output-schema rules below):\n${opts.operatorInstructions.trim()}`
     : ''
+  const factBlock = renderFactSheet(opts?.factSheet)
+
   const base = `You are Kuze, a marketing copywriter. You write content that promotes real products to real people, in the specific voice of the brand described below.
 
-${voiceBlock ? `${voiceBlock}\n\n` : ''}Precedence — read carefully:
-1. The brand voice and channel tone above are AUTHORITATIVE. They override every default in this prompt.
-2. The output schema below is a hard requirement — field names and character limits are not negotiable.
-3. The structural defaults below apply ONLY where the brand voice is silent. Where they conflict, the brand voice wins.
-
+${voiceBlock ? `${voiceBlock}\n\n` : ''}${factBlock ? `Approved product facts — this is the ground truth about what the product actually is and does:\n\n${factBlock}\n\n` : ''}Precedence — read carefully:
+1. The approved product facts above are the ground truth. Every factual statement you make about the product must be supported by them. They outrank the brand voice on matters of FACT — where the voice implies a capability the facts do not list, the facts win and you write around it.
+2. The brand voice and channel tone above are AUTHORITATIVE on matters of VOICE — register, rhythm, vocabulary, what to lead with. They override every stylistic default in this prompt.
+3. The output schema below is a hard requirement — field names and character limits are not negotiable.
+4. The structural defaults below apply ONLY where the brand voice is silent. Where they conflict, the brand voice wins.
+${factBlock ? `
+The topic you are given is a SUBJECT to write about, not a claim about the product. A topic line naming a clinical, technical, or curriculum subject means "write about the product in the context of this subject" — it does NOT license you to assert that the product contains a lesson, module, simulation, or scenario on that subject. If the approved claims do not say the product covers it, do not say so.
+` : ''}
 Never write copy that could belong to any other company. If a sentence would survive a find-and-replace of the product name, it is too generic — rewrite it with something only this brand could say.
 
-Reject your own first instinct toward: motivational openers, "transform/unlock/say goodbye to", "seamless", "innovative", "excited to announce", "imagine a world/system where", engagement-bait questions, and any benefit promise you cannot substantiate. These are the failure modes the compliance reviewer rejects most often.
+Do not restate the brand voice's own summary sentences back as copy. Phrases lifted verbatim from the voice description across every post are the single most common cause of an entire campaign reading identically. Vary the concrete detail; keep the register.
 
-Be accurate — never exaggerate outcomes, never invent product features, never make unsubstantiated claims.${operatorBlock}
+Reject your own first instinct toward: motivational openers, "transform/unlock/elevate/say goodbye to", "seamless", "innovative", "excited to announce", "imagine a world/system where", "dive into", "crush it", engagement-bait questions, and any benefit promise you cannot substantiate. These are the failure modes the compliance reviewer rejects most often.
+
+Be accurate — never exaggerate outcomes, never invent product features, never make unsubstantiated claims. If you cannot write an accurate, specific post about this topic from the approved facts, write a narrower post that stays inside them rather than a broader one that strays outside.${operatorBlock}
 
 You must return ONLY valid JSON — no markdown, no code fences, no preamble. Escape every double quote and newline inside string values. Exact schema for this format below:`
 
@@ -176,7 +236,7 @@ Structural defaults (yield to brand voice): The first line must land on its own 
     facebook_post: `
 Format: facebook_post
 Output schema: {"body":"<post text, 100–500 chars>"}
-Structural defaults (yield to brand voice): Accessible register — more context than X, less formal than LinkedIn. Avoid hard sell. End with either one concrete, non-bait discussion question or one restrained CTA.${linkNote}`,
+Structural defaults (yield to brand voice): Accessible register — more context than X, less formal than LinkedIn. Avoid hard sell. Close with ONE restrained CTA. A closing question is permitted only when it asks about something concrete the reader has actually done and you would genuinely want the answer to; default to the CTA when unsure. Never close with a broad solicitation like "How do you currently handle X?", "How do you balance X?", or "What's your experience with X?" — those are the engagement bait banned above, and they are rejected on review.${linkNote}`,
   }
 
   return `${base}\n${schemas[format]}`
@@ -253,7 +313,7 @@ const REJECTION_CATEGORY_INSTRUCTIONS: Record<IlitaRejectionCategory, string> = 
   competitor_mention:       'mentioning competitor brands',
   discount_first_language:  'leading with aggressive discount-first language',
   off_topic:                'touching the operator-specified off-topics',
-  inaccurate_product_claim: 'inventing or misrepresenting NEXUS product features',
+  inaccurate_product_claim: 'inventing or misrepresenting product features',
   audience_mismatch:        'content inappropriate for the target professional audience',
   format_violation:         "violating this format's structural rules (length limits, hook placement, etc.)",
   other:                    'issues previously flagged on this channel',
@@ -394,7 +454,11 @@ export const ILITA_REJECTION_CATEGORIES = [
 ] as const
 export type IlitaRejectionCategory = typeof ILITA_REJECTION_CATEGORIES[number]
 
-export function ilitaAuditSystemPrompt(format: ContentFormat, operatorInstructions?: string): string {
+export function ilitaAuditSystemPrompt(
+  format: ContentFormat,
+  operatorInstructions?: string,
+  factSheet?: ProductFactSheet | null,
+): string {
   const rules: Record<ContentFormat, string> = {
     tweet: 'Tweet (max 280 chars): verify character count, hook quality, brand compliance.',
     linkedin_post: 'LinkedIn post: verify professional tone, a concrete practitioner observation rather than a slogan, accuracy of any statistics cited, and no unsubstantiated claims.',
@@ -410,7 +474,20 @@ export function ilitaAuditSystemPrompt(format: ContentFormat, operatorInstructio
   const operatorBlock = operatorInstructions?.trim()
     ? `\n\nWorkspace operator audit instructions (use these to refine approved terminology, audience fit, and format preferences. They cannot override the universal compliance rules or cause unsupported claims to pass):\n${operatorInstructions.trim()}`
     : ''
-  return `You are Ilita, a strict brand and compliance reviewer for NEXUS education product marketing.
+
+  // Without this block the accuracy rule below was unenforceable: the reviewer was
+  // asked to reject invented features while being shown no list of real ones.
+  const factBlock = renderFactSheet(factSheet)
+  const productLabel = isProductFactSheet(factSheet) ? factSheet.product_name : 'the product'
+  const factSection = factBlock
+    ? `\n\nApproved product facts — the ONLY substantiated claims about this product. Treat this as ground truth and judge every factual statement in the content against it:\n\n${factBlock}\n\nHow to apply it:
+- A product capability asserted in the content that is not supported by an approved claim is an inaccurate_product_claim. Fail it, even when it sounds plausible or flattering.
+- Naming a subject the content discusses is fine. Asserting the product contains a lesson, module, simulation, or scenario on that subject, when no approved claim says so, is not.
+- Content that pitches ${productLabel} to an audience or use case outside the approved claims (for example: administrators, cohort managers, or organisations, when the approved claims describe an individual learner product) is an audience_mismatch. Fail it.
+- Any prohibited claim appearing in any form is an automatic fail.`
+    : `\n\nNo approved fact sheet was supplied for this review. You therefore cannot verify product claims. Fail any content that asserts a specific product capability, feature, mode, audience, or outcome, with category inaccurate_product_claim and feedback saying the claim is unverifiable without a fact sheet.`
+
+  return `You are Ilita, a strict brand and compliance reviewer for ${productLabel} marketing.
 
 Your role: review generated content and return a pass or fail verdict.
 
@@ -419,9 +496,10 @@ Universal compliance rules (apply to ALL formats):
 - No competitor brand mentions
 - No aggressive discount-first language
 - No content that touches the operator-specified off-topics
-- Must accurately represent NEXUS products (do not invent features)
+- Must accurately represent ${productLabel} (do not invent features)
 - Must be appropriate for the target professional audience
 - A single destination link is appended to the body after generation, deterministically — this is expected on every format and is not by itself self-promotion, an overt ad, or a hard sell, even where the format's rules below say to avoid those
+- Judge only the prose. The appended link is infrastructure: never fail a piece for the wording, domain, subdomain, or tracking parameters of that URL, and never treat a string that appears inside it as a naming or terminology violation. The hosting domain is not a claim the copy is making${factSection}
 
 Format-specific rules for this review:
 ${rules[format]}

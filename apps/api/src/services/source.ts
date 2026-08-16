@@ -1,6 +1,7 @@
 import { getSupabaseAdmin, getSupabaseForSchema } from "../lib/supabase.js";
 import { logActivity } from "../lib/activity.js";
 import { loadSettings } from "../lib/settings.js";
+import { inferVertical } from "../lib/vertical-infer.js";
 
 type ShiftRow = Record<string, unknown>;
 
@@ -162,7 +163,10 @@ export async function refreshTopicsFromScripta(workspaceId: string): Promise<{ i
   for (const row of rows) {
     const sourceRef = rowId(row);
     const topicText = rowTopicText(row);
-    const vertical  = rowVertical(row);
+    // Scripta lesson rows carry no vertical column, so every ingested topic landed
+    // with vertical NULL and the generator was told "Vertical: general". Fall back
+    // to inferring the career pack from the lesson title.
+    const vertical  = rowVertical(row) ?? inferVertical(topicText);
 
     if (topicText.length < 15) continue;
     if (sourceRef && await isDuplicate(workspaceId, "scripta", sourceRef, dedup_days)) continue;
@@ -213,14 +217,23 @@ export async function listNextTopics(workspaceId: string, limit: number): Promis
 }[]> {
   const sb  = getSupabaseAdmin();
   const now = new Date().toISOString();
+  const { topic_source_allowlist: allowlist } = await loadSettings(workspaceId);
 
   // 3B-6: Include topics that are either unused (used_at IS NULL) OR
   // are marked for recycling and have passed their recycle_after window.
-  const { data, error } = await sb
+  let query = sb
     .from("topics")
     .select("id, topic_text, vertical, priority, source_ref, source_product, recycle_after")
     .eq("workspace_id", workspaceId)
-    .or(`used_at.is.null,recycle_after.lte.${now}`)
+    .or(`used_at.is.null,recycle_after.lte.${now}`);
+
+  // Restrict which products' topics may become marketing copy. Ingestion and
+  // generation are deliberately separate concerns — a workspace can keep pulling
+  // Scripta and Pulse signal for research while only ever generating from its own
+  // product's topics. See PipelineSettings.topic_source_allowlist.
+  if (allowlist.length) query = query.in("source_product", allowlist);
+
+  const { data, error } = await query
     .order("priority", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(limit);

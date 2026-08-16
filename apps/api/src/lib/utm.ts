@@ -7,6 +7,35 @@ export const DEFAULT_UTM_CAMPAIGN = "vantage";
  * `campaign` sets utm_campaign — pass the campaign id for campaign-launched pieces so
  * analytics can separate them. Omit it for ad-hoc pieces, which fall back to "vantage".
  */
+/** UUID-shaped stand-in for the not-yet-created piece id, so the probe below measures a real-length tag. */
+const PIECE_ID_PLACEHOLDER = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * How many characters `tagUrls` will add to `url` on this channel/campaign.
+ *
+ * Generation happens before the content piece exists, so its id — and therefore
+ * the exact length of the UTM suffix — is unknown at the time Kuze has to be
+ * told its character budget. That budget used to carry a flat 130-character
+ * allowance, which was simply too small: a campaign-scoped tag is
+ * `?utm_source=<channel>&utm_medium=social&utm_campaign=<uuid>&utm_content=<uuid>`,
+ * about 131 characters before the channel slug, and longer on `instagram` or
+ * `bluesky` than on `x`. The shortfall landed on exactly the three formats with
+ * hard platform caps: a launched day put X at 299/280, Bluesky at 350/300 and
+ * Threads at 505/500, all rejected after tagging with otherwise-good copy.
+ *
+ * Measured by running the real `tagUrls` rather than re-deriving the format, so
+ * this cannot drift from it — and it accounts for URL normalization (a bare
+ * origin gains a `/`) that a hand-computed length would miss.
+ */
+export function utmExpansionCost(
+  url: string,
+  channel: string,
+  campaign: string = DEFAULT_UTM_CAMPAIGN,
+): number {
+  const tagged = tagUrls(url, channel, PIECE_ID_PLACEHOLDER, campaign);
+  return Math.max(0, tagged.length - url.length);
+}
+
 export function tagUrls(
   content: string,
   channel: string,

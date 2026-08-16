@@ -7,6 +7,15 @@ import { getSupabaseAdmin } from "./supabase.js";
 export interface PipelineSettings {
   dedup_days:            number;    // topic deduplication window in days (default 30)
   scripta_enabled:       boolean;   // include Scripta as a topic source
+  /**
+   * Run the Pulse reactor (Hacker News / Reddit / NewsAPI intake).
+   *
+   * Scripta and BioLoop have had kill switches since the beginning; Pulse never
+   * did, so it ran unconditionally on a 30-minute tick with no way to stop it
+   * short of editing the scheduler. It had accumulated 7,573 topics, of which
+   * 24 matched any Shift career pack and 7,430 had never been used.
+   */
+  pulse_enabled:         boolean;
   bioloop_enabled:       boolean;   // run BioLoop weight updates
   active_verticals:      string[];  // empty = all verticals; non-empty = filter to these
   // 3B-6: evergreen recycling
@@ -33,11 +42,24 @@ export interface PipelineSettings {
   // than on email_templates because settings.value is JSONB and needs no
   // migration — see lib/email-wrapper.ts for why the serializer can't be shared.
   email_wrapper_html:    string;
+  /**
+   * Which `topics.source_product` values the autopilot may draw from.
+   * Empty = no restriction (the historical behaviour).
+   *
+   * Added after the 2026-08-15 launch, where the autopilot pulled Scripta LMS
+   * lesson titles ("Catheter Care and Bowel/Bladder Assistance") and Hacker News
+   * headlines out of the shared topic pool and wrote them as product marketing
+   * for a different product, carrying that product's destination link. Ingestion
+   * of those sources is legitimate; feeding them to a product-ad generator
+   * unfiltered is not.
+   */
+  topic_source_allowlist: string[];
 }
 
 const DEFAULTS: PipelineSettings = {
   dedup_days:            30,
   scripta_enabled:       true,
+  pulse_enabled:         true,
   bioloop_enabled:       true,
   active_verticals:      [],
   evergreen_threshold:   3,
@@ -50,6 +72,7 @@ const DEFAULTS: PipelineSettings = {
   generator_instructions: "",
   auditor_instructions:   "",
   email_wrapper_html:    "",
+  topic_source_allowlist: [],
 };
 
 export async function loadSettings(workspaceId: string): Promise<PipelineSettings> {
@@ -64,6 +87,7 @@ export async function loadSettings(workspaceId: string): Promise<PipelineSetting
     return {
       dedup_days:             typeof map.dedup_days             === "number"  ? map.dedup_days             : DEFAULTS.dedup_days,
       scripta_enabled:        typeof map.scripta_enabled         === "boolean" ? map.scripta_enabled         : DEFAULTS.scripta_enabled,
+      pulse_enabled:          typeof map.pulse_enabled           === "boolean" ? map.pulse_enabled           : DEFAULTS.pulse_enabled,
       bioloop_enabled:        typeof map.bioloop_enabled         === "boolean" ? map.bioloop_enabled         : DEFAULTS.bioloop_enabled,
       active_verticals:       Array.isArray(map.active_verticals)              ? map.active_verticals as string[] : DEFAULTS.active_verticals,
       evergreen_threshold:    typeof map.evergreen_threshold    === "number"  ? map.evergreen_threshold    : DEFAULTS.evergreen_threshold,
@@ -76,6 +100,9 @@ export async function loadSettings(workspaceId: string): Promise<PipelineSetting
       generator_instructions: typeof map.generator_instructions === "string"  ? map.generator_instructions : DEFAULTS.generator_instructions,
       auditor_instructions:   typeof map.auditor_instructions   === "string"  ? map.auditor_instructions   : DEFAULTS.auditor_instructions,
       email_wrapper_html:     typeof map.email_wrapper_html     === "string"  ? map.email_wrapper_html     : DEFAULTS.email_wrapper_html,
+      topic_source_allowlist: Array.isArray(map.topic_source_allowlist)
+        ? (map.topic_source_allowlist as unknown[]).filter((s): s is string => typeof s === "string" && !!s.trim())
+        : DEFAULTS.topic_source_allowlist,
     };
   } catch {
     return { ...DEFAULTS };
