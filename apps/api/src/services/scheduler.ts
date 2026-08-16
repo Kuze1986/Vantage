@@ -61,6 +61,12 @@ const INSIGHTS_GENERATE_TICK_MS = 24 * 60 * 60_000; // Insights generation every
 // qualifying segment and depends on segment_members having had time to populate first.
 const SEGMENT_PREFS_LEARN_TICK_MS = 12 * 60 * 60_000; // Segment preference learning every 12 hours
 
+// A generated piece must reserve a cadence slot as soon as it enters the
+// pipeline. Counting only published pieces causes every five-minute tick to
+// regenerate the same daily quota while the earlier pieces await audit or
+// publication.
+const AUTO_GEN_RESERVED_STATUSES = ["auditing", "approved", "queued", "publishing"];
+
 type ChannelRow = {
   slug: string;
   enabled: boolean;
@@ -482,17 +488,29 @@ export async function autoGenerateTickForWorkspace(workspaceId: string): Promise
     const postsPerDay = ch.cadence_config.posts_per_day ?? 0;
     if (postsPerDay <= 0) continue;
 
-    // Count how many pieces were published today for this channel
-    const { count } = await sb
-      .from("content_pieces")
-      .select("*", { count: "exact", head: true })
-      .eq("workspace_id", workspaceId)
-      .eq("channel_slug", ch.slug)
-      .eq("status", "published")
-      .gte("published_at", todayStart);
+    // Published pieces consume today's quota. Pieces already being audited,
+    // approved, queued, or claimed for publishing reserve a slot too — without
+    // this second count every tick keeps generating the full deficit until a
+    // post succeeds, quickly exhausting LLM credits.
+    const [publishedRes, reservedRes] = await Promise.all([
+      sb
+        .from("content_pieces")
+        .select("*", { count: "exact", head: true })
+        .eq("workspace_id", workspaceId)
+        .eq("channel_slug", ch.slug)
+        .eq("status", "published")
+        .gte("published_at", todayStart),
+      sb
+        .from("content_pieces")
+        .select("*", { count: "exact", head: true })
+        .eq("workspace_id", workspaceId)
+        .eq("channel_slug", ch.slug)
+        .in("status", AUTO_GEN_RESERVED_STATUSES),
+    ]);
 
-    const publishedToday = count ?? 0;
-    const deficit        = postsPerDay - publishedToday;
+    const publishedToday = publishedRes.count ?? 0;
+    const reservedSlots  = reservedRes.count ?? 0;
+    const deficit        = postsPerDay - publishedToday - reservedSlots;
     if (deficit <= 0) continue;
 
     // Load brand voice

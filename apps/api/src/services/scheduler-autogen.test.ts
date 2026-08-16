@@ -6,6 +6,8 @@ const h = vi.hoisted(() => ({
   auditContent: vi.fn(),
   generateContent: vi.fn(async () => ({ format: "tweet", content_payload: { body: "x" }, text_preview: "x" })),
   pickNextTopic: vi.fn(async () => ({ id: "t1", topic_text: "hi", vertical: null })),
+  publishedCount: 0,
+  reservedCount: 0,
 }));
 
 vi.mock("../lib/supabase.js", () => {
@@ -16,12 +18,13 @@ vi.mock("../lib/supabase.js", () => {
         select(_s: unknown, opts?: { head?: boolean }) { st.op = opts?.head ? "count" : "select"; return chain; },
         insert() { st.op = "insert"; return chain; },
         update(p: Record<string, unknown>) { st.op = "update"; if (table === "content_pieces") h.cpUpdates.push(p); return chain; },
-        eq() { return chain; }, gte() { return chain; }, limit() { return chain; },
+        eq() { return chain; }, gte() { return chain; }, in() { st.op = "reserved-count"; return chain; }, limit() { return chain; },
         single() { return Promise.resolve({ data: { id: "p1" }, error: null }); }, // content_pieces insert
         then(resolve: (r: unknown) => void) {
           if (table === "channels") return resolve({ data: [{ slug: "x", enabled: true, cadence_config: { auto_approve: true, posts_per_day: 1, posting_hours: [9] } }], error: null });
           if (table === "brand_voice") return resolve({ data: [{ name: "N", description: "d", per_channel_tone: {}, off_topics: [] }], error: null });
-          if (table === "content_pieces" && st.op === "count") return resolve({ count: 0, error: null });
+          if (table === "content_pieces" && st.op === "count") return resolve({ count: h.publishedCount, error: null });
+          if (table === "content_pieces" && st.op === "reserved-count") return resolve({ count: h.reservedCount, error: null });
           return resolve({ error: null });
         },
       };
@@ -47,6 +50,8 @@ beforeEach(() => {
   h.cpUpdates.length = 0;
   h.auditContent.mockReset();
   h.generateContent.mockClear();
+  h.publishedCount = 0;
+  h.reservedCount = 0;
 });
 
 describe("auto-generate audit gating", () => {
@@ -71,5 +76,12 @@ describe("auto-generate audit gating", () => {
       .mockResolvedValueOnce({ verdict: "fail", feedback: "still off-brand" });
     await autoGenerateTickForWorkspace("ws-1");
     expect(statusUpdate()?.status).toBe("rejected");
+  });
+
+  it("does not generate another piece when a queued piece already reserves the daily slot", async () => {
+    h.reservedCount = 1;
+    await autoGenerateTickForWorkspace("ws-1");
+    expect(h.generateContent).not.toHaveBeenCalled();
+    expect(h.cpUpdates).toHaveLength(0);
   });
 });
