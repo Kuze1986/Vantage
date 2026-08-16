@@ -40,7 +40,7 @@ import { loadProductProfile } from '../lib/product-profile.js';
 import { launchStatusForMedia } from '../lib/auto-queue.js';
 import { listShiftPacks, getShiftPack } from '../lib/shift-packs.js';
 import { syncCampaignKpis } from '../lib/campaign-kpi.js';
-import { tagUrls } from '../lib/utm.js';
+import { tagPayloadUrls } from '../lib/utm.js';
 import { pickPostingHour, scheduledAtOnDate, type PostingHoursConfig } from '../lib/posting-hours.js';
 import { timelineDayCount, MAX_TIMELINE_DAYS } from '../lib/campaigns.js';
 import { campaignVolume, similarityScore, validateFactSheet, validateFinalPayload } from '../lib/campaign-quality.js';
@@ -1254,17 +1254,11 @@ campaignRoutes.post('/:id/launch', async (c) => {
         // UTM tags need the piece id, which only exists after the insert — so tag and
         // write back. Without this, campaign links publish untagged and every /try visit
         // is unattributable. utm_campaign carries the campaign id so analytics can split
-        // campaigns apart. tagUrls only rewrites http(s) matches, so non-URL payload
-        // fields (brand_id, visual_type, …) pass through untouched.
-        let tagged = false;
-        for (const [k, v] of Object.entries(payload)) {
-          if (typeof v !== 'string') continue;
-          const next = tagUrls(v, channel, piece.id, campaignId);
-          if (next !== v) {
-            payload[k] = next;
-            tagged = true;
-          }
-        }
+        // campaigns apart. tagPayloadUrls skips media keys (image_url, video_url, …)
+        // so asset URLs are never decorated with click attribution.
+        const retagged = tagPayloadUrls(payload, channel, piece.id, campaignId);
+        Object.assign(payload, retagged.payload);
+        const tagged = retagged.changed;
         if (tagged) {
           await sb
             .from('content_pieces')

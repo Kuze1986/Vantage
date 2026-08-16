@@ -36,6 +36,14 @@ export function validateFinalPayload(channel: string, payload: Record<string, un
   if (channel === 'instagram') {
     if (!Array.isArray(payload.hashtags) || payload.hashtags.length < 3) errors.push('Instagram requires at least three hashtags.');
     if (!String(payload.alt_text ?? '').trim()) errors.push('Instagram requires alt text.');
+    // Instagram's content-publishing API takes JPEG for a feed image. A GIF is
+    // accepted at container-create time and then fails at media_publish with
+    // "Media ID is not available", which reads as a transient platform fault
+    // rather than a wrong-format one. Catch it while the piece is being built.
+    const image = String(payload.image_url ?? '');
+    if (/\.gif(\?|$)/i.test(image)) {
+      errors.push('Instagram cannot publish a GIF — attach a JPEG still instead.');
+    }
   }
   if (channel === 'tiktok' && body.length < 40) errors.push('TikTok requires a substantive script.');
   return { valid: errors.length === 0, errors, character_count: body.length, payload_hash: createHash('sha256').update(JSON.stringify(payload)).digest('hex') };

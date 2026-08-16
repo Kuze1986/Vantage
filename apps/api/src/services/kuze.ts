@@ -1,7 +1,7 @@
 import { kuzeSystemPrompt, kuzeUserPrompt, channelFormatMap } from "@vantage/prompts";
 import type { ChannelSlug, ContentFormat, ViralityPatternExtra } from "@vantage/prompts";
 import { getSupabaseAdmin } from "../lib/supabase.js";
-import { tagUrls, utmExpansionCost } from "../lib/utm.js";
+import { tagPayloadUrls, utmExpansionCost } from "../lib/utm.js";
 import { resolveDestination, appendDestination } from "../lib/destination.js";
 import { loadSettings } from "../lib/settings.js";
 import { resolveProvider } from "../lib/llm.js";
@@ -301,9 +301,7 @@ export async function generateContent(input: GenerateContentInput): Promise<Gene
 
   // UTM-tag any URL-like strings in the payload
   if (input.pieceId) {
-    for (const [k, v] of Object.entries(parsed)) {
-      if (typeof v === "string") parsed[k] = tagUrls(v, input.channel, input.pieceId);
-    }
+    parsed = tagPayloadUrls(parsed, input.channel, input.pieceId, input.campaign_id ?? undefined).payload;
   }
 
   const preview = String(parsed.body ?? parsed.text ?? parsed.hook ?? parsed.title ?? "").slice(0, 200);

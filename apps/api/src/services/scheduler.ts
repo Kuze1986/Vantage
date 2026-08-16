@@ -559,10 +559,8 @@ export async function autoGenerateTickForWorkspace(workspaceId: string): Promise
         // Update UTM tags now that we have the piece ID
         const { format, content_payload } = gen;
         const taggedPayload = { ...content_payload };
-        const { tagUrls } = await import("../lib/utm.js");
-        for (const [k, v] of Object.entries(taggedPayload)) {
-          if (typeof v === "string") taggedPayload[k] = tagUrls(v, ch.slug, inserted.id);
-        }
+        const { tagPayloadUrls } = await import("../lib/utm.js");
+        Object.assign(taggedPayload, tagPayloadUrls(taggedPayload, ch.slug, inserted.id).payload);
         await sb.from("content_pieces").update({ content_payload: taggedPayload })
           .eq("workspace_id", workspaceId).eq("id", inserted.id);
 

@@ -37,7 +37,13 @@ vi.mock("../lib/supabase.js", () => {
 vi.mock("./ilita.js", () => ({ auditContent: h.auditContent }));
 vi.mock("./kuze.js", () => ({ generateContent: h.generateContent }));
 vi.mock("./source.js", () => ({ pickNextTopic: h.pickNextTopic }));
-vi.mock("../lib/utm.js", () => ({ tagUrls: (v: string) => v }));
+vi.mock("../lib/utm.js", () => ({
+  tagUrls: (v: string) => v,
+  // Must mirror the real module's surface: the autogen path imports this
+  // dynamically inside a try/catch, so a missing export throws and is silently
+  // swallowed, leaving the piece's status update to never run.
+  tagPayloadUrls: (payload: Record<string, unknown>) => ({ payload, changed: false }),
+}));
 vi.mock("../lib/activity.js", () => ({ logActivity: vi.fn(async () => {}) }));
 
 import { autoGenerateTickForWorkspace } from "./scheduler.js";
