@@ -9,6 +9,7 @@
 
 import React from 'react'
 import { vantageApi } from '../api/vantage'
+import { uploadSequentially, readFileAsDataUrl, progressLabel, failureSummary, type BatchProgress } from '../lib/batch-upload'
 import type { MediaGalleryItem } from '../api/vantage'
 import { Panel, Badge, MediaLightbox } from '../ds'
 import type { LightboxItem, BadgeVariant } from '../ds'
@@ -120,6 +121,7 @@ export default function MediaGalleryPage() {
   const [createError, setCreateError] = React.useState<string | null>(null)
   const [uploading, setUploading] = React.useState(false)
   const [uploadError, setUploadError] = React.useState<string | null>(null)
+  const [uploadProgress, setUploadProgress] = React.useState<BatchProgress | null>(null)
   const uploadInputRef = React.useRef<HTMLInputElement | null>(null)
   const [deletingId, setDeletingId] = React.useState<string | null>(null)
 
@@ -171,33 +173,35 @@ export default function MediaGalleryPage() {
     finally { setCreating(false) }
   }
 
-  const uploadMedia = async (file: File) => {
-    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
-      setUploadError('Choose an image or video file.')
-      return
-    }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setUploadError('Choose a file smaller than 24MB.')
-      return
-    }
-    setUploading(true); setUploadError(null)
+  const validateMedia = (file: File): string | null => {
+    if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) return 'not an image or video'
+    if (file.size > MAX_UPLOAD_BYTES) return 'larger than 24MB'
+    return null
+  }
+
+  const uploadMedia = async (files: File[]) => {
+    if (!files.length) return
+    setUploading(true); setUploadError(null); setUploadProgress(null)
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(String(reader.result))
-        reader.onerror = () => reject(new Error('Could not read the selected file.'))
-        reader.readAsDataURL(file)
-      })
-      await vantageApi.uploadMedia({
-        path: `uploads/${Date.now()}-${file.name.replace(/[^a-z0-9._-]/gi, '-')}`,
-        data_url: dataUrl,
-        title: file.name.replace(/\.[^.]+$/, ''),
-      })
-      setSource('upload'); setKind('')
-    } catch (error) {
-      setUploadError(error instanceof Error ? error.message : 'Upload failed.')
+      const { uploaded, failed } = await uploadSequentially(
+        files,
+        async (file) => {
+          const dataUrl = await readFileAsDataUrl(file)
+          // A bare Date.now() collides when several files land in the same
+          // millisecond, so a batch could overwrite its own earlier uploads.
+          return vantageApi.uploadMedia({
+            path: `uploads/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${file.name.replace(/[^a-z0-9._-]/gi, '-')}`,
+            data_url: dataUrl,
+            title: file.name.replace(/\.[^.]+$/, ''),
+          })
+        },
+        { validate: validateMedia, onProgress: setUploadProgress },
+      )
+      setUploadError(failureSummary(failed))
+      if (uploaded.length) { setSource('upload'); setKind('') }
     } finally {
       setUploading(false)
+      setUploadProgress(null)
       if (uploadInputRef.current) uploadInputRef.current.value = ''
     }
   }
@@ -269,8 +273,8 @@ export default function MediaGalleryPage() {
           <p className="vg-page-sub">Every image and video this workspace has produced</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input ref={uploadInputRef} type="file" accept="image/*,video/*" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadMedia(file) }} />
-          <button type="button" className="nx-btn nx-btn--secondary" onClick={() => uploadInputRef.current?.click()} disabled={uploading}>{uploading ? 'UPLOADING…' : 'UPLOAD MEDIA'}</button>
+          <input ref={uploadInputRef} type="file" accept="image/*,video/*" multiple hidden onChange={(event) => { const files = Array.from(event.target.files ?? []); if (files.length) void uploadMedia(files) }} />
+          <button type="button" className="nx-btn nx-btn--secondary" onClick={() => uploadInputRef.current?.click()} disabled={uploading}>{uploading ? progressLabel(uploadProgress) : 'UPLOAD MEDIA'}</button>
           <button type="button" className="nx-btn nx-btn--primary" onClick={() => setComposerOpen(true)}>CREATE GIF</button>
           <Badge label={`${total} asset${total === 1 ? '' : 's'}`} variant={total ? 'active' : 'soon'} />
         </div>

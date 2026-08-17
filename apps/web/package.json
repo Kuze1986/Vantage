@@ -10,7 +10,8 @@
     "start": "node ./scripts/listen.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "echo skip",
-    "demo": "npx tsx scripts/demo-walkthrough.ts"
+    "demo": "npx tsx scripts/demo-walkthrough.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
@@ -26,6 +27,7 @@
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.3",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^4.1.8"
   }
 }

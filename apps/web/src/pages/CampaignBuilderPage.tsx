@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, type CSSProperties } from 'react'
 import { vantageApi } from '../api/vantage'
 import { Panel, Button, Badge } from '../ds'
+import { uploadSequentially, readFileAsDataUrl, progressLabel, failureSummary, type BatchProgress } from '../lib/batch-upload'
 
 interface Campaign {
   id: string
@@ -159,6 +160,7 @@ export default function CampaignBuilderPage() {
   const [dayForAsset, setDayForAsset] = useState<Record<string, string>>({})
   const [uploadingCampaignAsset, setUploadingCampaignAsset] = useState(false)
   const [campaignAssetUploadError, setCampaignAssetUploadError] = useState<string | null>(null)
+  const [campaignAssetProgress, setCampaignAssetProgress] = useState<BatchProgress | null>(null)
   const [kpiMetrics, setKpiMetrics] = useState<KPIMetrics[]>([])
   const [formData, setFormData] = useState(createInitialFormData)
 
@@ -409,50 +411,60 @@ export default function CampaignBuilderPage() {
     }
   }
 
-  const uploadCampaignAsset = async (file: File) => {
-    if (!selectedCampaign) return
+  const validateCampaignAsset = (file: File): string | null => {
     if (!file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
-      setCampaignAssetUploadError('Choose an image, animated GIF, video, or audio file.')
-      return
+      return 'not an image, GIF, video, or audio file'
     }
-    if (file.size > MAX_CAMPAIGN_ASSET_UPLOAD_BYTES) {
-      setCampaignAssetUploadError('Choose a file smaller than 24MB.')
-      return
-    }
+    if (file.size > MAX_CAMPAIGN_ASSET_UPLOAD_BYTES) return 'larger than 24MB'
+    return null
+  }
+
+  /** Upload one file and attach it. Throws on failure so the batch runner can record it. */
+  const uploadOneCampaignAsset = async (file: File) => {
+    const campaignId = selectedCampaign!.id
+    const dataUrl = await readFileAsDataUrl(file)
+    const title = file.name.replace(/\.[^.]+$/, '').trim().slice(0, 180) || 'Campaign asset'
+    const upload = await vantageApi.uploadMedia({
+      // Date.now() alone collides when a batch uploads several files inside the
+      // same millisecond, which silently overwrote earlier files in the set.
+      path: `uploads/campaigns/${campaignId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${file.name.replace(/[^a-z0-9._-]/gi, '-')}`,
+      data_url: dataUrl,
+      title: title.slice(0, 160),
+    })
+    const assetType = file.type === 'image/gif' || /\.gif$/i.test(file.name)
+      ? 'gif'
+      : file.type.startsWith('video/')
+        ? 'video'
+        : file.type.startsWith('audio/')
+          ? 'music_project'
+          : 'visual'
+    const attached = await vantageApi.addCampaignAsset(campaignId, {
+      title,
+      asset_type: assetType,
+      source_url: upload.public_url,
+      metadata: { original_filename: file.name, size_bytes: file.size, uploaded_from: 'campaign_builder', audio_upload: file.type.startsWith('audio/') },
+    })
+    return attached.asset
+  }
+
+  const uploadCampaignAssets = async (files: File[]) => {
+    if (!selectedCampaign || !files.length) return
 
     setUploadingCampaignAsset(true)
     setCampaignAssetUploadError(null)
+    setCampaignAssetProgress(null)
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(String(reader.result))
-        reader.onerror = () => reject(new Error('Could not read the selected file.'))
-        reader.readAsDataURL(file)
+      const { failed } = await uploadSequentially(files, uploadOneCampaignAsset, {
+        validate: validateCampaignAsset,
+        onProgress: setCampaignAssetProgress,
+        // Stream each asset into the list as it lands rather than waiting for
+        // the whole batch, so a long upload shows progress in the panel itself.
+        onUploaded: (asset) => setCampaignAssets((current) => [asset, ...current]),
       })
-      const title = file.name.replace(/\.[^.]+$/, '').trim().slice(0, 180) || 'Campaign asset'
-      const upload = await vantageApi.uploadMedia({
-        path: `uploads/campaigns/${selectedCampaign.id}/${Date.now()}-${file.name.replace(/[^a-z0-9._-]/gi, '-')}`,
-        data_url: dataUrl,
-        title: title.slice(0, 160),
-      })
-      const assetType = file.type === 'image/gif' || /\.gif$/i.test(file.name)
-        ? 'gif'
-        : file.type.startsWith('video/')
-          ? 'video'
-          : file.type.startsWith('audio/')
-            ? 'music_project'
-            : 'visual'
-      const attached = await vantageApi.addCampaignAsset(selectedCampaign.id, {
-        title,
-        asset_type: assetType,
-        source_url: upload.public_url,
-        metadata: { original_filename: file.name, size_bytes: file.size, uploaded_from: 'campaign_builder', audio_upload: file.type.startsWith('audio/') },
-      })
-      setCampaignAssets((current) => [attached.asset, ...current])
-    } catch (error) {
-      setCampaignAssetUploadError(error instanceof Error ? error.message : 'Asset upload failed.')
+      setCampaignAssetUploadError(failureSummary(failed))
     } finally {
       setUploadingCampaignAsset(false)
+      setCampaignAssetProgress(null)
       if (campaignAssetInputRef.current) campaignAssetInputRef.current.value = ''
     }
   }
@@ -1390,18 +1402,24 @@ export default function CampaignBuilderPage() {
             ref={campaignAssetInputRef}
             type="file"
             accept="image/*,video/*,audio/*"
+            multiple
             hidden
             onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) void uploadCampaignAsset(file)
+              const files = Array.from(event.target.files ?? [])
+              if (files.length) void uploadCampaignAssets(files)
             }}
           />
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <button type="button" className="nx-btn nx-btn--secondary" onClick={() => campaignAssetInputRef.current?.click()} disabled={uploadingCampaignAsset}>
-              {uploadingCampaignAsset ? 'UPLOADING…' : 'UPLOAD ASSET'}
+              {uploadingCampaignAsset ? progressLabel(campaignAssetProgress) : 'UPLOAD ASSETS'}
             </button>
-            <span className="nx-mono" style={{ fontSize: 10, color: 'var(--nx-text-4)' }}>Images, GIFs, videos, or audio · up to 24MB</span>
+            <span className="nx-mono" style={{ fontSize: 10, color: 'var(--nx-text-4)' }}>Images, GIFs, videos, or audio · select several · up to 24MB each</span>
           </div>
+          {uploadingCampaignAsset && campaignAssetProgress && campaignAssetProgress.total > 1 && (
+            <div aria-hidden style={{ height: 2, background: 'var(--nx-surface-3)', borderRadius: 2, margin: '0 0 12px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${(campaignAssetProgress.done / campaignAssetProgress.total) * 100}%`, background: 'var(--nx-cyan)', transition: 'width 160ms linear' }} />
+            </div>
+          )}
           {campaignAssetUploadError && <p role="alert" className="nx-mono" style={{ margin: '0 0 12px', fontSize: 10, color: 'var(--nx-red)' }}>{campaignAssetUploadError}</p>}
           {campaignAssets.length === 0 ? (
             <p className="nx-mono" style={{ margin: 0, fontSize: 11, color: 'var(--nx-text-4)' }}>
