@@ -51,7 +51,7 @@ describe("instagram GIF guard", () => {
   it("rejects a GIF before it reaches the publish call", () => {
     const r = validateFinalPayload("instagram", { ...base, image_url: ASSET });
     expect(r.valid).toBe(false);
-    expect(r.errors.join(" ")).toMatch(/cannot publish a GIF/i);
+    expect(r.errors.join(" ")).toMatch(/cannot publish GIF/i);
   });
 
   it("rejects a GIF carrying a query string", () => {
@@ -61,6 +61,44 @@ describe("instagram GIF guard", () => {
 
   it("accepts a JPEG", () => {
     const r = validateFinalPayload("instagram", { ...base, image_url: "https://cdn.example.com/queue.jpg" });
+    expect(r.valid).toBe(true);
+  });
+
+  it("rejects PNG, which Instagram also refuses for a feed image", () => {
+    const r = validateFinalPayload("instagram", { ...base, image_url: "https://cdn.example.com/queue.png" });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join(" ")).toMatch(/cannot publish PNG/i);
+  });
+
+  it("rejects a 9:16 still as too tall for the feed", () => {
+    // 1080x1920 is the natural output of a phone-viewport capture and is
+    // 0.5625 — below Instagram's 4:5 floor. It was accepted at container
+    // create and then failed at publish with "Media ID is not available".
+    const r = validateFinalPayload("instagram", {
+      ...base,
+      image_url: "https://cdn.example.com/drop-03.jpg",
+      image_dimensions: { width: 1080, height: 1920 },
+    });
+    expect(r.valid).toBe(false);
+    expect(r.errors.join(" ")).toMatch(/between 4:5 and 1.91:1/);
+    expect(r.errors.join(" ")).toMatch(/1080x1350/);
+  });
+
+  it("accepts a 4:5 still", () => {
+    const r = validateFinalPayload("instagram", {
+      ...base,
+      image_url: "https://cdn.example.com/drop-03.jpg",
+      image_dimensions: { width: 1080, height: 1350 },
+    });
+    expect(r.valid).toBe(true);
+  });
+
+  it("accepts a square still", () => {
+    const r = validateFinalPayload("instagram", {
+      ...base,
+      image_url: "https://cdn.example.com/q.jpg",
+      image_dimensions: { width: 1080, height: 1080 },
+    });
     expect(r.valid).toBe(true);
   });
 

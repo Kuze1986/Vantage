@@ -36,13 +36,29 @@ export function validateFinalPayload(channel: string, payload: Record<string, un
   if (channel === 'instagram') {
     if (!Array.isArray(payload.hashtags) || payload.hashtags.length < 3) errors.push('Instagram requires at least three hashtags.');
     if (!String(payload.alt_text ?? '').trim()) errors.push('Instagram requires alt text.');
-    // Instagram's content-publishing API takes JPEG for a feed image. A GIF is
-    // accepted at container-create time and then fails at media_publish with
-    // "Media ID is not available", which reads as a transient platform fault
-    // rather than a wrong-format one. Catch it while the piece is being built.
+    // Instagram's content-publishing API accepts a container and only rejects
+    // it at media_publish, where the error is the uninformative "Media ID is
+    // not available" whatever the actual cause. Two causes are checkable from
+    // the payload alone, so name them here rather than at publish time.
+    //
+    // Format: JPEG only for a feed image. GIF and PNG both fail.
     const image = String(payload.image_url ?? '');
-    if (/\.gif(\?|$)/i.test(image)) {
-      errors.push('Instagram cannot publish a GIF — attach a JPEG still instead.');
+    if (/\.(gif|png|webp|avif|heic)(\?|$)/i.test(image)) {
+      const ext = image.match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1]?.toUpperCase() ?? 'that format';
+      errors.push(`Instagram cannot publish ${ext} — attach a JPEG still instead.`);
+    }
+    // Aspect: a feed image must sit between 4:5 (0.8) and 1.91:1. A 9:16 story
+    // or reel still is 0.5625 and is rejected, which is easy to hit because
+    // 1080x1920 is the natural output of a phone-viewport capture.
+    const dims = payload.image_dimensions as { width?: number; height?: number } | undefined;
+    if (dims?.width && dims?.height) {
+      const ratio = dims.width / dims.height;
+      if (ratio < 0.8 || ratio > 1.91) {
+        errors.push(
+          `Instagram feed images must be between 4:5 and 1.91:1 — this is ${dims.width}x${dims.height} ` +
+          `(${ratio.toFixed(2)}). Crop to 1080x1350 for a feed post.`,
+        );
+      }
     }
   }
   if (channel === 'tiktok' && body.length < 40) errors.push('TikTok requires a substantive script.');

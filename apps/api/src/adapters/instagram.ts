@@ -214,9 +214,31 @@ async function publishContainer(igUserId: string, token: string, creationId: str
   if (!res.ok || !json.id) {
     const detail = json.error?.message ?? JSON.stringify(json);
     await logActivity({ source: "adapter:instagram", source_type: "adapter", event_type: "post_failed", summary: detail.slice(0, 500), payload: json as Record<string, unknown> });
-    throw new Error(`Instagram publish failed: ${detail}`);
+    throw new Error(`Instagram publish failed: ${detail}${explainMediaIdError(detail)}`);
   }
   return json.id;
+}
+
+/**
+ * "Media ID is not available" is what Instagram returns whenever a container it
+ * accepted turns out to be unpublishable, regardless of why. The container
+ * create call succeeds, so the failure lands at the last step wearing an error
+ * that sounds transient — it reads like a platform blip and invites a retry,
+ * which can never succeed because the media itself is the problem.
+ *
+ * Two real cases produced it here: a GIF (feed images must be JPEG) and a
+ * 1080x1920 still (a feed image must be between 4:5 and 1.91:1, and 9:16 is
+ * 0.5625). Both are properties of the asset, so spell them out rather than
+ * leaving the operator to rediscover them.
+ */
+function explainMediaIdError(detail: string): string {
+  if (!/media id is not available/i.test(detail)) return "";
+  return (
+    " — Instagram accepted the container but cannot publish it. Usual causes:" +
+    " the image is not a JPEG (GIF and PNG are rejected);" +
+    " the aspect ratio is outside 4:5 to 1.91:1 (a 1080x1920 story/reel still is too tall for a feed post — crop to 1080x1350);" +
+    " or the media URL is not publicly reachable by Instagram's servers."
+  );
 }
 
 export async function postInstagramMedia(
