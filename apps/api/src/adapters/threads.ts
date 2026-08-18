@@ -152,6 +152,35 @@ export async function getThreadsAccessToken(workspaceId: string): Promise<{ toke
   return getAccessToken(workspaceId);
 }
 
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Poll a container until it finishes processing. Publishing immediately after
+ * creation can race Threads' own processing and return "Media Not Found"
+ * (code 24 / subcode 4279009) even for text posts, so wait for FINISHED first.
+ * status enum: EXPIRED | ERROR | FINISHED | IN_PROGRESS | PUBLISHED.
+ */
+async function waitForContainer(creationId: string, token: string, attempts = 10): Promise<void> {
+  let status = "IN_PROGRESS";
+  for (let i = 0; i < attempts; i++) {
+    await sleep(2000);
+    const statusUrl = new URL(`${TH_GRAPH}/${creationId}`);
+    statusUrl.searchParams.set("fields", "status,error_message");
+    statusUrl.searchParams.set("access_token", token);
+    const statusRes = await fetch(statusUrl);
+    const statusJson = (await statusRes.json()) as { status?: string; error_message?: string };
+    status = statusJson.status ?? status;
+    if (status === "FINISHED") return;
+    if (status === "ERROR" || status === "EXPIRED") {
+      await logActivity({ source: "adapter:threads", source_type: "adapter", event_type: "post_failed", summary: `container ${status}: ${statusJson.error_message ?? ""}`.slice(0, 500), payload: { creation_id: creationId } });
+      throw new Error(`Threads media processing failed: ${status}`);
+    }
+  }
+  throw new Error("Threads media processing timed out — try publishing again shortly");
+}
+
 export async function postThread(workspaceId: string, body: string): Promise<{ id: string }> {
   const { token, userId } = await getAccessToken(workspaceId);
   const text = body.slice(0, 500); // Threads post limit
@@ -172,7 +201,8 @@ export async function postThread(workspaceId: string, body: string): Promise<{ i
     throw new Error(`Threads container create failed: ${JSON.stringify(createJson).slice(0, 200)}`);
   }
 
-  // Step 2: publish the container
+  // Step 2: wait for the container to finish processing, then publish it
+  await waitForContainer(creationId, token);
   const pubUrl = new URL(`${TH_GRAPH}/${userId}/threads_publish`);
   pubUrl.searchParams.set("creation_id", creationId);
   pubUrl.searchParams.set("access_token", token);
