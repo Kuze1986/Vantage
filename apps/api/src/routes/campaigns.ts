@@ -38,6 +38,7 @@ import {
 } from '../lib/demoforge-templates.js';
 import { loadProductProfile } from '../lib/product-profile.js';
 import { launchStatusForMedia } from '../lib/auto-queue.js';
+import { itemsFromPiece, itemsFromJob, pickVerticalMatch, type MediaItem, type PieceRow, type JobRow } from '../lib/media-gallery.js';
 import { listShiftPacks, getShiftPack } from '../lib/shift-packs.js';
 import { syncCampaignKpis } from '../lib/campaign-kpi.js';
 import { tagPayloadUrls } from '../lib/utm.js';
@@ -117,8 +118,17 @@ type CampaignAssetForMedia = {
   source_url: string | null;
 };
 
-/** A campaign only needs DemoForge when a timeline item has no uploaded visual. */
-function campaignNeedsDemoForge(days: Array<{ content_ideas?: unknown }>, assets: CampaignAssetForMedia[]): boolean {
+/**
+ * A campaign only needs DemoForge when a timeline item has no uploaded visual
+ * and no matching gallery asset to reuse instead. `hasGalleryFallback`, when
+ * given, is consulted per day so a day the auto-reuse step will cover doesn't
+ * force a DemoForge readiness check it will never actually need.
+ */
+function campaignNeedsDemoForge(
+  days: Array<{ content_ideas?: unknown }>,
+  assets: CampaignAssetForMedia[],
+  hasGalleryFallback?: (visualType: string, ideaText: string) => boolean,
+): boolean {
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
   return days.some((day) => {
     const idea = Array.isArray(day.content_ideas) && day.content_ideas[0] && typeof day.content_ideas[0] === 'object'
@@ -132,7 +142,13 @@ function campaignNeedsDemoForge(days: Array<{ content_ideas?: unknown }>, assets
         : null;
     const asset = assetId ? assetsById.get(assetId) : undefined;
     const hasVisual = Boolean(asset?.source_url) && asset?.asset_type !== 'music_project';
-    return !hasVisual && (visualType === 'demo_video' || visualType === 'product_still');
+    const needsMedia = !hasVisual && (visualType === 'demo_video' || visualType === 'product_still');
+    if (!needsMedia) return false;
+    if (hasGalleryFallback) {
+      const ideaText = `${typeof idea.title === 'string' ? idea.title : ''}\n\n${typeof idea.outline === 'string' ? idea.outline : ''}`;
+      if (hasGalleryFallback(visualType, ideaText)) return false;
+    }
+    return true;
   });
 }
 
@@ -962,7 +978,32 @@ campaignRoutes.post('/:id/launch', async (c) => {
     .select('id,title,asset_type,source_url,metadata')
     .eq('campaign_id', campaignId)
     .eq('workspace_id', workspaceId);
-  if (campaignNeedsDemoForge(timeline, campaignAssets ?? [])) {
+
+  // Auto-reuse: before generating anything new, see what the workspace's media
+  // gallery already has for each day's vertical. Only piece/DemoForge-sourced
+  // items carry a vertical (see media-gallery.ts), so this only ever reuses
+  // actual generated/promotional media, never a brand-kit logo or intro clip.
+  const [galleryPiecesRes, galleryJobsRes] = await Promise.all([
+    sb.from('content_pieces')
+      .select('id, channel_slug, image_url, video_url, content_payload, created_at, topics(vertical)')
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: false })
+      .limit(500),
+    sb.from('demoforge_jobs')
+      .select('id, content_piece_id, target_format, output_url, thumbnail_url, extracted_frames, created_at, content_pieces(topics(vertical))')
+      .eq('workspace_id', workspaceId)
+      .order('created_at', { ascending: false })
+      .limit(500),
+  ]);
+  const galleryItems: MediaItem[] = [
+    ...((galleryPiecesRes.data ?? []) as unknown as PieceRow[]).flatMap(itemsFromPiece),
+    ...((galleryJobsRes.data ?? []) as unknown as JobRow[]).flatMap(itemsFromJob),
+  ];
+  const galleryMatchFor = (vertical: string | null, visualType: string): MediaItem | null =>
+    pickVerticalMatch(galleryItems, { vertical, kind: visualType === 'demo_video' ? 'video' : 'image' });
+
+  if (campaignNeedsDemoForge(timeline, campaignAssets ?? [], (visualType, ideaText) =>
+    Boolean(galleryMatchFor(inferVertical(ideaText), visualType)))) {
     const demoForge = await checkDemoForgeReadiness();
     if (!demoForge.ready) {
       throw new HTTPException(503, { message: `Campaign launch blocked: ${demoForge.message} Upload a visual asset or restore DemoForge, then try again.` });
@@ -1053,6 +1094,9 @@ campaignRoutes.post('/:id/launch', async (c) => {
     // every pack the product supports, so including it would match the first
     // pattern in the table on every single day of the campaign.
     const dayVertical = inferVertical(ideaText);
+    // Only consulted when no visual was explicitly chosen — an explicit pick
+    // (including "Generate / none") always wins over auto-reuse.
+    const galleryAsset = !campaignAsset && visualType !== 'none' ? galleryMatchFor(dayVertical, visualType) : null;
     const published = Array.isArray(day.published_pieces) ? [...day.published_pieces] : [];
     // A browser, proxy, or deploy may interrupt a multi-day launch after some
     // days have committed. The timeline is the durable launch ledger, so never
@@ -1174,11 +1218,15 @@ campaignRoutes.post('/:id/launch', async (c) => {
           visual_type: visualType,
           demoforge_template_id: templateId,
           campaign_asset_id: campaignAsset?.id ?? null,
-          campaign_asset_title: campaignAsset?.title ?? null,
+          campaign_asset_title: campaignAsset?.title ?? galleryAsset?.label ?? null,
+          gallery_asset_id: galleryAsset?.id ?? null,
         };
         if (campaignAsset?.source_url) {
           if (campaignAsset.asset_type === 'video') payload.video_url = campaignAsset.source_url;
           else payload.image_url = campaignAsset.source_url;
+        } else if (galleryAsset) {
+          if (galleryAsset.kind === 'video') payload.video_url = galleryAsset.url;
+          else payload.image_url = galleryAsset.url;
         }
         // A selected uploaded video uses the campaign's uploaded soundtrack when one is
         // available. DemoForge renders the pair into a publishable MP4 rather than
@@ -1206,7 +1254,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
           payload.thumbnail_preference = 'last';
         }
 
-        let mediaStatus: 'none' | 'pending' | 'failed' = campaignAsset?.source_url || visualType === 'none' ? 'none' : 'pending';
+        let mediaStatus: 'none' | 'pending' | 'failed' = campaignAsset?.source_url || galleryAsset || visualType === 'none' ? 'none' : 'pending';
 
         // Stagger by day + channel position so a multi-channel day walks the channel's
         // configured hours instead of firing every piece at the same instant.
@@ -1288,7 +1336,7 @@ campaignRoutes.post('/:id/launch', async (c) => {
         let demoforgeJobId: string | undefined;
 
         // Enqueue DemoForge for video / product stills (async — does not block launch).
-        if (!campaignAsset?.source_url && auditPassed && (visualType === 'demo_video' || visualType === 'product_still')) {
+        if (!campaignAsset?.source_url && !galleryAsset && auditPassed && (visualType === 'demo_video' || visualType === 'product_still')) {
           try {
             const dfPayload = buildDemoForgePayload(templateId, demoBaseUrl, {
               // Stills stay silent/clean; videos keep captions + grade.

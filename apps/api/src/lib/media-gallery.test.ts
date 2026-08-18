@@ -114,7 +114,7 @@ describe("media-gallery / brand kits and clips", () => {
 describe("media-gallery / assembleGallery", () => {
   const mk = (over: Partial<MediaItem>): MediaItem => ({
     id: "i", kind: "image", url: "https://x/a.png", thumbnail_url: null,
-    label: "a", source: "piece", piece_id: null, job_id: null, created_at: AT, ...over,
+    label: "a", source: "piece", piece_id: null, job_id: null, created_at: AT, vertical: null, ...over,
   });
 
   it("sorts newest first and sends undated items last", () => {

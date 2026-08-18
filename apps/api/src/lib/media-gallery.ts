@@ -34,6 +34,8 @@ export type MediaItem = {
   /** Set when the asset hangs off a DemoForge job — powers "Open job". */
   job_id: string | null;
   created_at: string | null;
+  /** The originating topic's vertical, when known — powers campaign-launch reuse matching. */
+  vertical: string | null;
 };
 
 /**
@@ -77,6 +79,8 @@ export type PieceRow = {
   video_url?: string | null;
   content_payload?: Record<string, unknown> | null;
   created_at?: string | null;
+  /** Populated by a `topics(vertical)` embed where the caller's query includes it. */
+  topics?: { vertical: string | null } | { vertical: string | null }[] | null;
 };
 
 export type JobRow = {
@@ -87,7 +91,21 @@ export type JobRow = {
   thumbnail_url?: string | null;
   extracted_frames?: unknown;
   created_at?: string | null;
+  /** Populated by a `content_pieces(topics(vertical))` embed where the caller's query includes it. */
+  content_pieces?: { topics: { vertical: string | null } | { vertical: string | null }[] | null } | { topics: { vertical: string | null } | { vertical: string | null }[] | null }[] | null;
 };
+
+/** A to-one embed comes back as an object, a to-many as an array — normalize either. */
+function firstOf<T>(v: T | T[] | null | undefined): T | null {
+  if (v == null) return null;
+  return Array.isArray(v) ? (v[0] ?? null) : v;
+}
+
+function verticalFromTopicsEmbed(topics: PieceRow["topics"]): string | null {
+  const topic = firstOf(topics);
+  const v = topic?.vertical;
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
 
 export type BrandKitRow = { id: string; name?: string | null; logo_url?: string | null; created_at?: string | null };
 export type ClipRow = {
@@ -107,6 +125,7 @@ export function itemsFromPiece(piece: PieceRow): MediaItem[] {
   const at = piece.created_at ?? null;
   const video = str(piece.video_url);
   const hero = str(piece.image_url);
+  const vertical = verticalFromTopicsEmbed(piece.topics);
 
   const push = (role: string, url: string, label: string, kind?: MediaKind, thumb?: string | null) => {
     items.push({
@@ -119,6 +138,7 @@ export function itemsFromPiece(piece: PieceRow): MediaItem[] {
       piece_id: piece.id,
       job_id: null,
       created_at: at,
+      vertical,
     });
   };
 
@@ -149,6 +169,7 @@ export function itemsFromJob(job: JobRow): MediaItem[] {
   const at = job.created_at ?? null;
   const fmt = job.target_format ?? "render";
   const thumb = str(job.thumbnail_url);
+  const vertical = verticalFromTopicsEmbed(firstOf(job.content_pieces)?.topics ?? null);
 
   const push = (role: string, url: string, label: string, kind?: MediaKind, poster?: string | null) => {
     items.push({
@@ -161,6 +182,7 @@ export function itemsFromJob(job: JobRow): MediaItem[] {
       piece_id: job.content_piece_id ?? null,
       job_id: job.id,
       created_at: at,
+      vertical,
     });
   };
 
@@ -193,6 +215,7 @@ export function itemsFromBrandKit(kit: BrandKitRow): MediaItem[] {
     piece_id: null,
     job_id: null,
     created_at: kit.created_at ?? null,
+    vertical: null,
   }];
 }
 
@@ -212,6 +235,7 @@ export function itemsFromClip(clip: ClipRow, publicUrlFor: (path: string) => str
     piece_id: null,
     job_id: null,
     created_at: clip.created_at ?? null,
+    vertical: null,
   }];
 }
 
@@ -221,11 +245,12 @@ export function itemsFromClip(clip: ClipRow, publicUrlFor: (path: string) => str
  */
 export function assembleGallery(
   all: MediaItem[],
-  opts: { source?: string | null; kind?: string | null; limit: number; offset: number },
+  opts: { source?: string | null; kind?: string | null; vertical?: string | null; limit: number; offset: number },
 ): { items: MediaItem[]; total: number; next_offset: number | null } {
   let filtered = all;
   if (opts.source) filtered = filtered.filter((i) => i.source === opts.source);
   if (opts.kind) filtered = filtered.filter((i) => i.kind === opts.kind);
+  if (opts.vertical) filtered = filtered.filter((i) => i.vertical === opts.vertical);
 
   // De-dupe by URL: the same object can legitimately be reachable from two
   // owners (a job's cover is also the linked piece's hero). Keep the first,
@@ -251,4 +276,22 @@ export function assembleGallery(
     total: deduped.length,
     next_offset: nextOffset < deduped.length ? nextOffset : null,
   };
+}
+
+/**
+ * Campaign-launch auto-reuse: the newest gallery asset of the right kind whose
+ * originating topic shares the day's vertical. Only piece- and DemoForge-sourced
+ * items carry a vertical (brand kit logos and clips are not topic-specific), so
+ * this only ever matches actual generated/promotional media, never a logo.
+ */
+export function pickVerticalMatch(
+  items: MediaItem[],
+  opts: { vertical: string | null; kind: MediaKind },
+): MediaItem | null {
+  if (!opts.vertical) return null;
+  const candidates = items
+    .filter((i) => i.vertical === opts.vertical && i.kind === opts.kind)
+    .filter((i) => i.source === "piece" || i.source === "demoforge")
+    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+  return candidates[0] ?? null;
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type CSSProperties } from 'react'
-import { vantageApi } from '../api/vantage'
+import { vantageApi, type MediaGalleryItem } from '../api/vantage'
 import { Panel, Button, Badge } from '../ds'
 import { uploadSequentially, readFileAsDataUrl, progressLabel, failureSummary, type BatchProgress } from '../lib/batch-upload'
 
@@ -161,6 +161,9 @@ export default function CampaignBuilderPage() {
   const [uploadingCampaignAsset, setUploadingCampaignAsset] = useState(false)
   const [campaignAssetUploadError, setCampaignAssetUploadError] = useState<string | null>(null)
   const [campaignAssetProgress, setCampaignAssetProgress] = useState<BatchProgress | null>(null)
+  const [galleryAssets, setGalleryAssets] = useState<MediaGalleryItem[]>([])
+  const [galleryAssetError, setGalleryAssetError] = useState<string | null>(null)
+  const [attachingGalleryAssetForDay, setAttachingGalleryAssetForDay] = useState<number | null>(null)
   const [kpiMetrics, setKpiMetrics] = useState<KPIMetrics[]>([])
   const [formData, setFormData] = useState(createInitialFormData)
 
@@ -258,6 +261,39 @@ export default function CampaignBuilderPage() {
       setMediaPieces(mediaData.pieces || [])
     } catch (err) {
       console.error('Failed to fetch campaign details:', err)
+    }
+    // Best-effort — the "reuse from gallery" picker just shows nothing if this fails,
+    // it does not block the campaign from loading.
+    try {
+      const gallery = await vantageApi.mediaGallery({ limit: 60 })
+      setGalleryAssets(gallery.items || [])
+    } catch (err) {
+      console.error('Failed to fetch media gallery:', err)
+    }
+  }
+
+  /** Materializes a gallery item as a campaign asset (so the launch path can treat
+   *  it exactly like an uploaded one), then assigns it as the day's visual. */
+  const attachGalleryAssetToDay = async (dayNumber: number, item: MediaGalleryItem) => {
+    if (!selectedCampaign) return
+    const day = timeline.find((d) => d.day_number === dayNumber)
+    const idea = day?.content_ideas?.[0]
+    if (!idea) return
+    setAttachingGalleryAssetForDay(dayNumber)
+    setGalleryAssetError(null)
+    try {
+      const { asset } = await vantageApi.addCampaignAsset(selectedCampaign.id, {
+        title: item.label,
+        asset_type: item.kind === 'video' ? 'video' : 'visual',
+        source_url: item.url,
+        origin_surface: 'media_gallery',
+      })
+      setCampaignAssets((current) => [asset, ...current])
+      updateDayLocal(dayNumber, { content_ideas: [{ ...idea, visual_asset_id: asset.id, campaign_asset_id: undefined }] })
+    } catch (err) {
+      setGalleryAssetError(err instanceof Error ? err.message : 'Failed to attach gallery asset')
+    } finally {
+      setAttachingGalleryAssetForDay(null)
     }
   }
 
@@ -1421,6 +1457,7 @@ export default function CampaignBuilderPage() {
             </div>
           )}
           {campaignAssetUploadError && <p role="alert" className="nx-mono" style={{ margin: '0 0 12px', fontSize: 10, color: 'var(--nx-red)' }}>{campaignAssetUploadError}</p>}
+          {galleryAssetError && <p role="alert" className="nx-mono" style={{ margin: '0 0 12px', fontSize: 10, color: 'var(--nx-red)' }}>{galleryAssetError}</p>}
           {campaignAssets.length === 0 ? (
             <p className="nx-mono" style={{ margin: 0, fontSize: 11, color: 'var(--nx-text-4)' }}>
               No assets attached yet. Upload one here or use Creation Studio’s guided workflow to add visuals, GIFs, videos, and soundtrack projects.
@@ -1738,6 +1775,30 @@ export default function CampaignBuilderPage() {
                             <option value="">Generate / none</option>
                             {campaignAssets.filter((asset) => asset.source_url && asset.asset_type !== 'music_project').map((asset) => <option key={asset.id} value={asset.id}>{asset.title}</option>)}
                           </select>
+                          {idea.visual_type !== 'none' && (() => {
+                            const wantKind = idea.visual_type === 'demo_video' ? 'video' : 'image'
+                            const matches = galleryAssets.filter((item) => item.kind === wantKind)
+                            if (!matches.length) return null
+                            return (
+                              <select
+                                style={{ ...inputStyle, marginTop: 4 }}
+                                value=""
+                                disabled={attachingGalleryAssetForDay === day.day_number}
+                                onChange={(e) => {
+                                  const item = matches.find((m) => m.id === e.target.value)
+                                  if (item) void attachGalleryAssetToDay(day.day_number, item)
+                                }}
+                                title="Reuse an existing asset from the workspace media gallery instead of generating a new one"
+                              >
+                                <option value="">
+                                  {attachingGalleryAssetForDay === day.day_number ? 'Attaching…' : `— or reuse from gallery (${matches.length}) —`}
+                                </option>
+                                {matches.map((item) => (
+                                  <option key={item.id} value={item.id}>{item.label}{item.vertical ? ` · ${item.vertical}` : ''}</option>
+                                ))}
+                              </select>
+                            )
+                          })()}
                         </div>
                         <div>
                           <label style={labelStyle}>Optional soundtrack</label>

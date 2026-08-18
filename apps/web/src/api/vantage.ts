@@ -109,6 +109,7 @@ export type MediaGalleryItem = {
   piece_id: string | null;
   job_id: string | null;
   created_at: string | null;
+  vertical: string | null;
 };
 
 export type ChannelStatus = {
@@ -356,10 +357,11 @@ export const vantageApi = {
     vantageFetch("/v1/billing/portal", { method: "POST" }) as Promise<{ url: string }>,
 
   // ── Media gallery ─────────────────────────────────────────────────────────
-  mediaGallery: (opts?: { source?: string; kind?: string; limit?: number; offset?: number }) => {
+  mediaGallery: (opts?: { source?: string; kind?: string; vertical?: string; limit?: number; offset?: number }) => {
     const qs = new URLSearchParams();
     if (opts?.source) qs.set("source", opts.source);
     if (opts?.kind) qs.set("kind", opts.kind);
+    if (opts?.vertical) qs.set("vertical", opts.vertical);
     if (opts?.limit != null) qs.set("limit", String(opts.limit));
     if (opts?.offset != null) qs.set("offset", String(opts.offset));
     const q = qs.toString();

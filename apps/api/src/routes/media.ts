@@ -133,16 +133,17 @@ mediaRoutes.get("/gallery", async (c) => {
   const offset = Math.max(Number(c.req.query("offset") ?? 0) || 0, 0);
   const source = c.req.query("source") ?? null;
   const kind   = c.req.query("kind") ?? null;
+  const vertical = c.req.query("vertical") ?? null;
 
   // Every query is workspace-filtered — that, not the Storage path layout, is
   // what makes the gallery tenant-safe. See lib/media-gallery.ts.
   const scanLimit = Math.min(GALLERY_SCAN_LIMIT, Math.max(100, offset + limit));
   const [pieces, jobs, kits, clips, uploads, deletions] = await Promise.all([
     sb.from("content_pieces")
-      .select("id, channel_slug, image_url, video_url, content_payload, created_at")
+      .select("id, channel_slug, image_url, video_url, content_payload, created_at, topics(vertical)")
       .eq("workspace_id", ws).order("created_at", { ascending: false }).limit(scanLimit),
     sb.from("demoforge_jobs")
-      .select("id, content_piece_id, target_format, output_url, thumbnail_url, extracted_frames, created_at")
+      .select("id, content_piece_id, target_format, output_url, thumbnail_url, extracted_frames, created_at, content_pieces(topics(vertical))")
       .eq("workspace_id", ws).order("created_at", { ascending: false }).limit(scanLimit),
     sb.from("brand_kits")
       .select("id, name, logo_url, created_at")
@@ -179,11 +180,12 @@ mediaRoutes.get("/gallery", async (c) => {
       piece_id: null,
       job_id: null,
       created_at: asset.created_at,
+      vertical: null,
     })),
   ];
 
   const deletedIds = new Set((deletions.data ?? []).map((item) => item.item_id));
-  return c.json({ ...assembleGallery(all.filter((item) => !deletedIds.has(item.id)), { source, kind, limit, offset }), scan_limit: scanLimit });
+  return c.json({ ...assembleGallery(all.filter((item) => !deletedIds.has(item.id)), { source, kind, vertical, limit, offset }), scan_limit: scanLimit });
 });
 
 // DELETE /v1/media/gallery/:id — removes uploads from Storage and hides generated assets from the gallery.
