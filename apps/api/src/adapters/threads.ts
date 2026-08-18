@@ -78,7 +78,6 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
   const json = (await res.json()) as Record<string, unknown>;
   if (!res.ok) throw new Error(`Threads token exchange failed: ${JSON.stringify(json)}`);
   const shortToken = typeof json.access_token === "string" ? json.access_token : null;
-  const userId = json.user_id != null ? String(json.user_id) : undefined;
   if (!shortToken) throw new Error("Threads token response missing access_token");
 
   // Step 2: exchange for a long-lived token (~60 days)
@@ -92,6 +91,19 @@ export async function exchangeCodeForTokens(code: string, state: string): Promis
   const access_token = typeof longJson.access_token === "string" ? longJson.access_token : shortToken;
   const expires_in = typeof longJson.expires_in === "number" ? longJson.expires_in : 5184000;
   const expires_at = new Date(Date.now() + expires_in * 1000).toISOString();
+
+  // The token-exchange response's `user_id` is unreliable — Meta's Threads API has
+  // returned a different numeric ID there than the one that actually owns the
+  // /{id}/threads publish endpoint. Ask /me for the authoritative id instead.
+  const meUrl = new URL(`${TH_GRAPH}/me`);
+  meUrl.searchParams.set("fields", "id");
+  meUrl.searchParams.set("access_token", access_token);
+  const meRes = await fetch(meUrl);
+  const meJson = (await meRes.json()) as Record<string, unknown>;
+  const userId = meRes.ok && meJson.id != null
+    ? String(meJson.id)
+    : (json.user_id != null ? String(json.user_id) : undefined);
+  if (!userId) throw new Error(`Threads /me lookup failed and no fallback user_id: ${JSON.stringify(meJson)}`);
 
   const next: ThreadsAuthState = { tokens: { access_token, expires_at, user_id: userId } };
   const { error } = await sb.from("channels").update({ auth_state: next, enabled: true }).eq("workspace_id", workspaceId).eq("slug", "threads");
